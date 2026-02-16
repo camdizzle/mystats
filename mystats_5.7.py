@@ -159,6 +159,60 @@ def get_chat_max_names():
     return min(25, max(3, value))
 
 
+def get_int_setting(setting_key, default=0):
+    try:
+        return int(config.get_setting(setting_key) or default)
+    except (TypeError, ValueError):
+        return default
+
+
+def get_season_quest_updates():
+    if not is_chat_response_enabled("season_quests_enabled"):
+        return []
+
+    quest_definitions = [
+        {
+            'target_key': 'season_quest_target_races',
+            'complete_key': 'season_quest_complete_races',
+            'value': get_int_setting('totalcountseason', 0),
+            'message': "🎯 Season Quest Complete: {value:,} / {target:,} season races finished!"
+        },
+        {
+            'target_key': 'season_quest_target_points',
+            'complete_key': 'season_quest_complete_points',
+            'value': get_int_setting('totalpointsseason', 0),
+            'message': "🎯 Season Quest Complete: {value:,} / {target:,} season points earned!"
+        },
+        {
+            'target_key': 'season_quest_target_race_hs',
+            'complete_key': 'season_quest_complete_race_hs',
+            'value': get_int_setting('race_hs_season', 0),
+            'message': "🎯 Season Quest Complete: Race high score reached {value:,} (target {target:,})!"
+        },
+        {
+            'target_key': 'season_quest_target_br_hs',
+            'complete_key': 'season_quest_complete_br_hs',
+            'value': get_int_setting('br_hs_season', 0),
+            'message': "🎯 Season Quest Complete: BR high score reached {value:,} (target {target:,})!"
+        },
+    ]
+
+    quest_messages = []
+
+    for quest in quest_definitions:
+        target_value = get_int_setting(quest['target_key'], 0)
+        already_complete = str(config.get_setting(quest['complete_key']) or 'False').lower() == 'true'
+
+        if target_value <= 0 or already_complete:
+            continue
+
+        if quest['value'] >= target_value:
+            config.set_setting(quest['complete_key'], 'True', persistent=True)
+            quest_messages.append(quest['message'].format(value=quest['value'], target=target_value))
+
+    return quest_messages
+
+
 async def send_chat_message(channel, message, category=None, apply_delay=False):
     category_map = {
         "br": "chat_br_results",
@@ -740,11 +794,13 @@ def open_settings_window():
     general_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
     audio_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
     chat_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
+    season_quests_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
     appearance_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
 
     notebook.add(general_tab, text="General")
     notebook.add(audio_tab, text="Audio")
     notebook.add(chat_tab, text="Chat")
+    notebook.add(season_quests_tab, text="Season Quests")
     notebook.add(appearance_tab, text="Appearance")
 
     # --- General tab ---
@@ -877,6 +933,41 @@ def open_settings_window():
     delay_seconds_entry.grid(row=1, column=1, sticky="w", padx=(8, 10), pady=(0, 8))
     delay_seconds_entry.insert(0, config.get_setting("announcedelayseconds") or "")
 
+    # --- Season Quests tab ---
+    ttk.Label(season_quests_tab, text="Configure long-term season goals and chat announcements", style="Small.TLabel").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
+
+    season_quests_enabled_var = tk.BooleanVar(value=is_chat_response_enabled("season_quests_enabled"))
+    ttk.Checkbutton(season_quests_tab, text="Enable Season Quests", variable=season_quests_enabled_var).grid(row=1, column=0, sticky="w", pady=(0, 10), columnspan=2)
+
+    ttk.Label(season_quests_tab, text="Season Race Target").grid(row=2, column=0, sticky="w", pady=(2, 4))
+    season_quest_races_entry = ttk.Entry(season_quests_tab, width=12, justify='center')
+    season_quest_races_entry.grid(row=2, column=1, sticky="w", pady=(2, 4))
+    season_quest_races_entry.insert(0, config.get_setting("season_quest_target_races") or "1000")
+
+    ttk.Label(season_quests_tab, text="Season Points Target").grid(row=3, column=0, sticky="w", pady=(2, 4))
+    season_quest_points_entry = ttk.Entry(season_quests_tab, width=12, justify='center')
+    season_quest_points_entry.grid(row=3, column=1, sticky="w", pady=(2, 4))
+    season_quest_points_entry.insert(0, config.get_setting("season_quest_target_points") or "500000")
+
+    ttk.Label(season_quests_tab, text="Race High Score Target").grid(row=4, column=0, sticky="w", pady=(2, 4))
+    season_quest_race_hs_entry = ttk.Entry(season_quests_tab, width=12, justify='center')
+    season_quest_race_hs_entry.grid(row=4, column=1, sticky="w", pady=(2, 4))
+    season_quest_race_hs_entry.insert(0, config.get_setting("season_quest_target_race_hs") or "3000")
+
+    ttk.Label(season_quests_tab, text="BR High Score Target").grid(row=5, column=0, sticky="w", pady=(2, 4))
+    season_quest_br_hs_entry = ttk.Entry(season_quests_tab, width=12, justify='center')
+    season_quest_br_hs_entry.grid(row=5, column=1, sticky="w", pady=(2, 4))
+    season_quest_br_hs_entry.insert(0, config.get_setting("season_quest_target_br_hs") or "3000")
+
+    ttk.Label(season_quests_tab, text="Tip: Set any target to 0 to disable that specific quest.", style="Small.TLabel").grid(row=6, column=0, columnspan=2, sticky="w", pady=(8, 4))
+
+    def reset_season_quest_progress():
+        for completion_key in ("season_quest_complete_races", "season_quest_complete_points", "season_quest_complete_race_hs", "season_quest_complete_br_hs"):
+            config.set_setting(completion_key, "False", persistent=True)
+        messagebox.showinfo("Season Quests", "Season quest completion flags have been reset.")
+
+    ttk.Button(season_quests_tab, text="Reset Quest Progress", command=reset_season_quest_progress).grid(row=7, column=0, sticky="w", pady=(8, 0))
+
     # --- Appearance tab ---
     ttk.Label(appearance_tab, text="Theme and visual preferences", style="Small.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 8))
     ttk.Label(appearance_tab, text="UI Theme").grid(row=1, column=0, sticky="w", pady=(0, 4))
@@ -907,7 +998,16 @@ def open_settings_window():
         chat_tilt_results_var.set(True)
         chat_all_commands_var.set(True)
         chat_narrative_alerts_var.set(True)
+        season_quests_enabled_var.set(True)
         selected_max_names.set("25")
+        season_quest_races_entry.delete(0, tk.END)
+        season_quest_races_entry.insert(0, "1000")
+        season_quest_points_entry.delete(0, tk.END)
+        season_quest_points_entry.insert(0, "500000")
+        season_quest_race_hs_entry.delete(0, tk.END)
+        season_quest_race_hs_entry.insert(0, "3000")
+        season_quest_br_hs_entry.delete(0, tk.END)
+        season_quest_br_hs_entry.insert(0, "3000")
         chunk_alert_trigger_entry.delete(0, tk.END)
         chunk_alert_trigger_entry.insert(0, "1000")
         delay_seconds_entry.delete(0, tk.END)
@@ -932,6 +1032,11 @@ def open_settings_window():
         config.set_setting("chat_tilt_results", str(chat_tilt_results_var.get()), persistent=True)
         config.set_setting("chat_all_commands", str(chat_all_commands_var.get()), persistent=True)
         config.set_setting("chat_narrative_alerts", str(chat_narrative_alerts_var.get()), persistent=True)
+        config.set_setting("season_quests_enabled", str(season_quests_enabled_var.get()), persistent=True)
+        config.set_setting("season_quest_target_races", season_quest_races_entry.get(), persistent=True)
+        config.set_setting("season_quest_target_points", season_quest_points_entry.get(), persistent=True)
+        config.set_setting("season_quest_target_race_hs", season_quest_race_hs_entry.get(), persistent=True)
+        config.set_setting("season_quest_target_br_hs", season_quest_br_hs_entry.get(), persistent=True)
         config.set_setting("chat_max_names", selected_max_names.get(), persistent=True)
         settings_window.destroy()
 
@@ -1562,7 +1667,10 @@ class ConfigManager:
                                 'tilt_player_file', 'active_event_ids', 'paused_event_ids', 'checkpoint_results_file',
                                 'tilts_results_file', 'tilt_level_file', 'map_data_file', 'map_results_file',
                                 'UI_THEME', 'chat_br_results', 'chat_race_results', 'chat_tilt_results',
-                                'chat_mystats_command', 'chat_all_commands', 'chat_narrative_alerts', 'chat_max_names'}
+                                'chat_mystats_command', 'chat_all_commands', 'chat_narrative_alerts', 'chat_max_names',
+                                'season_quests_enabled', 'season_quest_target_races', 'season_quest_target_points',
+                                'season_quest_target_race_hs', 'season_quest_target_br_hs', 'season_quest_complete_races',
+                                'season_quest_complete_points', 'season_quest_complete_race_hs', 'season_quest_complete_br_hs'}
         self.transient_keys = set([])
         self.defaults = {
             'chat_br_results': 'True',
@@ -1572,6 +1680,15 @@ class ConfigManager:
             'chat_all_commands': 'True',
             'chat_narrative_alerts': 'True',
             'chat_max_names': '25',
+            'season_quests_enabled': 'True',
+            'season_quest_target_races': '1000',
+            'season_quest_target_points': '500000',
+            'season_quest_target_race_hs': '3000',
+            'season_quest_target_br_hs': '3000',
+            'season_quest_complete_races': 'False',
+            'season_quest_complete_points': 'False',
+            'season_quest_complete_race_hs': 'False',
+            'season_quest_complete_br_hs': 'False',
             'UI_THEME': DEFAULT_UI_THEME,
             'announcedelay': 'False',
             'announcedelayseconds': '0',
@@ -1624,6 +1741,13 @@ class ConfigManager:
             else:
                 print(f"Invalid value for {key}: {value}. Resetting to default (1000).")
                 return False
+
+        if key in {"season_quest_target_races", "season_quest_target_points", "season_quest_target_race_hs", "season_quest_target_br_hs"}:
+            if isinstance(value, int) or (isinstance(value, str) and value.isdigit()):
+                return True
+            print(f"Invalid value for {key}: {value}. Quest targets must be whole numbers.")
+            return False
+
         return True
 
     def save_settings(self):
@@ -4408,6 +4532,8 @@ async def race(bot):
 
             config.set_setting('avgpointstoday', avgptstoday, persistent=False)
 
+            messages.extend(get_season_quest_updates())
+
             channel = bot.get_channel(config.get_setting('CHANNEL'))
             if not channel:
                 print(f"Could not find channel: {config.get_setting('CHANNEL')}" + " Restart Mystats.")
@@ -4844,6 +4970,9 @@ async def royale(bot):
                             pass
                         await send_chat_message(bot.channel, message, category="br")
                         write_overlays()
+
+                    for quest_message in get_season_quest_updates():
+                        await send_chat_message(bot.channel, quest_message, category="br")
 
                     if crownwin:
                         # Determine the name color based on the br_winner color code
