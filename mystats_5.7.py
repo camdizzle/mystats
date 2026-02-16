@@ -41,6 +41,7 @@ import pandas as pd
 import babel
 from babel import numbers
 from twitchio import errors
+import io
 from io import BytesIO
 from dateutil import parser
 from datetime import datetime, timedelta
@@ -3661,10 +3662,97 @@ def append_to_csv(file_path, data):
         writer.writerows(data)
 
 
+def _parse_mos_date(raw_value):
+    value = (raw_value or '').strip().strip('"')
+    if not value:
+        return None
+
+    for date_format in ('%Y-%m-%dT%H:%M:%S.%fZ', '%Y.%m.%d-%H.%M.%S'):
+        try:
+            return datetime.strptime(value, date_format).date()
+        except ValueError:
+            continue
+    return None
+
+
+def read_latest_map_data(map_data_file):
+    with open(map_data_file, 'rb') as f:
+        map_data = f.read()
+
+    encoding_result = chardet.detect(map_data)
+    map_encoding = encoding_result['encoding'] or 'utf-8'
+    map_text = map_data.decode(map_encoding, errors='ignore')
+
+    if DEBUG == True:
+        print('Debug: Read Map Data File')
+
+    sample = '\n'.join(map_text.splitlines()[:3])
+    delimiter = ','
+    try:
+        sniffed = csv.Sniffer().sniff(sample, delimiters=',\t;')
+        delimiter = sniffed.delimiter
+    except csv.Error:
+        if '\t' in sample:
+            delimiter = '\t'
+
+    reader = csv.DictReader(io.StringIO(map_text), delimiter=delimiter)
+    first_row = next(reader, None)
+    if not first_row:
+        return None
+
+    map_name = (first_row.get('MapName') or '').strip()
+    map_builder = (first_row.get('CreatorName') or '').strip()
+
+    try:
+        play_count = int(float((first_row.get('TotalRaces') or '0').strip() or 0))
+    except ValueError:
+        play_count = 0
+
+    try:
+        elim_rate = float((first_row.get('ElimRate') or '0').strip() or 0)
+    except ValueError:
+        elim_rate = 0.0
+
+    try:
+        avg_finish_time = float((first_row.get('AverageFinishTime') or '0').strip() or 0)
+    except ValueError:
+        avg_finish_time = 0.0
+
+    try:
+        record_time = float((first_row.get('RecordTime') or '0').strip() or 0)
+    except ValueError:
+        record_time = 0.0
+
+    return {
+        'MapName': map_name,
+        'MapBuilder': map_builder,
+        'MapCreatedDate': _parse_mos_date(first_row.get('DateCreated')),
+        'PlayCount': play_count,
+        'ElimRate': elim_rate,
+        'AvgFinishTime': avg_finish_time,
+        'RecordTime': record_time,
+        'RecordHolder': (first_row.get('RecordHolderName') or '').strip() or None,
+        'RecordSetDate': _parse_mos_date(first_row.get('DateSet')),
+        'RecordStreamer': (first_row.get('StreamerRecordHolder') or '').strip() or None,
+    }
+
+
 async def race(bot):
     last_modified_race = None
     last_map_file_mod_time = None
     totalpointsrace = 0
+    cached_map_data = {
+        'MapName': None,
+        'MapBuilder': None,
+        'MapCreatedDate': None,
+        'PlayCount': 0,
+        'ElimRate': 0.0,
+        'AvgFinishTime': 0.0,
+        'RecordTime': 0.0,
+        'RecordHolder': None,
+        'RecordSetDate': None,
+        'RecordStreamer': None,
+    }
     while True:
         if DEBUG == True:
             print('Debug: Race file check')
@@ -3703,10 +3791,6 @@ async def race(bot):
             s_t_points = int(config.get_setting('totalpointsseason'))
             s_t_count = int(config.get_setting('totalcountseason'))
 
-            # Initialize variables to store map data
-            MapName, MapBuilder, MapCreatedDate, PlayCount, ElimRate, AvgFinishTime, RecordTime, RecordHolder, RecordSetDate, RecordStreamer = (
-                None, None, None, 0, 0.0, 0.0, 0.0, None, None, None)
-
             # Step 1: Process the map file only if the modification time has changed
             map_data_file = config.get_setting('map_data_file')
             map_results_file = config.get_setting('map_results_file')
@@ -3719,85 +3803,36 @@ async def race(bot):
                 if last_map_file_mod_time is None or current_mod_time > last_map_file_mod_time:
                     last_map_file_mod_time = current_mod_time  # Update the last modification time
 
-                    # Read the map data file with encoding detection
-                    with open(map_data_file, 'rb') as f:
-                        map_data = f.read()
-
-                    encoding_result = chardet.detect(map_data)
-                    map_encoding = encoding_result['encoding'] or 'utf-8'  # Default to 'utf-8' if detection fails
-
-                    # Read the file using the detected encoding
-                    with open(map_data_file, 'r', encoding=map_encoding, errors='ignore') as f:
-                        map_lines = f.readlines()
-                        if DEBUG == True:
-                            print('Debug: Read Map Data File')
-                        else:
-                            pass
-
-                    if len(map_lines) > 1:
-                        # Ignore the header row and get the first data row
-                        map_data_first_row = map_lines[1].strip()
-                        map_data_fields = [field.strip().strip('"') for field in map_data_first_row.split(',')]
-
-                        if len(map_data_fields) >= 10:
-                            # Parse map data fields
-                            MapName = map_data_fields[0]
-                            MapBuilder = map_data_fields[1]
-
-                            try:
-                                MapCreatedDate = datetime.strptime(map_data_fields[2], '%Y-%m-%dT%H:%M:%S.%fZ').date()
-                            except ValueError:
-                                MapCreatedDate = None
-
-                            try:
-                                PlayCount = int(map_data_fields[3])
-                            except ValueError:
-                                PlayCount = 0
-
-                            try:
-                                ElimRate = float(map_data_fields[4])
-                            except ValueError:
-                                ElimRate = 0.0
-
-                            try:
-                                AvgFinishTime = float(map_data_fields[5])
-                            except ValueError:
-                                AvgFinishTime = 0.0
-
-                            try:
-                                RecordTime = float(map_data_fields[6])
-                            except ValueError:
-                                RecordTime = 0.0
-
-                            RecordHolder = map_data_fields[7]
-
-                            try:
-                                RecordSetDate = datetime.strptime(map_data_fields[8], '%Y-%m-%dT%H:%M:%S.%fZ').date()
-                            except ValueError:
-                                RecordSetDate = None
-
-                            RecordStreamer = map_data_fields[9]
-
-                            # Write the parsed data to the map_results_file
-                            with open(map_results_file, 'a', encoding='utf-8', errors='ignore', newline='') as f:
-                                f.write(
-                                    f'{MapName},{MapBuilder},{MapCreatedDate},{PlayCount},{ElimRate},'
-                                    f'{AvgFinishTime},{RecordTime},{RecordHolder},{RecordSetDate},'
-                                    f'{RecordStreamer}\n')
-                        else:
-                            print("Not enough data fields in map_data_first_row.")
+                    parsed_map_data = read_latest_map_data(map_data_file)
+                    if parsed_map_data:
+                        cached_map_data.update(parsed_map_data)
+                        with open(map_results_file, 'a', encoding='utf-8', errors='ignore', newline='') as f:
+                            f.write(
+                                f"{cached_map_data['MapName']},{cached_map_data['MapBuilder']},{cached_map_data['MapCreatedDate']},"
+                                f"{cached_map_data['PlayCount']},{cached_map_data['ElimRate']},{cached_map_data['AvgFinishTime']},"
+                                f"{cached_map_data['RecordTime']},{cached_map_data['RecordHolder']},{cached_map_data['RecordSetDate']},"
+                                f"{cached_map_data['RecordStreamer']}\n")
                     else:
                         print(f"The map data file {map_data_file} does not contain enough data.")
                 else:
-                    print("Map file has not been modified since last read.")
-                    # Reset map data since we're not reading the file
-                    MapName, MapBuilder, PlayCount, ElimRate, AvgFinishTime, RecordTime, RecordHolder, RecordSetDate, RecordStreamer = (
-                        None, None, 0, 0.0, 0.0, 0.0, None, None, None)
+                    if DEBUG == True:
+                        print("Debug: Map file has not been modified; reusing cached map data.")
 
             except FileNotFoundError:
                 print(f"Map data file {map_data_file} not found.")
             except Exception as e:
                 print(f"An error occurred while processing the map data file: {e}")
+
+            MapName = cached_map_data['MapName']
+            MapBuilder = cached_map_data['MapBuilder']
+            MapCreatedDate = cached_map_data['MapCreatedDate']
+            PlayCount = cached_map_data['PlayCount']
+            ElimRate = cached_map_data['ElimRate']
+            AvgFinishTime = cached_map_data['AvgFinishTime']
+            RecordTime = cached_map_data['RecordTime']
+            RecordHolder = cached_map_data['RecordHolder']
+            RecordSetDate = cached_map_data['RecordSetDate']
+            RecordStreamer = cached_map_data['RecordStreamer']
 
             with open(config.get_setting('race_file'), 'rb') as f:
                 data = f.read()
