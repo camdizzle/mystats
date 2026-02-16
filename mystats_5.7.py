@@ -649,19 +649,8 @@ def open_settings_window():
     settings_window.transient(root)
     settings_window.attributes('-topmost', True)
 
-    # Get the main window's position and size
-    main_x = root.winfo_x()
-    main_y = root.winfo_y()
-    main_width = root.winfo_width()
-    main_height = root.winfo_height()
-
-    # Calculate the position for the settings window to be centered
-    window_width = 475  # Set to 475 pixels wide
-    window_height = 400
-    pos_x = main_x + (main_width // 2) - (window_width // 2)
-    pos_y = main_y + (main_height // 2) - (window_height // 2)
-
-    center_toplevel(settings_window, window_width, window_height)
+    # Start with a larger base size and recenter once content is measured
+    center_toplevel(settings_window, 560, 620)
 
     # Create a frame to contain the canvas and scrollbar
     frame_with_scrollbar = ttk.Frame(settings_window, style="App.TFrame")
@@ -901,9 +890,36 @@ def open_settings_window():
     open_location_button = ttk.Button(directory_frame, text="📁", command=open_directory, width=3)
     open_location_button.grid(row=1, column=1, padx=(10, 0), pady=(5, 5))
 
-    # Create a new row in top_frame and merge all three columns for the audio device selection
+    # UI theme selection (placed near top to keep it visible)
+    theme_label = ttk.Label(top_frame, text="UI Theme")
+    theme_label.grid(row=1, column=0, sticky="w", padx=10, pady=(8, 4))
+
+    selected_theme = tk.StringVar(value=app_style.theme_use())
+    available_themes = get_available_ui_themes()
+
+    if selected_theme.get() not in available_themes:
+        available_themes = [selected_theme.get()] + available_themes
+
+    theme_combobox = ttk.Combobox(
+        top_frame,
+        textvariable=selected_theme,
+        values=available_themes,
+        width=24,
+        state="readonly"
+    )
+    theme_combobox.grid(row=1, column=1, columnspan=2, sticky="w", padx=10, pady=(8, 4))
+
+    def apply_selected_theme(event=None):
+        try:
+            apply_theme(selected_theme.get())
+        except Exception as e:
+            messagebox.showerror("Theme Error", f"Could not apply theme: {e}")
+
+    theme_combobox.bind('<<ComboboxSelected>>', apply_selected_theme)
+
+    # Audio device selection
     label = ttk.Label(top_frame, text="Select Audio Output Device:")
-    label.grid(row=1, column=0, columnspan=3, sticky="w", padx=10, pady=(10, 5))
+    label.grid(row=2, column=0, columnspan=3, sticky="w", padx=10, pady=(8, 5))
 
     audio_devices = get_audio_devices()
     selected_device = tk.StringVar()
@@ -917,30 +933,13 @@ def open_settings_window():
     selected_device.set(current_device)
 
     device_combobox = ttk.Combobox(top_frame, textvariable=selected_device, values=audio_devices, width=60)
-    device_combobox.grid(row=2, column=0, columnspan=3, sticky="w", padx=10, pady=(0, 10))
+    device_combobox.grid(row=3, column=0, columnspan=3, sticky="w", padx=10, pady=(0, 10))
 
     # Save the selection back to config when user makes a selection
     def on_device_change(event):
         config.set_setting('audio_device', selected_device.get())
 
     device_combobox.bind('<<ComboboxSelected>>', on_device_change)
-
-    theme_label = ttk.Label(top_frame, text="UI Theme:")
-    theme_label.grid(row=3, column=0, columnspan=1, sticky="w", padx=10, pady=(0, 5))
-
-    selected_theme = tk.StringVar(value=app_style.theme_use())
-    available_themes = get_available_ui_themes()
-
-    theme_combobox = ttk.Combobox(top_frame, textvariable=selected_theme, values=available_themes, width=30, state="readonly")
-    theme_combobox.grid(row=3, column=1, columnspan=2, sticky="w", padx=10, pady=(0, 5))
-
-    def apply_selected_theme(event=None):
-        try:
-            apply_theme(selected_theme.get())
-        except Exception as e:
-            messagebox.showerror("Theme Error", f"Could not apply theme: {e}")
-
-    theme_combobox.bind('<<ComboboxSelected>>', apply_selected_theme)
 
     def save_settings_and_close():
         # -- Example: Channel entry --
@@ -979,6 +978,13 @@ def open_settings_window():
 
     close_button = ttk.Button(close_button_frame, text="Save and Close", command=save_settings_and_close, style="Primary.TButton")
     close_button.pack(side="right")
+
+    # Resize settings window to fit content, with sane min/max bounds
+    settings_window.update_idletasks()
+    required_width = max(560, frame_with_scrollbar.winfo_reqwidth() + 32)
+    required_height = min(max(620, frame_with_scrollbar.winfo_reqheight() + 90), 840)
+    settings_window.minsize(560, 620)
+    center_toplevel(settings_window, required_width, required_height)
 
 def test_chunkaudio_playback():
     """
