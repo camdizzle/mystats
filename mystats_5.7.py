@@ -97,18 +97,23 @@ def create_root_window():
 
 
 def apply_ui_styles(style):
-    """Central app styles for consistent spacing and typography."""
-    style.configure("App.TFrame", padding=6)
-    style.configure("Card.TLabelframe", padding=10)
+    """Central app styles for a modern, cleaner UI."""
+    style.configure("App.TFrame", padding=8)
+    style.configure("Card.TLabelframe", padding=12)
     style.configure("Card.TLabelframe.Label", font=("Segoe UI", 10, "bold"))
     style.configure("Heading.TLabel", font=("Segoe UI", 16, "bold"))
-    style.configure("Small.TLabel", font=("Segoe UI", 8))
+    style.configure("Small.TLabel", font=("Segoe UI", 9))
 
-    # Beveled/raised button look across ttk buttons.
-    style.configure("TButton", padding=6, relief="raised", borderwidth=2)
-    style.map("TButton", relief=[("pressed", "sunken"), ("active", "raised")])
-    style.configure("Primary.TButton", padding=6, relief="raised", borderwidth=2)
-    style.map("Primary.TButton", relief=[("pressed", "sunken"), ("active", "raised")])
+    # Modern flat button look (no bevel), with subtle interactive states.
+    style.configure("TButton", padding=(10, 6), relief="flat", borderwidth=0)
+    style.map("TButton", relief=[("pressed", "flat"), ("active", "flat")])
+    style.configure("Primary.TButton", padding=(12, 7), relief="flat", borderwidth=0)
+    style.map("Primary.TButton", relief=[("pressed", "flat"), ("active", "flat")])
+
+    # Improve field density/readability.
+    style.configure("TEntry", padding=4)
+    style.configure("TCombobox", padding=3)
+    style.configure("TCheckbutton", padding=2)
 
 
 def get_available_ui_themes():
@@ -738,7 +743,7 @@ def open_settings_window():
     general_tab.grid_columnconfigure(0, weight=1)
 
     # --- Audio tab ---
-    ttk.Label(audio_tab, text="Audio alerts and delay settings", style="Small.TLabel").grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 8))
+    ttk.Label(audio_tab, text="Audio alerts and output device settings", style="Small.TLabel").grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 8))
 
     chunk_alert_frame = ttk.LabelFrame(audio_tab, text="Chunk Alert", style="Card.TLabelframe")
     chunk_alert_frame.grid(row=1, column=0, padx=(0, 10), pady=6, sticky="nsew")
@@ -1046,9 +1051,10 @@ def initialize_main_window():
     root_window, app_style = create_root_window()
     apply_ui_styles(app_style)
 
-    # Beveled look for classic tk.Button widgets too.
-    root_window.option_add("*Button.relief", "raised")
-    root_window.option_add("*Button.borderWidth", 2)
+    # Keep classic tk.Button widgets visually flatter to match ttk style.
+    root_window.option_add("*Button.relief", "flat")
+    root_window.option_add("*Button.borderWidth", 0)
+    root_window.option_add("*Button.highlightThickness", 0)
 
     root_window.protocol("WM_DELETE_WINDOW", on_close)
     root_window.title("MyStats - Marbles On Stream Companion Application")
