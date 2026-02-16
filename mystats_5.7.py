@@ -213,6 +213,212 @@ def get_season_quest_updates():
     return quest_messages
 
 
+def get_season_quest_targets():
+    return {
+        'races': get_int_setting('season_quest_target_races', 0),
+        'points': get_int_setting('season_quest_target_points', 0),
+        'race_hs': get_int_setting('season_quest_target_race_hs', 0),
+        'br_hs': get_int_setting('season_quest_target_br_hs', 0),
+    }
+
+
+def get_user_season_stats():
+    user_stats = {}
+    for allraces in glob.glob(os.path.join(config.get_setting('directory'), "allraces_*.csv")):
+        try:
+            with open(allraces, 'rb') as f:
+                raw_data = f.read()
+            result = chardet.detect(raw_data)
+            encoding = result['encoding'] if result['encoding'] else 'utf-8'
+
+            with open(allraces, 'r', encoding=encoding, errors='ignore') as f:
+                reader = csv.reader(f)
+                for row in reader:
+                    if len(row) < 5:
+                        continue
+                    username = row[1].strip().lower()
+                    display_name = row[2].strip() if len(row) > 2 else username
+                    if not username:
+                        continue
+
+                    if username not in user_stats:
+                        user_stats[username] = {
+                            'display_name': display_name or username,
+                            'races': 0,
+                            'points': 0,
+                            'race_hs': 0,
+                            'br_hs': 0,
+                        }
+
+                    if display_name:
+                        user_stats[username]['display_name'] = display_name
+
+                    user_stats[username]['races'] += 1
+                    try:
+                        points = int(row[3])
+                    except (TypeError, ValueError):
+                        points = 0
+
+                    user_stats[username]['points'] += points
+                    mode = row[4].strip().lower()
+                    if mode == 'race' and points > user_stats[username]['race_hs']:
+                        user_stats[username]['race_hs'] = points
+                    elif mode == 'br' and points > user_stats[username]['br_hs']:
+                        user_stats[username]['br_hs'] = points
+
+        except FileNotFoundError:
+            continue
+        except Exception as e:
+            print(f"Error reading season stats from {allraces}: {e}")
+
+    return user_stats
+
+
+def get_user_quest_progress(username):
+    user_stats = get_user_season_stats()
+    if not user_stats:
+        return None
+
+    username_lookup = (username or '').strip().lower()
+    target_username = None
+
+    if username_lookup in user_stats:
+        target_username = username_lookup
+    else:
+        for uname, stats in user_stats.items():
+            if stats.get('display_name', '').strip().lower() == username_lookup:
+                target_username = uname
+                break
+
+    if target_username is None:
+        return None
+
+    targets = get_season_quest_targets()
+    stats = user_stats[target_username]
+    quest_rows = [
+        ("Season Races", stats['races'], targets['races']),
+        ("Season Points", stats['points'], targets['points']),
+        ("Race High Score", stats['race_hs'], targets['race_hs']),
+        ("BR High Score", stats['br_hs'], targets['br_hs']),
+    ]
+
+    completed = 0
+    active_quests = 0
+    progress_lines = []
+    for quest_name, current, target in quest_rows:
+        if target <= 0:
+            progress_lines.append(f"{quest_name}: disabled")
+            continue
+        active_quests += 1
+        if current >= target:
+            completed += 1
+            progress_lines.append(f"{quest_name}: ✅ {current:,}/{target:,}")
+        else:
+            progress_lines.append(f"{quest_name}: {current:,}/{target:,}")
+
+    return {
+        'username': target_username,
+        'display_name': stats['display_name'] or target_username,
+        'completed': completed,
+        'active_quests': active_quests,
+        'progress_lines': progress_lines,
+        'stats': stats,
+    }
+
+
+def get_quest_completion_leaderboard(limit=100):
+    user_stats = get_user_season_stats()
+    targets = get_season_quest_targets()
+
+    leaderboard = []
+    for username, stats in user_stats.items():
+        completed = 0
+        active_quests = 0
+
+        checks = [
+            ('races', stats['races']),
+            ('points', stats['points']),
+            ('race_hs', stats['race_hs']),
+            ('br_hs', stats['br_hs']),
+        ]
+
+        for key, current_value in checks:
+            target = targets[key]
+            if target <= 0:
+                continue
+            active_quests += 1
+            if current_value >= target:
+                completed += 1
+
+        if active_quests == 0:
+            completed = 0
+
+        leaderboard.append({
+            'username': username,
+            'display_name': stats['display_name'] or username,
+            'completed': completed,
+            'active_quests': active_quests,
+            'races': stats['races'],
+            'points': stats['points'],
+            'race_hs': stats['race_hs'],
+            'br_hs': stats['br_hs'],
+        })
+
+    leaderboard.sort(key=lambda row: (row['completed'], row['points'], row['races']), reverse=True)
+    return leaderboard[:limit]
+
+
+def open_quest_completion_window(parent_window):
+    leaderboard = get_quest_completion_leaderboard(limit=200)
+    if not leaderboard:
+        messagebox.showinfo("Season Quests", "No season race data found yet.")
+        return
+
+    popup = tk.Toplevel(parent_window)
+    popup.title("Season Quest Completion")
+    popup.transient(parent_window)
+    popup.attributes('-topmost', True)
+    center_toplevel(popup, 760, 520)
+
+    ttk.Label(popup, text="Season Quest Completion Leaderboard", style="Small.TLabel").pack(anchor="w", padx=12, pady=(10, 4))
+
+    columns = ("rank", "user", "completed", "races", "points", "race_hs", "br_hs")
+    tree = ttk.Treeview(popup, columns=columns, show="headings", height=18)
+    tree.heading("rank", text="#")
+    tree.heading("user", text="User")
+    tree.heading("completed", text="Completed")
+    tree.heading("races", text="Races")
+    tree.heading("points", text="Points")
+    tree.heading("race_hs", text="Race HS")
+    tree.heading("br_hs", text="BR HS")
+
+    tree.column("rank", width=50, anchor="center")
+    tree.column("user", width=190, anchor="w")
+    tree.column("completed", width=110, anchor="center")
+    tree.column("races", width=90, anchor="e")
+    tree.column("points", width=120, anchor="e")
+    tree.column("race_hs", width=90, anchor="e")
+    tree.column("br_hs", width=90, anchor="e")
+
+    for idx, row in enumerate(leaderboard, start=1):
+        completed_text = f"{row['completed']}/{row['active_quests']}" if row['active_quests'] > 0 else "0/0"
+        tree.insert("", "end", values=(
+            idx,
+            row['display_name'],
+            completed_text,
+            f"{row['races']:,}",
+            f"{row['points']:,}",
+            f"{row['race_hs']:,}",
+            f"{row['br_hs']:,}",
+        ))
+
+    scrollbar = ttk.Scrollbar(popup, orient="vertical", command=tree.yview)
+    tree.configure(yscrollcommand=scrollbar.set)
+
+    tree.pack(side="left", fill="both", expand=True, padx=(12, 0), pady=(0, 12))
+    scrollbar.pack(side="right", fill="y", padx=(0, 12), pady=(0, 12))
+
+
 async def send_chat_message(channel, message, category=None, apply_delay=False):
     category_map = {
         "br": "chat_br_results",
@@ -967,6 +1173,7 @@ def open_settings_window():
         messagebox.showinfo("Season Quests", "Season quest completion flags have been reset.")
 
     ttk.Button(season_quests_tab, text="Reset Quest Progress", command=reset_season_quest_progress).grid(row=7, column=0, sticky="w", pady=(8, 0))
+    ttk.Button(season_quests_tab, text="View Quest Completion", command=lambda: open_quest_completion_window(settings_window)).grid(row=7, column=1, sticky="w", pady=(8, 0))
 
     # --- Appearance tab ---
     ttk.Label(appearance_tab, text="Theme and visual preferences", style="Small.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 8))
@@ -2751,6 +2958,23 @@ class Bot(commands.Bot):
     def get_commands(self):
         excluded_commands = ['commands', 'mplreset']
         return [f'!{cmd.name}' for cmd in self.commands.values() if cmd.name not in excluded_commands]
+
+    @commands.command(name='myquests')
+    async def myquests_command(self, ctx, username: str = None):
+        lookup_name = username if username else ctx.author.name
+        progress = get_user_quest_progress(lookup_name)
+
+        if progress is None:
+            await ctx.channel.send(f"{lookup_name}: No quest progress found yet.")
+            return
+
+        headline = (
+            f"{progress['display_name']} Quest Progress: "
+            f"{progress['completed']}/{progress['active_quests'] if progress['active_quests'] > 0 else 0} quests complete"
+        )
+        details = " | ".join(progress['progress_lines'])
+        await ctx.channel.send(f"{headline} | {details}")
+
 
     @commands.command(name='top10ppr')
     async def top10ppr_command(self, ctx):
