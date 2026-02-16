@@ -48,6 +48,7 @@ import atexit
 import socket
 import subprocess
 import importlib.util
+import logging
 
 # Global Variables
 version = '5.7.0'
@@ -58,6 +59,12 @@ DEBUG = False
 HAS_TTKBOOTSTRAP = importlib.util.find_spec("ttkbootstrap") is not None
 DEFAULT_UI_THEME = "darkly"
 app_style = None
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s"
+)
+logger = logging.getLogger("mystats")
 
 
 def get_initial_ui_theme():
@@ -144,6 +151,31 @@ def get_chat_max_names():
         value = 25
 
     return min(25, max(3, value))
+
+
+async def send_chat_message(channel, message, category=None, apply_delay=False):
+    category_map = {
+        "br": "chat_br_results",
+        "race": "chat_race_results",
+        "tilt": "chat_tilt_results",
+        "mystats": "chat_mystats_command",
+    }
+
+    if category in category_map and not is_chat_response_enabled(category_map[category]):
+        return False
+
+    if apply_delay and config.get_setting('announcedelay') == 'True':
+        try:
+            await asyncio.sleep(int(config.get_setting('announcedelayseconds') or 0))
+        except ValueError:
+            await asyncio.sleep(0)
+
+    try:
+        await channel.send(message)
+        return True
+    except Exception as e:
+        logger.exception(f"Failed to send chat message ({category}): {e}")
+        return False
 
 
 def center_toplevel(window, width, height):
@@ -1522,6 +1554,17 @@ class ConfigManager:
                                 'UI_THEME', 'chat_br_results', 'chat_race_results', 'chat_tilt_results',
                                 'chat_mystats_command', 'chat_max_names'}
         self.transient_keys = set([])
+        self.defaults = {
+            'chat_br_results': 'True',
+            'chat_race_results': 'True',
+            'chat_tilt_results': 'True',
+            'chat_mystats_command': 'True',
+            'chat_max_names': '25',
+            'UI_THEME': DEFAULT_UI_THEME,
+            'announcedelay': 'False',
+            'announcedelayseconds': '0',
+            'chunk_alert_value': '1000'
+        }
         self.load_settings()
 
     def load_settings(self):
@@ -1543,7 +1586,9 @@ class ConfigManager:
     def get_setting(self, key):
         if key in self.transient_settings:
             return self.transient_settings[key]
-        return self.settings.get(key, None)
+        if key in self.settings:
+            return self.settings[key]
+        return self.defaults.get(key, None)
 
     def set_setting(self, key, value, persistent=True):
         if key == "CHANNEL":
@@ -1570,10 +1615,12 @@ class ConfigManager:
         return True
 
     def save_settings(self):
-        with open(self.settings_file, "w") as f:
+        temp_file = f"{self.settings_file}.tmp"
+        with open(temp_file, "w") as f:
             for key, value in self.settings.items():
                 if key in self.persistent_keys:
                     f.write(f"{key}={value}\n")
+        os.replace(temp_file, self.settings_file)
 
 
 config = ConfigManager()
@@ -2773,9 +2820,11 @@ class Bot(commands.Bot):
             f"World Records - {counts['world_record_count']}"
         )
 
-        await ctx.channel.send(
+        await send_chat_message(
+            ctx.channel,
             f"{winnersdisplayname}: Today: {counts['winstoday']} {wins_str}, {pointstoday_formatted} points, {racestoday_formatted} races. "
-            f"PPR: {today_avg_points_formatted} | Season total: {output_msg}"
+            f"PPR: {today_avg_points_formatted} | Season total: {output_msg}",
+            category="mystats"
         )
 
 
@@ -3370,20 +3419,20 @@ async def tilted(bot):
                             player_summary = f"{username} - {points} points, "
                             if len(full_summary_message) + len(player_summary) > MAX_MESSAGE_LENGTH:
                                 if is_chat_response_enabled("chat_tilt_results"):
-                                    await bot.channel.send(full_summary_message.strip(", "))
+                                    await send_chat_message(bot.channel, full_summary_message.strip(", "), category="tilt")
                                 full_summary_message = player_summary
                             else:
                                 full_summary_message += player_summary
 
                         if full_summary_message:
                             if is_chat_response_enabled("chat_tilt_results"):
-                                await bot.channel.send(full_summary_message.strip(", "))
+                                await send_chat_message(bot.channel, full_summary_message.strip(", "), category="tilt")
 
                         text_area.insert('end', f"\nRun {run_id[:6]} is over! Final standings: {', '.join([f'{username} - {points} points' for username, points in limited_run_results])}\n")
                     else:
                         # If no results found for the run_id
                         if is_chat_response_enabled("chat_tilt_results"):
-                            await bot.channel.send(f"Run {run_id[:6]} is over! No results to display.")
+                            await send_chat_message(bot.channel, f"Run {run_id[:6]} is over! No results to display.", category="tilt")
                         text_area.insert('end', f"\nRun {run_id[:6]} is over! No results to display.\n")
                         print("No results found for this run.")
 
@@ -3414,14 +3463,14 @@ async def tilted(bot):
                             player_result = f"{row[0]}, "
                             if len(full_message) + len(player_result) > MAX_MESSAGE_LENGTH:
                                 if is_chat_response_enabled("chat_tilt_results"):
-                                    await bot.channel.send(full_message.strip(", "))
+                                    await send_chat_message(bot.channel, full_message.strip(", "), category="tilt")
                                 full_message = player_result
                             else:
                                 full_message += player_result
 
                         if full_message:
                             if is_chat_response_enabled("chat_tilt_results"):
-                                await bot.channel.send(full_message.strip(", "))
+                                await send_chat_message(bot.channel, full_message.strip(", "), category="tilt")
                         # print("Sent current level results to chat.")
 
                         text_area.insert('end', f"\n{top_tiltee_message} | Finishers: {', '.join([f'{row[0]}' for row in limited_level_data])}\n")
@@ -3564,7 +3613,7 @@ async def checkpoints(bot):
 
                 # Send the message to Twitch chat
                 if concatenated_message:
-                    await bot.channel.send(concatenated_message)
+                    await send_chat_message(bot.channel, concatenated_message, category="race")
 
                 # Update the Tkinter text_area in the main thread
                 if concatenated_text_area_message:
@@ -3631,7 +3680,7 @@ async def race(bot):
             print("Marble Day Reset Is Upon Us!")
             print()
             if is_chat_response_enabled("chat_race_results"):
-                await bot.channel.send("🎺 Marble Day Reset! 🎺")
+                await send_chat_message(bot.channel, "🎺 Marble Day Reset! 🎺", category="race")
             config.set_setting('data_sync', 'yes', persistent=False)
             await asyncio.sleep(3)
             reset()
@@ -3867,7 +3916,7 @@ async def race(bot):
                         f"120th race today! Congratulations! 🎉"
                     )
                     if is_chat_response_enabled("chat_race_results"):
-                        await bot.channel.send(announcement_message)
+                        await send_chat_message(bot.channel, announcement_message, category="race")
 
             # MPL Code
             if DEBUG == True:
@@ -4507,7 +4556,7 @@ async def royale(bot):
                                 f"120th race today! Congratulations! 🎉"
                             )
                             if is_chat_response_enabled("chat_br_results"):
-                                await bot.channel.send(announcement_message)
+                                await send_chat_message(bot.channel, announcement_message, category="br")
 
                     if int(br_winner[4]) >= int(config.get_setting('chunk_alert_value')) and config.get_setting(
                             'chunk_alert') == 'True':
@@ -4692,17 +4741,14 @@ async def royale(bot):
                             print('Debug: Announcement Delay: True')
                         else:
                             pass
-                        await asyncio.sleep(int(config.get_setting('announcedelayseconds')))
-                        if is_chat_response_enabled("chat_br_results"):
-                            await bot.channel.send(message)
+                        await send_chat_message(bot.channel, message, category="br", apply_delay=True)
                         write_overlays()
                     else:
                         if DEBUG == True:
                             print('Debug: Announcement Delay: False')
                         else:
                             pass
-                        if is_chat_response_enabled("chat_br_results"):
-                            await bot.channel.send(message)
+                        await send_chat_message(bot.channel, message, category="br")
                         write_overlays()
 
                     if crownwin:
