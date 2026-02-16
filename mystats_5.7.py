@@ -57,10 +57,6 @@ GLOBAL_SOCKET = None
 DEBUG = False
 HAS_TTKBOOTSTRAP = importlib.util.find_spec("ttkbootstrap") is not None
 DEFAULT_UI_THEME = "flatly"
-BOOTSTRAP_THEMES = {
-    "flatly", "litera", "cosmo", "minty", "lumen",
-    "darkly", "superhero", "cyborg", "solar", "vapor"
-}
 app_style = None
 
 
@@ -84,9 +80,13 @@ def create_root_window():
 
     if HAS_TTKBOOTSTRAP:
         ttkbootstrap_module = __import__("ttkbootstrap")
-        theme_name = initial_theme if initial_theme in BOOTSTRAP_THEMES else DEFAULT_UI_THEME
-        root_window = ttkbootstrap_module.Window(themename=theme_name)
+        root_window = ttkbootstrap_module.Window(themename=DEFAULT_UI_THEME)
         style = root_window.style
+
+        try:
+            style.theme_use(initial_theme)
+        except Exception:
+            style.theme_use(DEFAULT_UI_THEME)
     else:
         root_window = tk.Tk()
         style = ttk.Style(root_window)
@@ -107,10 +107,7 @@ def apply_ui_styles(style):
 
 
 def get_available_ui_themes():
-    if HAS_TTKBOOTSTRAP:
-        return sorted(BOOTSTRAP_THEMES)
-
-    return sorted(ttk.Style(root).theme_names())
+    return sorted(app_style.theme_names())
 
 
 def apply_theme(theme_name):
@@ -2318,12 +2315,11 @@ def ver_season_only():
 
     def retry_popup():
         """Show retry popup to prompt user login and retry."""
-        retry_window = tk.Tk()
-        retry_window.withdraw()  # Hide root window
-        result = messagebox.askretrycancel("Login Required",
-                                           "You must log in to the website to use MyStats. Click Retry to try again.")
-        retry_window.destroy()  # Close the popup window
-        return result
+        return messagebox.askretrycancel(
+            "Login Required",
+            "You must log in to the website to use MyStats. Click Retry to try again.",
+            parent=root
+        )
 
     retry_request()  # Initial API call
 
