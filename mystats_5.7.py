@@ -853,20 +853,22 @@ def open_settings_window():
     chat_race_results_var = tk.BooleanVar(value=is_chat_response_enabled("chat_race_results"))
     chat_tilt_results_var = tk.BooleanVar(value=is_chat_response_enabled("chat_tilt_results"))
     chat_all_commands_var = tk.BooleanVar(value=is_chat_response_enabled("chat_all_commands"))
+    chat_narrative_alerts_var = tk.BooleanVar(value=is_chat_response_enabled("chat_narrative_alerts"))
 
     ttk.Checkbutton(chat_tab, text="BR Results", variable=chat_br_results_var).grid(row=1, column=0, sticky="w", pady=2)
     ttk.Checkbutton(chat_tab, text="Race Results", variable=chat_race_results_var).grid(row=2, column=0, sticky="w", pady=2)
     ttk.Checkbutton(chat_tab, text="Tilt Results", variable=chat_tilt_results_var).grid(row=3, column=0, sticky="w", pady=2)
-    ttk.Checkbutton(chat_tab, text="All !commands", variable=chat_all_commands_var).grid(row=4, column=0, sticky="w", pady=(2, 10))
+    ttk.Checkbutton(chat_tab, text="All !commands", variable=chat_all_commands_var).grid(row=4, column=0, sticky="w", pady=2)
+    ttk.Checkbutton(chat_tab, text="Narrative Alerts", variable=chat_narrative_alerts_var).grid(row=5, column=0, sticky="w", pady=(2, 10))
 
-    ttk.Label(chat_tab, text="Max names announced (Race/Tilt)").grid(row=5, column=0, sticky="w", pady=(4, 4))
+    ttk.Label(chat_tab, text="Max names announced (Race/Tilt)").grid(row=6, column=0, sticky="w", pady=(4, 4))
     max_name_values = [str(i) for i in range(3, 26)]
     selected_max_names = tk.StringVar(value=str(get_chat_max_names()))
     max_names_combobox = ttk.Combobox(chat_tab, textvariable=selected_max_names, values=max_name_values, width=5, state="readonly")
-    max_names_combobox.grid(row=5, column=1, sticky="w", pady=(4, 4), padx=(8, 0))
+    max_names_combobox.grid(row=6, column=1, sticky="w", pady=(4, 4), padx=(8, 0))
 
     message_delay_frame = ttk.LabelFrame(chat_tab, text="Message Delay", style="Card.TLabelframe")
-    message_delay_frame.grid(row=6, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+    message_delay_frame.grid(row=7, column=0, columnspan=2, sticky="ew", pady=(10, 0))
 
     announce_delay_var = tk.BooleanVar(value=config.get_setting("announcedelay") == "True")
     ttk.Checkbutton(message_delay_frame, text="Enable Delay", variable=announce_delay_var).grid(row=0, column=0, sticky="w", padx=10, pady=(8, 6))
@@ -904,6 +906,7 @@ def open_settings_window():
         chat_race_results_var.set(True)
         chat_tilt_results_var.set(True)
         chat_all_commands_var.set(True)
+        chat_narrative_alerts_var.set(True)
         selected_max_names.set("25")
         chunk_alert_trigger_entry.delete(0, tk.END)
         chunk_alert_trigger_entry.insert(0, "1000")
@@ -928,6 +931,7 @@ def open_settings_window():
         config.set_setting("chat_race_results", str(chat_race_results_var.get()), persistent=True)
         config.set_setting("chat_tilt_results", str(chat_tilt_results_var.get()), persistent=True)
         config.set_setting("chat_all_commands", str(chat_all_commands_var.get()), persistent=True)
+        config.set_setting("chat_narrative_alerts", str(chat_narrative_alerts_var.get()), persistent=True)
         config.set_setting("chat_max_names", selected_max_names.get(), persistent=True)
         settings_window.destroy()
 
@@ -1558,7 +1562,7 @@ class ConfigManager:
                                 'tilt_player_file', 'active_event_ids', 'paused_event_ids', 'checkpoint_results_file',
                                 'tilts_results_file', 'tilt_level_file', 'map_data_file', 'map_results_file',
                                 'UI_THEME', 'chat_br_results', 'chat_race_results', 'chat_tilt_results',
-                                'chat_mystats_command', 'chat_all_commands', 'chat_max_names'}
+                                'chat_mystats_command', 'chat_all_commands', 'chat_narrative_alerts', 'chat_max_names'}
         self.transient_keys = set([])
         self.defaults = {
             'chat_br_results': 'True',
@@ -1566,6 +1570,7 @@ class ConfigManager:
             'chat_tilt_results': 'True',
             'chat_mystats_command': 'True',
             'chat_all_commands': 'True',
+            'chat_narrative_alerts': 'True',
             'chat_max_names': '25',
             'UI_THEME': DEFAULT_UI_THEME,
             'announcedelay': 'False',
@@ -3741,6 +3746,9 @@ async def race(bot):
     last_modified_race = None
     last_map_file_mod_time = None
     totalpointsrace = 0
+    winner_streak_name = None
+    winner_streak_count = 0
+    current_daily_points_leader = None
     cached_map_data = {
         'MapName': None,
         'MapBuilder': None,
@@ -3776,6 +3784,9 @@ async def race(bot):
             print()
             if is_chat_response_enabled("chat_race_results"):
                 await send_chat_message(bot.channel, "🎺 Marble Day Reset! 🎺", category="race")
+            winner_streak_name = None
+            winner_streak_count = 0
+            current_daily_points_leader = None
             config.set_setting('data_sync', 'yes', persistent=False)
             await asyncio.sleep(3)
             reset()
@@ -3940,11 +3951,20 @@ async def race(bot):
                 pass
 
             race_counts = {row[1]: 0 for row in racedata}
+            points_by_player = {}
             with open(config.get_setting('allraces_file'), 'r', encoding='utf-8', errors='ignore') as f:
                 reader = csv.reader(f)
                 for row in reader:
-                    if row[1] in race_counts:
-                        race_counts[row[1]] += 1
+                    if len(row) < 4:
+                        continue
+                    racer_username = row[1]
+                    if racer_username in race_counts:
+                        race_counts[racer_username] += 1
+                    try:
+                        racer_points = int(row[3])
+                    except ValueError:
+                        continue
+                    points_by_player[racer_username] = points_by_player.get(racer_username, 0) + racer_points
 
             if DEBUG == True:
                 print('Debug: Check for 120 Race Checkmark')
@@ -4207,6 +4227,36 @@ async def race(bot):
             # Prepare messages for Twitch chat
             messages = []
 
+            narrative_messages = []
+            if not nowinner and is_chat_response_enabled("chat_narrative_alerts"):
+                winner_username = first_row[1]
+                winner_display_name = first_row[2] if first_row[1] != first_row[2].lower() else first_row[1]
+
+                if winner_streak_name == winner_username:
+                    winner_streak_count += 1
+                else:
+                    winner_streak_name = winner_username
+                    winner_streak_count = 1
+
+                if winner_streak_count in (3, 5, 10):
+                    narrative_messages.append(
+                        f"🔥 Streak Alert: {winner_display_name} just hit {winner_streak_count} race wins in a row!"
+                    )
+
+                if points_by_player:
+                    sorted_points = sorted(points_by_player.items(), key=lambda item: item[1], reverse=True)
+                    leader_username, leader_points = sorted_points[0]
+                    tied_for_lead = len(sorted_points) > 1 and sorted_points[1][1] == leader_points
+                    if not tied_for_lead and leader_username != current_daily_points_leader:
+                        current_daily_points_leader = leader_username
+                        leader_display_name = next(
+                            (row[2] for row in namecolordata if row[1] == leader_username and row[2]),
+                            leader_username
+                        )
+                        narrative_messages.append(
+                            f"📈 Lead Change: {leader_display_name} now leads today with {leader_points:,} points!"
+                        )
+
             # --- CHUNK ALERT BLOCK ---
             if int(first_row[3]) >= int(config.get_setting('chunk_alert_value')) and config.get_setting('chunk_alert') == 'True':
                 if DEBUG:
@@ -4342,6 +4392,8 @@ async def race(bot):
 
                         temp_messages.append(message.rstrip(', '))
                         messages.extend(temp_messages)
+
+            messages.extend(narrative_messages)
 
             # ---- After building up messages, do config updates, etc. ----
             config.set_setting('totalpointstoday', t_points, persistent=False)
