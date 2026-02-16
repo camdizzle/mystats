@@ -139,6 +139,11 @@ def apply_theme(theme_name):
 
 def is_chat_response_enabled(setting_key):
     setting_value = config.get_setting(setting_key)
+
+    # Backward compatibility for old setting name.
+    if setting_value is None and setting_key == "chat_all_commands":
+        setting_value = config.get_setting("chat_mystats_command")
+
     if setting_value is None:
         return True
     return str(setting_value).strip().lower() == "true"
@@ -158,7 +163,7 @@ async def send_chat_message(channel, message, category=None, apply_delay=False):
         "br": "chat_br_results",
         "race": "chat_race_results",
         "tilt": "chat_tilt_results",
-        "mystats": "chat_mystats_command",
+        "mystats": "chat_all_commands",
     }
 
     if category in category_map and not is_chat_response_enabled(category_map[category]):
@@ -846,12 +851,12 @@ def open_settings_window():
     chat_br_results_var = tk.BooleanVar(value=is_chat_response_enabled("chat_br_results"))
     chat_race_results_var = tk.BooleanVar(value=is_chat_response_enabled("chat_race_results"))
     chat_tilt_results_var = tk.BooleanVar(value=is_chat_response_enabled("chat_tilt_results"))
-    chat_mystats_command_var = tk.BooleanVar(value=is_chat_response_enabled("chat_mystats_command"))
+    chat_all_commands_var = tk.BooleanVar(value=is_chat_response_enabled("chat_all_commands"))
 
     ttk.Checkbutton(chat_tab, text="BR Results", variable=chat_br_results_var).grid(row=1, column=0, sticky="w", pady=2)
     ttk.Checkbutton(chat_tab, text="Race Results", variable=chat_race_results_var).grid(row=2, column=0, sticky="w", pady=2)
     ttk.Checkbutton(chat_tab, text="Tilt Results", variable=chat_tilt_results_var).grid(row=3, column=0, sticky="w", pady=2)
-    ttk.Checkbutton(chat_tab, text="!mystats Command", variable=chat_mystats_command_var).grid(row=4, column=0, sticky="w", pady=(2, 10))
+    ttk.Checkbutton(chat_tab, text="All !commands", variable=chat_all_commands_var).grid(row=4, column=0, sticky="w", pady=(2, 10))
 
     ttk.Label(chat_tab, text="Max names announced (Race/Tilt)").grid(row=5, column=0, sticky="w", pady=(4, 4))
     max_name_values = [str(i) for i in range(3, 26)]
@@ -897,7 +902,7 @@ def open_settings_window():
         chat_br_results_var.set(True)
         chat_race_results_var.set(True)
         chat_tilt_results_var.set(True)
-        chat_mystats_command_var.set(True)
+        chat_all_commands_var.set(True)
         selected_max_names.set("25")
         chunk_alert_trigger_entry.delete(0, tk.END)
         chunk_alert_trigger_entry.insert(0, "1000")
@@ -921,7 +926,7 @@ def open_settings_window():
         config.set_setting("chat_br_results", str(chat_br_results_var.get()), persistent=True)
         config.set_setting("chat_race_results", str(chat_race_results_var.get()), persistent=True)
         config.set_setting("chat_tilt_results", str(chat_tilt_results_var.get()), persistent=True)
-        config.set_setting("chat_mystats_command", str(chat_mystats_command_var.get()), persistent=True)
+        config.set_setting("chat_all_commands", str(chat_all_commands_var.get()), persistent=True)
         config.set_setting("chat_max_names", selected_max_names.get(), persistent=True)
         settings_window.destroy()
 
@@ -1552,13 +1557,14 @@ class ConfigManager:
                                 'tilt_player_file', 'active_event_ids', 'paused_event_ids', 'checkpoint_results_file',
                                 'tilts_results_file', 'tilt_level_file', 'map_data_file', 'map_results_file',
                                 'UI_THEME', 'chat_br_results', 'chat_race_results', 'chat_tilt_results',
-                                'chat_mystats_command', 'chat_max_names'}
+                                'chat_mystats_command', 'chat_all_commands', 'chat_max_names'}
         self.transient_keys = set([])
         self.defaults = {
             'chat_br_results': 'True',
             'chat_race_results': 'True',
             'chat_tilt_results': 'True',
             'chat_mystats_command': 'True',
+            'chat_all_commands': 'True',
             'chat_max_names': '25',
             'UI_THEME': DEFAULT_UI_THEME,
             'announcedelay': 'False',
@@ -2434,6 +2440,10 @@ class Bot(commands.Bot):
             return
 
         content = message.content.lower()
+
+        if content.startswith('!') and not is_chat_response_enabled("chat_all_commands"):
+            return
+
         new_message = copy.copy(message)
         new_message.content = content
         await self.handle_commands(new_message)
@@ -2695,9 +2705,6 @@ class Bot(commands.Bot):
 
     @commands.command(name='mystats')
     async def mystats_command(self, ctx, username: str = None):
-        if not is_chat_response_enabled("chat_mystats_command"):
-            return
-
         timestamp, timestampMDY, timestampHMS, adjusted_time = time_manager.get_adjusted_time()
 
         # Use the provided username if available; otherwise default to the command author.
