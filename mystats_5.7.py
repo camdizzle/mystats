@@ -132,6 +132,15 @@ def is_chat_response_enabled(setting_key):
     return str(setting_value).strip().lower() == "true"
 
 
+def get_chat_max_names():
+    try:
+        value = int(config.get_setting("chat_max_names") or 10)
+    except (TypeError, ValueError):
+        value = 10
+
+    return min(25, max(3, value))
+
+
 def center_toplevel(window, width, height):
     """Center a Toplevel against the main root window."""
     root.update_idletasks()
@@ -985,6 +994,19 @@ def open_settings_window():
     ttk.Checkbutton(chat_responses_frame, text="Tilt Results", variable=chat_tilt_results_var).grid(row=2, column=0, sticky="w", padx=10, pady=2)
     ttk.Checkbutton(chat_responses_frame, text="!mystats Command", variable=chat_mystats_command_var).grid(row=3, column=0, sticky="w", padx=10, pady=(2, 8))
 
+    ttk.Label(chat_responses_frame, text="Max names announced (Race/Tilt)").grid(row=4, column=0, sticky="w", padx=10, pady=(8, 4))
+
+    max_name_values = [str(i) for i in range(3, 26)]
+    selected_max_names = tk.StringVar(value=str(get_chat_max_names()))
+    max_names_combobox = ttk.Combobox(
+        chat_responses_frame,
+        textvariable=selected_max_names,
+        values=max_name_values,
+        width=5,
+        state="readonly"
+    )
+    max_names_combobox.grid(row=4, column=1, sticky="w", padx=(0, 10), pady=(8, 4))
+
     def save_settings_and_close():
         # -- Example: Channel entry --
         config.set_setting("CHANNEL", channel_entry.get(), persistent=True)
@@ -1016,6 +1038,7 @@ def open_settings_window():
         config.set_setting("chat_race_results", str(chat_race_results_var.get()), persistent=True)
         config.set_setting("chat_tilt_results", str(chat_tilt_results_var.get()), persistent=True)
         config.set_setting("chat_mystats_command", str(chat_mystats_command_var.get()), persistent=True)
+        config.set_setting("chat_max_names", selected_max_names.get(), persistent=True)
 
         # Since set_setting(persistent=True) automatically calls config.save_settings() 
         # for each item that is in persistent_keys, we do *not* need to manually call
@@ -1656,7 +1679,7 @@ class ConfigManager:
                                 'tilt_player_file', 'active_event_ids', 'paused_event_ids', 'checkpoint_results_file',
                                 'tilts_results_file', 'tilt_level_file', 'map_data_file', 'map_results_file',
                                 'UI_THEME', 'chat_br_results', 'chat_race_results', 'chat_tilt_results',
-                                'chat_mystats_command'}
+                                'chat_mystats_command', 'chat_max_names'}
         self.transient_keys = set([])
         self.load_settings()
 
@@ -3497,10 +3520,12 @@ async def tilted(bot):
                                     run_results[username] = run_results.get(username, 0) + points
 
                     sorted_run_results = sorted(run_results.items(), key=lambda x: x[1], reverse=True)
+                    max_names = get_chat_max_names()
+                    limited_run_results = sorted_run_results[:max_names]
 
                     if sorted_run_results:
                         full_summary_message = f"Run {run_id[:6]} is over! Final standings: "
-                        for username, points in sorted_run_results:
+                        for username, points in limited_run_results:
                             player_summary = f"{username} - {points} points, "
                             if len(full_summary_message) + len(player_summary) > MAX_MESSAGE_LENGTH:
                                 if is_chat_response_enabled("chat_tilt_results"):
@@ -3513,7 +3538,7 @@ async def tilted(bot):
                             if is_chat_response_enabled("chat_tilt_results"):
                                 await bot.channel.send(full_summary_message.strip(", "))
 
-                        text_area.insert('end', f"\nRun {run_id[:6]} is over! Final standings: {', '.join([f'{username} - {points} points' for username, points in sorted_run_results])}\n")
+                        text_area.insert('end', f"\nRun {run_id[:6]} is over! Final standings: {', '.join([f'{username} - {points} points' for username, points in limited_run_results])}\n")
                     else:
                         # If no results found for the run_id
                         if is_chat_response_enabled("chat_tilt_results"):
@@ -3535,6 +3560,8 @@ async def tilted(bot):
                         tiltdata = list(reader)
 
                     current_level_data = [row for row in tiltdata[1:] if int(row[4]) == current_level and int(row[2]) > 0]
+                    max_names = get_chat_max_names()
+                    limited_level_data = current_level_data[:max_names]
 
                     top_tiltee_message = f"End of Tilt Level {current_level} | Level Completion Time: {elapsed_time} | " \
                                          f"Top Tiltee: {top_tiltee} | Points Earned: {level_xp} | Finishers: " if top_tiltee \
@@ -3542,7 +3569,7 @@ async def tilted(bot):
 
                     if current_level_data:
                         full_message = top_tiltee_message
-                        for row in current_level_data:
+                        for row in limited_level_data:
                             player_result = f"{row[0]}, "
                             if len(full_message) + len(player_result) > MAX_MESSAGE_LENGTH:
                                 if is_chat_response_enabled("chat_tilt_results"):
@@ -3556,7 +3583,7 @@ async def tilted(bot):
                                 await bot.channel.send(full_message.strip(", "))
                         # print("Sent current level results to chat.")
 
-                        text_area.insert('end', f"\n{top_tiltee_message} | Finishers: {', '.join([f'{row[0]}' for row in current_level_data])}\n")
+                        text_area.insert('end', f"\n{top_tiltee_message} | Finishers: {', '.join([f'{row[0]}' for row in limited_level_data])}\n")
                     else:
                         print("No player data to send for current level.")
 
@@ -3665,6 +3692,8 @@ async def checkpoints(bot):
                 df_sorted = df_cleaned.sort_values(by=0, ascending=True)
 
                 checkpointplayers = df_sorted.values.tolist()
+                max_names = get_chat_max_names()
+                checkpointplayers = checkpointplayers[:max_names]
 
                 # Concatenated messages
                 concatenated_message = ""
