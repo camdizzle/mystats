@@ -4,7 +4,7 @@ from tkinter import ttk
 from tkinter import Menu
 from tkinter import filedialog
 from tkinter import messagebox
-from tkcalendar import DateEntry
+from tkcalendar import Calendar
 import asyncio
 import sys
 import os
@@ -1430,18 +1430,55 @@ def open_events_window():
         event_name_entry = ttk.Entry(form_frame, width=34)
         event_name_entry.grid(row=1, column=0, sticky="ew", pady=(0, 10))
 
-        ttk.Label(form_frame, text="Event Start Date").grid(row=2, column=0, sticky="w", pady=(0, 4))
-        event_start_entry = DateEntry(form_frame, date_pattern='y-mm-dd', width=20)
-        event_start_entry.grid(row=3, column=0, sticky="w", pady=(0, 10))
+        def build_date_picker(parent, row_index, label_text):
+            ttk.Label(parent, text=label_text).grid(row=row_index, column=0, sticky="w", pady=(0, 4))
 
-        ttk.Label(form_frame, text="Event End Date").grid(row=4, column=0, sticky="w", pady=(0, 4))
-        event_end_entry = DateEntry(form_frame, date_pattern='y-mm-dd', width=20)
-        event_end_entry.grid(row=5, column=0, sticky="w", pady=(0, 12))
+            value = tk.StringVar(value=datetime.now().strftime('%Y-%m-%d'))
+            field_frame = ttk.Frame(parent, style="App.TFrame")
+            field_frame.grid(row=row_index + 1, column=0, sticky="w", pady=(0, 10))
+
+            date_entry = ttk.Entry(field_frame, textvariable=value, width=22)
+            date_entry.pack(side="left")
+
+            def open_calendar_popup():
+                popup = tk.Toplevel(create_event_window)
+                popup.title("Select Date")
+                popup.resizable(False, False)
+                popup.transient(create_event_window)
+
+                calendar = Calendar(popup, date_pattern='y-mm-dd', selectmode='day')
+                calendar.pack(padx=10, pady=10)
+
+                if value.get():
+                    try:
+                        calendar.selection_set(datetime.strptime(value.get(), '%Y-%m-%d').date())
+                    except ValueError:
+                        pass
+
+                def use_selected_date():
+                    value.set(calendar.get_date())
+                    popup.destroy()
+
+                ttk.Button(popup, text="Use Date", command=use_selected_date, style="Primary.TButton").pack(pady=(0, 10))
+
+                popup.update_idletasks()
+                popup_width = popup.winfo_width()
+                popup_height = popup.winfo_height()
+                popup_x = create_event_window.winfo_x() + (create_event_window.winfo_width() // 2) - (popup_width // 2)
+                popup_y = create_event_window.winfo_y() + (create_event_window.winfo_height() // 2) - (popup_height // 2)
+                popup.geometry(f"{popup_width}x{popup_height}+{popup_x}+{popup_y}")
+                popup.grab_set()
+
+            ttk.Button(field_frame, text="📅", width=3, command=open_calendar_popup).pack(side="left", padx=(6, 0))
+            return value
+
+        event_start_value = build_date_picker(form_frame, 2, "Event Start Date")
+        event_end_value = build_date_picker(form_frame, 4, "Event End Date")
 
         def create_event():
             event_name = event_name_entry.get()
-            event_start = event_start_entry.get_date().strftime('%Y-%m-%d')
-            event_end = event_end_entry.get_date().strftime('%Y-%m-%d')
+            event_start = event_start_value.get()
+            event_end = event_end_value.get()
 
             confirm = messagebox.askyesno(
                 "Confirm Event Creation",
