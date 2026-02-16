@@ -1563,25 +1563,23 @@ def update_reset_audio_label(reset_audio_label, file_path):
 # Function to select the chunk alert audio file
 def select_chunk_alert_sound(chunk_alert_label, settings_window):
     initial_dir = os.path.expandvars(r"%localappdata%/mystats/sound files/")
-    settings_window.attributes('-topmost', False)  # Temporarily remove topmost attribute
     file_path = tk.filedialog.askopenfilename(initialdir=initial_dir, title="Select Sound File",
                                               filetypes=[("Audio Files", "*.mp3;*.wav;*.ogg")])
-    settings_window.attributes('-topmost', True)  # Restore topmost attribute
     if file_path:
         update_chunk_alert_audio_label(chunk_alert_label, file_path)
-        settings_window.lift()  # Bring settings window back to the front
+        settings_window.lift()
+        settings_window.focus_force()
 
 
 # Function to select the reset audio file
 def select_reset_audio_sound(reset_audio_label, settings_window):
     initial_dir = os.path.expandvars(r"%localappdata%\\mystats\\sound files\\")
-    settings_window.attributes('-topmost', False)  # Temporarily remove topmost attribute
     file_path = tk.filedialog.askopenfilename(initialdir=initial_dir, title="Select Sound File",
                                               filetypes=[("Audio Files", "*.mp3;*.wav;*.ogg")])
-    settings_window.attributes('-topmost', True)  # Restore topmost attribute
     if file_path:
         update_reset_audio_label(reset_audio_label, file_path)
-        settings_window.lift()  # Bring settings window back to the front
+        settings_window.lift()
+        settings_window.focus_force()
 
 
 def play_audio_file(filename, device_name=None):
@@ -1615,7 +1613,7 @@ def open_settings_window():
     settings_window = tk.Toplevel(root)
     settings_window.title("Settings")
     settings_window.transient(root)
-    settings_window.attributes('-topmost', True)
+    settings_window.attributes('-topmost', False)
 
     window_width = 760
     window_height = 700
