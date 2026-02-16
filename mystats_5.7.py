@@ -708,6 +708,8 @@ def _ensure_user_cycle_record(session, username, display_name, min_place, max_pl
             'total_races': 0,
             'current_cycle_races': 0,
             'last_cycle_races': 0,
+            'fastest_cycle_races': 0,
+            'slowest_cycle_races': 0,
             'last_cycle_completed_at': None,
         }
         stats[username] = user_record
@@ -720,6 +722,8 @@ def _ensure_user_cycle_record(session, username, display_name, min_place, max_pl
     user_record.setdefault('total_races', 0)
     user_record.setdefault('current_cycle_races', 0)
     user_record.setdefault('last_cycle_races', 0)
+    user_record.setdefault('fastest_cycle_races', 0)
+    user_record.setdefault('slowest_cycle_races', 0)
     user_record.setdefault('last_cycle_completed_at', None)
 
     if display_name:
@@ -771,8 +775,15 @@ def update_mycycle_with_race_rows(racedata):
 
                 unique_needed = settings['max_place'] - settings['min_place'] + 1
                 if len(hits) >= unique_needed:
+                    completed_in_races = user_record['current_cycle_races']
                     user_record['cycles_completed'] += 1
-                    user_record['last_cycle_races'] = user_record['current_cycle_races']
+                    user_record['last_cycle_races'] = completed_in_races
+                    fastest = int(user_record.get('fastest_cycle_races', 0) or 0)
+                    slowest = int(user_record.get('slowest_cycle_races', 0) or 0)
+                    if fastest <= 0 or completed_in_races < fastest:
+                        user_record['fastest_cycle_races'] = completed_in_races
+                    if slowest <= 0 or completed_in_races > slowest:
+                        user_record['slowest_cycle_races'] = completed_in_races
                     user_record['last_cycle_completed_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                     completion_events.append({
                         'session_name': session.get('name', 'Unknown Session'),
@@ -817,6 +828,185 @@ def get_mycycle_leaderboard(limit=200):
         })
     leaderboard.sort(key=lambda r: (r['cycles_completed'], r['progress_hits'], -r['current_cycle_races']), reverse=True)
     return session, leaderboard[:limit]
+
+
+def get_mycycle_cycle_stats(session_query=None):
+    with MYCYCLE_LOCK:
+        data = load_mycycle_data()
+        default_id = ensure_default_mycycle_session(data)
+        save_mycycle_data(data)
+
+    sessions = data.get('sessions', {})
+    selected_session_ids = []
+    label = ""
+
+    if session_query:
+        query = session_query.strip().lower()
+        if query == "all":
+            selected_session_ids = [sid for sid, session in sessions.items() if session.get('active', True)]
+            label = "Active Sessions"
+        else:
+            for sid, session in sessions.items():
+                if session.get('name', '').strip().lower() == query or sid.lower() == query:
+                    selected_session_ids = [sid]
+                    label = session.get('name', sid)
+                    break
+    else:
+        selected_session_ids = [sid for sid, session in sessions.items() if session.get('active', True)]
+        if not selected_session_ids and default_id in sessions:
+            selected_session_ids = [default_id]
+        label = "Global Active Sessions"
+
+    if not selected_session_ids:
+        return None
+
+    cycle_settings = get_mycycle_settings()
+    progress_total = max(1, cycle_settings['max_place'] - cycle_settings['min_place'] + 1)
+
+    fastest = None
+    slowest = None
+    completed_cycles_total = 0
+    racers_with_cycles = set()
+    total_races_for_cycled = 0
+    cycle_rate_leader = None
+    near_cycle_leader = None
+    consistency_leader = None
+
+    for sid in selected_session_ids:
+        session = sessions.get(sid, {})
+        stats = session.get('stats', {})
+        for username, record in stats.items():
+            cycles_completed = int(record.get('cycles_completed', 0) or 0)
+            completed_cycles_total += cycles_completed
+            total_races = int(record.get('total_races', 0) or 0)
+            progress_hits = len(set(record.get('current_hits', [])))
+            current_cycle_races = int(record.get('current_cycle_races', 0) or 0)
+
+            display_name = record.get('display_name') or username
+
+            near_row = {
+                'name': display_name,
+                'hits': progress_hits,
+                'needed': progress_total,
+                'races': current_cycle_races,
+            }
+            if near_cycle_leader is None or (near_row['hits'], -near_row['races']) > (near_cycle_leader['hits'], -near_cycle_leader['races']):
+                near_cycle_leader = near_row
+
+            if cycles_completed <= 0:
+                continue
+
+            racers_with_cycles.add(f"{sid}:{username}")
+            total_races_for_cycled += total_races
+
+            fastest_races = int(record.get('fastest_cycle_races', 0) or 0)
+            if fastest_races <= 0:
+                fastest_races = int(record.get('last_cycle_races', 0) or 0)
+
+            slowest_races = int(record.get('slowest_cycle_races', 0) or 0)
+            if slowest_races <= 0:
+                slowest_races = int(record.get('last_cycle_races', 0) or 0)
+
+            if fastest_races > 0:
+                row = {
+                    'name': display_name,
+                    'races': fastest_races,
+                    'session_name': session.get('name', sid),
+                }
+                if fastest is None or row['races'] < fastest['races']:
+                    fastest = row
+
+            if slowest_races > 0:
+                row = {
+                    'name': display_name,
+                    'races': slowest_races,
+                    'session_name': session.get('name', sid),
+                }
+                if slowest is None or row['races'] > slowest['races']:
+                    slowest = row
+
+            if total_races > 0:
+                rate = (cycles_completed / total_races) * 100.0
+                rate_row = {
+                    'name': display_name,
+                    'rate': rate,
+                    'cycles': cycles_completed,
+                }
+                if cycle_rate_leader is None or rate_row['rate'] > cycle_rate_leader['rate']:
+                    cycle_rate_leader = rate_row
+
+            if cycles_completed >= 2 and fastest_races > 0 and slowest_races > 0:
+                spread = slowest_races - fastest_races
+                consistency_row = {
+                    'name': display_name,
+                    'spread': spread,
+                    'cycles': cycles_completed,
+                }
+                if consistency_leader is None or consistency_row['spread'] < consistency_leader['spread']:
+                    consistency_leader = consistency_row
+
+    avg_races_per_cycle = 0.0
+    if completed_cycles_total > 0 and total_races_for_cycled > 0:
+        avg_races_per_cycle = total_races_for_cycled / completed_cycles_total
+
+    return {
+        'label': label,
+        'session_count': len(selected_session_ids),
+        'cycles_total': completed_cycles_total,
+        'racers_with_cycles': len(racers_with_cycles),
+        'fastest': fastest,
+        'slowest': slowest,
+        'avg_races_per_cycle': avg_races_per_cycle,
+        'cycle_rate_leader': cycle_rate_leader,
+        'near_cycle_leader': near_cycle_leader,
+        'consistency_leader': consistency_leader,
+    }
+
+
+def get_next_cyclestats_metric_key():
+    metric_keys = [
+        'avg_races_per_cycle',
+        'cycle_rate_leader',
+        'near_cycle_leader',
+        'consistency_leader',
+    ]
+
+    try:
+        current_index = int(config.get_setting('mycycle_cyclestats_rotation_index') or 0)
+    except (TypeError, ValueError):
+        current_index = 0
+
+    key = metric_keys[current_index % len(metric_keys)]
+    next_index = (current_index + 1) % len(metric_keys)
+    config.set_setting('mycycle_cyclestats_rotation_index', str(next_index), persistent=True)
+    return key
+
+
+def format_rotating_cyclestats_metric(metric_key, stats):
+    if metric_key == 'avg_races_per_cycle':
+        if stats.get('cycles_total', 0) <= 0:
+            return "AvgCycle: n/a"
+        return f"AvgCycle: {stats.get('avg_races_per_cycle', 0.0):.1f} races"
+
+    if metric_key == 'cycle_rate_leader':
+        leader = stats.get('cycle_rate_leader')
+        if not leader:
+            return "BestRate: n/a"
+        return f"BestRate: {leader['name']} {leader['rate']:.2f}/100r"
+
+    if metric_key == 'near_cycle_leader':
+        leader = stats.get('near_cycle_leader')
+        if not leader:
+            return "NearCycle: n/a"
+        return f"NearCycle: {leader['name']} {leader['hits']}/{leader['needed']}"
+
+    if metric_key == 'consistency_leader':
+        leader = stats.get('consistency_leader')
+        if not leader:
+            return "Consistency: n/a"
+        return f"Consistency: {leader['name']} ±{leader['spread']}r"
+
+    return "Extra: n/a"
 
 
 def open_mycycle_leaderboard_window(parent_window):
@@ -2491,7 +2681,8 @@ class ConfigManager:
                                 'season_quest_complete_points', 'season_quest_complete_race_hs', 'season_quest_complete_br_hs',
                                 'rivals_enabled', 'rivals_min_races', 'rivals_max_point_gap', 'rivals_pair_count',
                                 'mycycle_enabled', 'mycycle_announcements_enabled', 'mycycle_include_br',
-                                'mycycle_min_place', 'mycycle_max_place', 'mycycle_primary_session_id'}
+                                'mycycle_min_place', 'mycycle_max_place', 'mycycle_primary_session_id',
+                                'mycycle_cyclestats_rotation_index'}
         self.transient_keys = set([])
         self.defaults = {
             'chat_br_results': 'True',
@@ -2525,6 +2716,7 @@ class ConfigManager:
             'mycycle_include_br': 'False',
             'mycycle_min_place': '1',
             'mycycle_max_place': '10',
+            'mycycle_cyclestats_rotation_index': '0',
             'UI_THEME': DEFAULT_UI_THEME,
             'announcedelay': 'False',
             'announcedelayseconds': '0',
@@ -3711,6 +3903,45 @@ class Bot(commands.Bot):
             message += f" | Missing: {','.join(missing)}"
 
         await ctx.channel.send(message)
+
+    @commands.command(name='cyclestats')
+    async def cyclestats_command(self, ctx, session_name: str = None):
+        if not is_chat_response_enabled('mycycle_enabled'):
+            await ctx.channel.send("MyCycle tracking is currently disabled.")
+            return
+
+        stats = get_mycycle_cycle_stats(session_name)
+        if not stats:
+            await ctx.channel.send("No MyCycle sessions found. Try !cyclestats all")
+            return
+
+        fastest = stats.get('fastest')
+        slowest = stats.get('slowest')
+        if not fastest and not slowest:
+            await ctx.channel.send(
+                f"🔁 CycleStats [{stats['label']}] | No completed cycles yet."
+            )
+            return
+
+        fastest_text = (
+            f"{fastest['name']} ({fastest['races']} races)"
+            if fastest else
+            "n/a"
+        )
+        slowest_text = (
+            f"{slowest['name']} ({slowest['races']} races)"
+            if slowest else
+            "n/a"
+        )
+
+        rotating_metric_key = get_next_cyclestats_metric_key()
+        rotating_metric_text = format_rotating_cyclestats_metric(rotating_metric_key, stats)
+
+        await ctx.channel.send(
+            f"🔁 CycleStats [{stats['label']}] | Fastest: {fastest_text} | "
+            f"Slowest: {slowest_text} | {rotating_metric_text} | "
+            f"Total cycles: {stats['cycles_total']}"
+        )
 
     @commands.command(name='myquests')
     async def myquests_command(self, ctx, username: str = None):
