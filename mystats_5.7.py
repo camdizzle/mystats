@@ -445,7 +445,7 @@ def get_global_rivalries(limit=None):
 
     qualified = [
         (username, stats) for username, stats in user_stats.items()
-        if stats.get('races', 0) >= settings['min_races']
+        if stats.get('races', 0) >= settings['min_races'] and stats.get('points', 0) > 0
     ]
 
     rivalries = []
@@ -481,7 +481,7 @@ def get_user_rivals(username, limit=5):
         return None
 
     base = user_stats[user_key]
-    if base.get('races', 0) < settings['min_races']:
+    if base.get('races', 0) < settings['min_races'] or base.get('points', 0) <= 0:
         return {
             'user': user_key,
             'display_name': base.get('display_name') or user_key,
@@ -496,6 +496,8 @@ def get_user_rivals(username, limit=5):
         if other_key == user_key:
             continue
         if other_stats.get('races', 0) < settings['min_races']:
+            continue
+        if other_stats.get('points', 0) <= 0:
             continue
 
         gap = abs(base.get('points', 0) - other_stats.get('points', 0))
