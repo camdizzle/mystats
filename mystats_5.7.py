@@ -569,6 +569,487 @@ def open_rivalries_window(parent_window):
     scrollbar.pack(side="right", fill="y", padx=(0, 12), pady=(0, 12))
 
 
+MYCYCLE_FILE_NAME = "mycycle_data.json"
+MYCYCLE_SESSION_PREFIX = "season_"
+MYCYCLE_LOCK = threading.Lock()
+
+
+def _mycycle_file_path():
+    base_dir = config.get_setting('directory') or os.getcwd()
+    return os.path.join(base_dir, MYCYCLE_FILE_NAME)
+
+
+def _empty_placement_counts(min_place, max_place):
+    return {str(i): 0 for i in range(min_place, max_place + 1)}
+
+
+def get_mycycle_settings():
+    min_place = max(1, get_int_setting('mycycle_min_place', 1))
+    max_place = min(10, get_int_setting('mycycle_max_place', 10))
+    if min_place > max_place:
+        min_place, max_place = 1, 10
+    return {
+        'enabled': is_chat_response_enabled('mycycle_enabled'),
+        'announce': is_chat_response_enabled('mycycle_announcements_enabled'),
+        'include_br': is_chat_response_enabled('mycycle_include_br'),
+        'min_place': min_place,
+        'max_place': max_place,
+    }
+
+
+def load_mycycle_data():
+    path = _mycycle_file_path()
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        data = {'version': 1, 'sessions': {}}
+
+    if not isinstance(data, dict):
+        data = {'version': 1, 'sessions': {}}
+    data.setdefault('version', 1)
+    data.setdefault('sessions', {})
+    return data
+
+
+def save_mycycle_data(data):
+    path = _mycycle_file_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    temp_file = f"{path}.tmp"
+    with open(temp_file, 'w', encoding='utf-8') as f:
+        json.dump(data, f, indent=2)
+    os.replace(temp_file, path)
+
+
+def ensure_default_mycycle_session(data):
+    season = str(config.get_setting('season') or 'unknown')
+    session_id = f"{MYCYCLE_SESSION_PREFIX}{season}"
+    now_text = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    sessions = data.setdefault('sessions', {})
+    if session_id not in sessions:
+        sessions[session_id] = {
+            'id': session_id,
+            'name': f"Season {season}",
+            'season': season,
+            'active': True,
+            'is_default': True,
+            'created_at': now_text,
+            'created_by': 'system',
+            'stats': {},
+        }
+
+    if not config.get_setting('mycycle_primary_session_id'):
+        config.set_setting('mycycle_primary_session_id', session_id, persistent=True)
+    return session_id
+
+
+def get_mycycle_sessions(include_inactive=True):
+    with MYCYCLE_LOCK:
+        data = load_mycycle_data()
+        default_id = ensure_default_mycycle_session(data)
+        save_mycycle_data(data)
+    sessions = list(data.get('sessions', {}).values())
+    sessions.sort(key=lambda s: (not s.get('is_default', False), s.get('name', '').lower()))
+    if include_inactive:
+        return sessions, default_id
+    return [s for s in sessions if s.get('active', True)], default_id
+
+
+def create_mycycle_session(session_name, created_by='streamer'):
+    with MYCYCLE_LOCK:
+        data = load_mycycle_data()
+        ensure_default_mycycle_session(data)
+        now_text = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        season = str(config.get_setting('season') or 'unknown')
+        session_id = f"custom_{uuid.uuid4().hex[:8]}"
+        data['sessions'][session_id] = {
+            'id': session_id,
+            'name': session_name.strip(),
+            'season': season,
+            'active': True,
+            'is_default': False,
+            'created_at': now_text,
+            'created_by': created_by,
+            'stats': {},
+        }
+        save_mycycle_data(data)
+    return session_id
+
+
+def _resolve_session_id(data):
+    primary_id = config.get_setting('mycycle_primary_session_id')
+    sessions = data.get('sessions', {})
+    if primary_id and primary_id in sessions:
+        return primary_id
+    return ensure_default_mycycle_session(data)
+
+
+def _resolve_user_in_session(session_stats, username):
+    lookup = (username or '').strip().lower().lstrip('@')
+    if not lookup:
+        return None
+    if lookup in session_stats:
+        return lookup
+    for uname, stats in session_stats.items():
+        if (stats.get('display_name') or '').strip().lower() == lookup:
+            return uname
+    return None
+
+
+def _ensure_user_cycle_record(session, username, display_name, min_place, max_place):
+    stats = session.setdefault('stats', {})
+    user_record = stats.get(username)
+    if user_record is None:
+        user_record = {
+            'display_name': display_name or username,
+            'placements': _empty_placement_counts(min_place, max_place),
+            'current_hits': [],
+            'cycles_completed': 0,
+            'total_races': 0,
+            'current_cycle_races': 0,
+            'last_cycle_races': 0,
+            'fastest_cycle_races': 0,
+            'slowest_cycle_races': 0,
+            'last_cycle_completed_at': None,
+        }
+        stats[username] = user_record
+
+    user_record.setdefault('placements', _empty_placement_counts(min_place, max_place))
+    for i in range(min_place, max_place + 1):
+        user_record['placements'].setdefault(str(i), 0)
+    user_record.setdefault('current_hits', [])
+    user_record.setdefault('cycles_completed', 0)
+    user_record.setdefault('total_races', 0)
+    user_record.setdefault('current_cycle_races', 0)
+    user_record.setdefault('last_cycle_races', 0)
+    user_record.setdefault('fastest_cycle_races', 0)
+    user_record.setdefault('slowest_cycle_races', 0)
+    user_record.setdefault('last_cycle_completed_at', None)
+
+    if display_name:
+        user_record['display_name'] = display_name
+    return user_record
+
+
+def update_mycycle_with_race_rows(racedata):
+    settings = get_mycycle_settings()
+    if not settings['enabled']:
+        return []
+
+    completion_events = []
+    with MYCYCLE_LOCK:
+        data = load_mycycle_data()
+        ensure_default_mycycle_session(data)
+        sessions = [s for s in data.get('sessions', {}).values() if s.get('active', True)]
+
+        for session in sessions:
+            for row in racedata:
+                if len(row) < 5:
+                    continue
+                race_type = row[4]
+                if race_type != 'Race' and not (settings['include_br'] and race_type == 'BR'):
+                    continue
+
+                try:
+                    placement = int(row[0])
+                except (TypeError, ValueError):
+                    continue
+
+                if placement < settings['min_place'] or placement > settings['max_place']:
+                    continue
+
+                username = (row[1] or '').strip().lower()
+                if not username:
+                    continue
+
+                display_name = (row[2] or '').strip() if len(row) > 2 else username
+                user_record = _ensure_user_cycle_record(session, username, display_name, settings['min_place'], settings['max_place'])
+
+                user_record['total_races'] += 1
+                user_record['current_cycle_races'] += 1
+                user_record['placements'][str(placement)] += 1
+
+                hits = set(user_record.get('current_hits', []))
+                hits.add(placement)
+                user_record['current_hits'] = sorted(hits)
+
+                unique_needed = settings['max_place'] - settings['min_place'] + 1
+                if len(hits) >= unique_needed:
+                    completed_in_races = user_record['current_cycle_races']
+                    user_record['cycles_completed'] += 1
+                    user_record['last_cycle_races'] = completed_in_races
+                    fastest = int(user_record.get('fastest_cycle_races', 0) or 0)
+                    slowest = int(user_record.get('slowest_cycle_races', 0) or 0)
+                    if fastest <= 0 or completed_in_races < fastest:
+                        user_record['fastest_cycle_races'] = completed_in_races
+                    if slowest <= 0 or completed_in_races > slowest:
+                        user_record['slowest_cycle_races'] = completed_in_races
+                    user_record['last_cycle_completed_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    completion_events.append({
+                        'session_name': session.get('name', 'Unknown Session'),
+                        'username': username,
+                        'display_name': user_record.get('display_name') or username,
+                        'cycles_completed': user_record['cycles_completed'],
+                        'races_used': user_record['last_cycle_races'],
+                    })
+                    user_record['current_hits'] = []
+                    user_record['current_cycle_races'] = 0
+
+        save_mycycle_data(data)
+    return completion_events
+
+
+def get_mycycle_progress(username=None):
+    with MYCYCLE_LOCK:
+        data = load_mycycle_data()
+        session_id = _resolve_session_id(data)
+        save_mycycle_data(data)
+
+    session = data['sessions'].get(session_id, {})
+    stats = session.get('stats', {})
+    target_user = _resolve_user_in_session(stats, username) if username else None
+    return session, stats, target_user
+
+
+def get_mycycle_leaderboard(limit=200):
+    session, stats, _ = get_mycycle_progress()
+    leaderboard = []
+    settings = get_mycycle_settings()
+    for username, row in stats.items():
+        hits = set(row.get('current_hits', []))
+        leaderboard.append({
+            'username': username,
+            'display_name': row.get('display_name') or username,
+            'cycles_completed': int(row.get('cycles_completed', 0)),
+            'progress_hits': len(hits),
+            'progress_total': settings['max_place'] - settings['min_place'] + 1,
+            'current_cycle_races': int(row.get('current_cycle_races', 0)),
+            'last_cycle_races': int(row.get('last_cycle_races', 0)),
+        })
+    leaderboard.sort(key=lambda r: (r['cycles_completed'], r['progress_hits'], -r['current_cycle_races']), reverse=True)
+    return session, leaderboard[:limit]
+
+
+def get_mycycle_cycle_stats(session_query=None):
+    with MYCYCLE_LOCK:
+        data = load_mycycle_data()
+        default_id = ensure_default_mycycle_session(data)
+        save_mycycle_data(data)
+
+    sessions = data.get('sessions', {})
+    selected_session_ids = []
+    label = ""
+
+    if session_query:
+        query = session_query.strip().lower()
+        if query == "all":
+            selected_session_ids = [sid for sid, session in sessions.items() if session.get('active', True)]
+            label = "Active Sessions"
+        else:
+            for sid, session in sessions.items():
+                if session.get('name', '').strip().lower() == query or sid.lower() == query:
+                    selected_session_ids = [sid]
+                    label = session.get('name', sid)
+                    break
+    else:
+        selected_session_ids = [sid for sid, session in sessions.items() if session.get('active', True)]
+        if not selected_session_ids and default_id in sessions:
+            selected_session_ids = [default_id]
+        label = "Global Active Sessions"
+
+    if not selected_session_ids:
+        return None
+
+    cycle_settings = get_mycycle_settings()
+    progress_total = max(1, cycle_settings['max_place'] - cycle_settings['min_place'] + 1)
+
+    fastest = None
+    slowest = None
+    completed_cycles_total = 0
+    racers_with_cycles = set()
+    total_races_for_cycled = 0
+    cycle_rate_leader = None
+    near_cycle_leader = None
+    consistency_leader = None
+
+    for sid in selected_session_ids:
+        session = sessions.get(sid, {})
+        stats = session.get('stats', {})
+        for username, record in stats.items():
+            cycles_completed = int(record.get('cycles_completed', 0) or 0)
+            completed_cycles_total += cycles_completed
+            total_races = int(record.get('total_races', 0) or 0)
+            progress_hits = len(set(record.get('current_hits', [])))
+            current_cycle_races = int(record.get('current_cycle_races', 0) or 0)
+
+            display_name = record.get('display_name') or username
+
+            near_row = {
+                'name': display_name,
+                'hits': progress_hits,
+                'needed': progress_total,
+                'races': current_cycle_races,
+            }
+            if near_cycle_leader is None or (near_row['hits'], -near_row['races']) > (near_cycle_leader['hits'], -near_cycle_leader['races']):
+                near_cycle_leader = near_row
+
+            if cycles_completed <= 0:
+                continue
+
+            racers_with_cycles.add(f"{sid}:{username}")
+            total_races_for_cycled += total_races
+
+            fastest_races = int(record.get('fastest_cycle_races', 0) or 0)
+            if fastest_races <= 0:
+                fastest_races = int(record.get('last_cycle_races', 0) or 0)
+
+            slowest_races = int(record.get('slowest_cycle_races', 0) or 0)
+            if slowest_races <= 0:
+                slowest_races = int(record.get('last_cycle_races', 0) or 0)
+
+            if fastest_races > 0:
+                row = {
+                    'name': display_name,
+                    'races': fastest_races,
+                    'session_name': session.get('name', sid),
+                }
+                if fastest is None or row['races'] < fastest['races']:
+                    fastest = row
+
+            if slowest_races > 0:
+                row = {
+                    'name': display_name,
+                    'races': slowest_races,
+                    'session_name': session.get('name', sid),
+                }
+                if slowest is None or row['races'] > slowest['races']:
+                    slowest = row
+
+            if total_races > 0:
+                rate = (cycles_completed / total_races) * 100.0
+                rate_row = {
+                    'name': display_name,
+                    'rate': rate,
+                    'cycles': cycles_completed,
+                }
+                if cycle_rate_leader is None or rate_row['rate'] > cycle_rate_leader['rate']:
+                    cycle_rate_leader = rate_row
+
+            if cycles_completed >= 2 and fastest_races > 0 and slowest_races > 0:
+                spread = slowest_races - fastest_races
+                consistency_row = {
+                    'name': display_name,
+                    'spread': spread,
+                    'cycles': cycles_completed,
+                }
+                if consistency_leader is None or consistency_row['spread'] < consistency_leader['spread']:
+                    consistency_leader = consistency_row
+
+    avg_races_per_cycle = 0.0
+    if completed_cycles_total > 0 and total_races_for_cycled > 0:
+        avg_races_per_cycle = total_races_for_cycled / completed_cycles_total
+
+    return {
+        'label': label,
+        'session_count': len(selected_session_ids),
+        'cycles_total': completed_cycles_total,
+        'racers_with_cycles': len(racers_with_cycles),
+        'fastest': fastest,
+        'slowest': slowest,
+        'avg_races_per_cycle': avg_races_per_cycle,
+        'cycle_rate_leader': cycle_rate_leader,
+        'near_cycle_leader': near_cycle_leader,
+        'consistency_leader': consistency_leader,
+    }
+
+
+def get_next_cyclestats_metric_key():
+    metric_keys = [
+        'avg_races_per_cycle',
+        'cycle_rate_leader',
+        'near_cycle_leader',
+        'consistency_leader',
+    ]
+
+    try:
+        current_index = int(config.get_setting('mycycle_cyclestats_rotation_index') or 0)
+    except (TypeError, ValueError):
+        current_index = 0
+
+    key = metric_keys[current_index % len(metric_keys)]
+    next_index = (current_index + 1) % len(metric_keys)
+    config.set_setting('mycycle_cyclestats_rotation_index', str(next_index), persistent=True)
+    return key
+
+
+def format_rotating_cyclestats_metric(metric_key, stats):
+    if metric_key == 'avg_races_per_cycle':
+        if stats.get('cycles_total', 0) <= 0:
+            return "AvgCycle: n/a"
+        return f"AvgCycle: {stats.get('avg_races_per_cycle', 0.0):.1f} races"
+
+    if metric_key == 'cycle_rate_leader':
+        leader = stats.get('cycle_rate_leader')
+        if not leader:
+            return "BestRate: n/a"
+        return f"BestRate: {leader['name']} {leader['rate']:.2f}/100r"
+
+    if metric_key == 'near_cycle_leader':
+        leader = stats.get('near_cycle_leader')
+        if not leader:
+            return "NearCycle: n/a"
+        return f"NearCycle: {leader['name']} {leader['hits']}/{leader['needed']}"
+
+    if metric_key == 'consistency_leader':
+        leader = stats.get('consistency_leader')
+        if not leader:
+            return "Consistency: n/a"
+        return f"Consistency: {leader['name']} ±{leader['spread']}r"
+
+    return "Extra: n/a"
+
+
+def open_mycycle_leaderboard_window(parent_window):
+    session, leaderboard = get_mycycle_leaderboard(limit=500)
+    if not leaderboard:
+        messagebox.showinfo("MyCycle", "No cycle data yet for the selected session.")
+        return
+
+    popup = tk.Toplevel(parent_window)
+    popup.title("MyCycle Leaderboard")
+    popup.transient(parent_window)
+    popup.attributes('-topmost', True)
+    center_toplevel(popup, 840, 540)
+
+    ttk.Label(popup, text=f"Session: {session.get('name', 'Unknown')}", style="Small.TLabel").pack(anchor="w", padx=12, pady=(10, 4))
+    columns = ("rank", "user", "cycles", "progress", "cycle_races", "last_cycle")
+    tree = ttk.Treeview(popup, columns=columns, show="headings", height=20)
+    for col, text in (("rank", "#"), ("user", "User"), ("cycles", "Cycles"), ("progress", "Current Progress"), ("cycle_races", "Races in Current Cycle"), ("last_cycle", "Races in Last Completed Cycle")):
+        tree.heading(col, text=text)
+
+    tree.column("rank", width=50, anchor="center")
+    tree.column("user", width=200, anchor="w")
+    tree.column("cycles", width=80, anchor="center")
+    tree.column("progress", width=140, anchor="center")
+    tree.column("cycle_races", width=180, anchor="center")
+    tree.column("last_cycle", width=210, anchor="center")
+
+    for idx, row in enumerate(leaderboard, start=1):
+        tree.insert("", "end", values=(
+            idx,
+            row['display_name'],
+            row['cycles_completed'],
+            f"{row['progress_hits']}/{row['progress_total']}",
+            row['current_cycle_races'],
+            row['last_cycle_races'],
+        ))
+
+    scrollbar = ttk.Scrollbar(popup, orient="vertical", command=tree.yview)
+    tree.configure(yscrollcommand=scrollbar.set)
+    tree.pack(side="left", fill="both", expand=True, padx=(12, 0), pady=(0, 12))
+    scrollbar.pack(side="right", fill="y", padx=(0, 12), pady=(0, 12))
+
+
 async def send_chat_message(channel, message, category=None, apply_delay=False):
     category_map = {
         "br": "chat_br_results",
@@ -1152,6 +1633,7 @@ def open_settings_window():
     chat_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
     season_quests_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
     rivals_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
+    mycycle_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
     appearance_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
 
     notebook.add(general_tab, text="General")
@@ -1159,6 +1641,7 @@ def open_settings_window():
     notebook.add(chat_tab, text="Chat")
     notebook.add(season_quests_tab, text="Season Quests")
     notebook.add(rivals_tab, text="Rivals")
+    notebook.add(mycycle_tab, text="MyCycle")
     notebook.add(appearance_tab, text="Appearance")
 
     # --- General tab ---
@@ -1375,6 +1858,80 @@ def open_settings_window():
 
     ttk.Button(rivals_tab, text="View Rivalries", command=lambda: open_rivalries_window(settings_window)).grid(row=5, column=0, sticky="w", pady=(8, 0))
 
+    # --- MyCycle tab ---
+    ttk.Label(mycycle_tab, text="Track placement cycles (positions 1-10) and custom sessions", style="Small.TLabel").grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 8))
+
+    mycycle_enabled_var = tk.BooleanVar(value=is_chat_response_enabled("mycycle_enabled"))
+    mycycle_announce_var = tk.BooleanVar(value=is_chat_response_enabled("mycycle_announcements_enabled"))
+    mycycle_include_br_var = tk.BooleanVar(value=is_chat_response_enabled("mycycle_include_br"))
+
+    ttk.Checkbutton(mycycle_tab, text="Enable MyCycle tracking", variable=mycycle_enabled_var).grid(row=1, column=0, sticky="w", pady=(0, 4), columnspan=3)
+    ttk.Checkbutton(mycycle_tab, text="Announce completed cycles in chat", variable=mycycle_announce_var).grid(row=2, column=0, sticky="w", pady=(0, 4), columnspan=3)
+    ttk.Checkbutton(mycycle_tab, text="Include BR placements in cycle tracking", variable=mycycle_include_br_var).grid(row=3, column=0, sticky="w", pady=(0, 10), columnspan=3)
+
+    ttk.Label(mycycle_tab, text="Minimum placement in cycle").grid(row=4, column=0, sticky="w", pady=(2, 4))
+    mycycle_min_place_entry = ttk.Entry(mycycle_tab, width=8, justify='center')
+    mycycle_min_place_entry.grid(row=4, column=1, sticky="w", pady=(2, 4))
+    mycycle_min_place_entry.insert(0, config.get_setting("mycycle_min_place") or "1")
+
+    ttk.Label(mycycle_tab, text="Maximum placement in cycle").grid(row=5, column=0, sticky="w", pady=(2, 4))
+    mycycle_max_place_entry = ttk.Entry(mycycle_tab, width=8, justify='center')
+    mycycle_max_place_entry.grid(row=5, column=1, sticky="w", pady=(2, 4))
+    mycycle_max_place_entry.insert(0, config.get_setting("mycycle_max_place") or "10")
+
+    ttk.Label(mycycle_tab, text="Primary session for !mycycle", style="Small.TLabel").grid(row=6, column=0, sticky="w", pady=(10, 2))
+    session_options, default_session_id = get_mycycle_sessions(include_inactive=True)
+    session_names = {s['name']: s['id'] for s in session_options}
+    current_primary = config.get_setting('mycycle_primary_session_id') or default_session_id
+    current_primary_name = next((s['name'] for s in session_options if s['id'] == current_primary), session_options[0]['name'] if session_options else "")
+    selected_session_name = tk.StringVar(value=current_primary_name)
+    session_dropdown = ttk.Combobox(mycycle_tab, textvariable=selected_session_name, values=list(session_names.keys()), width=30, state="readonly")
+    session_dropdown.grid(row=6, column=1, sticky="w", pady=(10, 2), columnspan=2)
+
+    def refresh_session_dropdown(select_id=None):
+        sessions, default_id = get_mycycle_sessions(include_inactive=True)
+        if not sessions:
+            return
+        mapping = {s['name']: s['id'] for s in sessions}
+        session_names.clear()
+        session_names.update(mapping)
+        session_dropdown['values'] = list(mapping.keys())
+        target_id = select_id or config.get_setting('mycycle_primary_session_id') or default_id
+        target_name = next((s['name'] for s in sessions if s['id'] == target_id), sessions[0]['name'])
+        selected_session_name.set(target_name)
+
+    def create_cycle_session_prompt():
+        session_name = simpledialog.askstring("Create MyCycle Session", "Session name:", parent=settings_window)
+        if not session_name or not session_name.strip():
+            return
+        create_mycycle_session(session_name.strip(), created_by=config.get_setting("CHANNEL") or "streamer")
+        refresh_session_dropdown()
+
+    def toggle_selected_session():
+        selected_name = selected_session_name.get()
+        session_id = session_names.get(selected_name)
+        if not session_id:
+            return
+
+        with MYCYCLE_LOCK:
+            data = load_mycycle_data()
+            session = data.get('sessions', {}).get(session_id)
+            if not session:
+                return
+            if session.get('is_default'):
+                messagebox.showinfo("MyCycle", "Default season sessions cannot be toggled off.")
+                return
+            session['active'] = not session.get('active', True)
+            save_mycycle_data(data)
+
+        state_text = "active" if session.get('active', True) else "inactive"
+        messagebox.showinfo("MyCycle", f"Session '{selected_name}' is now {state_text}.")
+
+    ttk.Button(mycycle_tab, text="Create Session", command=create_cycle_session_prompt).grid(row=7, column=0, sticky="w", pady=(8, 0))
+    ttk.Button(mycycle_tab, text="Toggle Session Active", command=toggle_selected_session).grid(row=7, column=1, sticky="w", pady=(8, 0))
+    ttk.Button(mycycle_tab, text="View Leaderboard", command=lambda: open_mycycle_leaderboard_window(settings_window)).grid(row=7, column=2, sticky="w", pady=(8, 0))
+    ttk.Label(mycycle_tab, text="Tip: Streamers can create event-specific sessions and toggle them on/off at any time.", style="Small.TLabel").grid(row=8, column=0, columnspan=3, sticky="w", pady=(8, 0))
+
     # --- Appearance tab ---
     ttk.Label(appearance_tab, text="Theme and visual preferences", style="Small.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 8))
     ttk.Label(appearance_tab, text="UI Theme").grid(row=1, column=0, sticky="w", pady=(0, 4))
@@ -1423,6 +1980,13 @@ def open_settings_window():
         rivals_max_gap_entry.insert(0, "1500")
         rivals_pair_count_entry.delete(0, tk.END)
         rivals_pair_count_entry.insert(0, "25")
+        mycycle_enabled_var.set(True)
+        mycycle_announce_var.set(True)
+        mycycle_include_br_var.set(False)
+        mycycle_min_place_entry.delete(0, tk.END)
+        mycycle_min_place_entry.insert(0, "1")
+        mycycle_max_place_entry.delete(0, tk.END)
+        mycycle_max_place_entry.insert(0, "10")
         season_quest_races_entry.delete(0, tk.END)
         season_quest_races_entry.insert(0, "1000")
         season_quest_points_entry.delete(0, tk.END)
@@ -1470,6 +2034,14 @@ def open_settings_window():
         config.set_setting("rivals_min_races", rivals_min_races_entry.get(), persistent=True)
         config.set_setting("rivals_max_point_gap", rivals_max_gap_entry.get(), persistent=True)
         config.set_setting("rivals_pair_count", rivals_pair_count_entry.get(), persistent=True)
+        config.set_setting("mycycle_enabled", str(mycycle_enabled_var.get()), persistent=True)
+        config.set_setting("mycycle_announcements_enabled", str(mycycle_announce_var.get()), persistent=True)
+        config.set_setting("mycycle_include_br", str(mycycle_include_br_var.get()), persistent=True)
+        config.set_setting("mycycle_min_place", mycycle_min_place_entry.get(), persistent=True)
+        config.set_setting("mycycle_max_place", mycycle_max_place_entry.get(), persistent=True)
+        selected_session_id = session_names.get(selected_session_name.get())
+        if selected_session_id:
+            config.set_setting("mycycle_primary_session_id", selected_session_id, persistent=True)
         config.set_setting("chat_max_names", selected_max_names.get(), persistent=True)
         settings_window.destroy()
 
@@ -2107,7 +2679,10 @@ class ConfigManager:
                                 'season_quests_enabled', 'season_quest_target_races', 'season_quest_target_points',
                                 'season_quest_target_race_hs', 'season_quest_target_br_hs', 'season_quest_complete_races',
                                 'season_quest_complete_points', 'season_quest_complete_race_hs', 'season_quest_complete_br_hs',
-                                'rivals_enabled', 'rivals_min_races', 'rivals_max_point_gap', 'rivals_pair_count'}
+                                'rivals_enabled', 'rivals_min_races', 'rivals_max_point_gap', 'rivals_pair_count',
+                                'mycycle_enabled', 'mycycle_announcements_enabled', 'mycycle_include_br',
+                                'mycycle_min_place', 'mycycle_max_place', 'mycycle_primary_session_id',
+                                'mycycle_cyclestats_rotation_index'}
         self.transient_keys = set([])
         self.defaults = {
             'chat_br_results': 'True',
@@ -2136,6 +2711,12 @@ class ConfigManager:
             'rivals_min_races': '50',
             'rivals_max_point_gap': '1500',
             'rivals_pair_count': '25',
+            'mycycle_enabled': 'True',
+            'mycycle_announcements_enabled': 'True',
+            'mycycle_include_br': 'False',
+            'mycycle_min_place': '1',
+            'mycycle_max_place': '10',
+            'mycycle_cyclestats_rotation_index': '0',
             'UI_THEME': DEFAULT_UI_THEME,
             'announcedelay': 'False',
             'announcedelayseconds': '0',
@@ -2191,7 +2772,8 @@ class ConfigManager:
 
         if key in {"season_quest_target_races", "season_quest_target_points", "season_quest_target_race_hs", "season_quest_target_br_hs",
                    "rivals_min_races", "rivals_max_point_gap", "rivals_pair_count",
-                   "narrative_alert_cooldown_races", "narrative_alert_min_lead_change_points", "narrative_alert_max_items"}:
+                   "narrative_alert_cooldown_races", "narrative_alert_min_lead_change_points", "narrative_alert_max_items",
+                   "mycycle_min_place", "mycycle_max_place"}:
             if isinstance(value, int) or (isinstance(value, str) and value.isdigit()):
                 return True
             print(f"Invalid value for {key}: {value}. Value must be a whole number.")
@@ -2621,6 +3203,11 @@ def load_racer_data():
 def load_additional_settings():
     if config.get_setting('directory') in ['', None]:
         create_results_files()
+
+    with MYCYCLE_LOCK:
+        cycle_data = load_mycycle_data()
+        ensure_default_mycycle_session(cycle_data)
+        save_mycycle_data(cycle_data)
 
     load_race_hs_season = 0
     load_race_hs_today = 0
@@ -3281,6 +3868,79 @@ class Bot(commands.Bot):
             f"Race HS: {stats_a['race_hs']:,}-{stats_b['race_hs']:,} | "
             f"BR HS: {stats_a['br_hs']:,}-{stats_b['br_hs']:,} | "
             f"Leader: {leader_name} by {point_gap:,}"
+        )
+
+    @commands.command(name='mycycle')
+    async def mycycle_command(self, ctx, username: str = None):
+        if not is_chat_response_enabled('mycycle_enabled'):
+            await ctx.channel.send("MyCycle tracking is currently disabled.")
+            return
+
+        target_name = username or ctx.author.name
+        session, stats, target_user = get_mycycle_progress(target_name)
+        settings = get_mycycle_settings()
+
+        if not target_user or target_user not in stats:
+            await ctx.channel.send(
+                f"{target_name}: no MyCycle race data yet in session '{session.get('name', 'Unknown')}'."
+            )
+            return
+
+        record = stats[target_user]
+        hits = set(record.get('current_hits', []))
+        required_positions = list(range(settings['min_place'], settings['max_place'] + 1))
+        missing = [str(pos) for pos in required_positions if pos not in hits]
+        progress_text = f"{len(hits)}/{len(required_positions)}"
+        display_name = record.get('display_name') or target_user
+
+        message = (
+            f"🔁 {display_name} | Session: {session.get('name', 'Unknown')} | "
+            f"Cycles: {record.get('cycles_completed', 0)} | Progress: {progress_text} | "
+            f"Races this cycle: {record.get('current_cycle_races', 0)} | "
+            f"Last cycle races: {record.get('last_cycle_races', 0)}"
+        )
+        if missing:
+            message += f" | Missing: {','.join(missing)}"
+
+        await ctx.channel.send(message)
+
+    @commands.command(name='cyclestats')
+    async def cyclestats_command(self, ctx, session_name: str = None):
+        if not is_chat_response_enabled('mycycle_enabled'):
+            await ctx.channel.send("MyCycle tracking is currently disabled.")
+            return
+
+        stats = get_mycycle_cycle_stats(session_name)
+        if not stats:
+            await ctx.channel.send("No MyCycle sessions found. Try !cyclestats all")
+            return
+
+        fastest = stats.get('fastest')
+        slowest = stats.get('slowest')
+        if not fastest and not slowest:
+            await ctx.channel.send(
+                f"🔁 CycleStats [{stats['label']}] | No completed cycles yet."
+            )
+            return
+
+        fastest_text = (
+            f"{fastest['name']} ({fastest['races']} races)"
+            if fastest else
+            "n/a"
+        )
+        slowest_text = (
+            f"{slowest['name']} ({slowest['races']} races)"
+            if slowest else
+            "n/a"
+        )
+
+        rotating_metric_key = get_next_cyclestats_metric_key()
+        rotating_metric_text = format_rotating_cyclestats_metric(rotating_metric_key, stats)
+
+        await ctx.channel.send(
+            f"🔁 CycleStats [{stats['label']}] | Fastest: {fastest_text} | "
+            f"Slowest: {slowest_text} | {rotating_metric_text} | "
+            f"Total cycles: {stats['cycles_total']}"
         )
 
     @commands.command(name='myquests')
@@ -5095,6 +5755,14 @@ async def race(bot):
 
             config.set_setting('avgpointstoday', avgptstoday, persistent=False)
 
+            cycle_events = update_mycycle_with_race_rows(racedata)
+            if is_chat_response_enabled('mycycle_announcements_enabled'):
+                for event in cycle_events:
+                    messages.append(
+                        f"🔁 {event['display_name']} completed a MyCycle in {event['session_name']}! "
+                        f"Cycle #{event['cycles_completed']} took {event['races_used']} races."
+                    )
+
             messages.extend(get_season_quest_updates())
 
             channel = bot.get_channel(config.get_setting('CHANNEL'))
@@ -5533,6 +6201,16 @@ async def royale(bot):
                             pass
                         await send_chat_message(bot.channel, message, category="br")
                         write_overlays()
+
+                    cycle_events = update_mycycle_with_race_rows(brdata)
+                    if is_chat_response_enabled('mycycle_announcements_enabled'):
+                        for event in cycle_events:
+                            await send_chat_message(
+                                bot.channel,
+                                f"🔁 {event['display_name']} completed a MyCycle in {event['session_name']}! "
+                                f"Cycle #{event['cycles_completed']} took {event['races_used']} races.",
+                                category="br"
+                            )
 
                     for quest_message in get_season_quest_updates():
                         await send_chat_message(bot.channel, quest_message, category="br")
