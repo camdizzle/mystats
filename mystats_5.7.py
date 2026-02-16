@@ -1411,21 +1411,11 @@ def open_events_window():
 
     def open_create_event_window():
         events_window.destroy()
-        root.update_idletasks()
-        root_width = root.winfo_width()
-        root_height = root.winfo_height()
-        root_x = root.winfo_x()
-        root_y = root.winfo_y()
 
         create_event_window = tk.Toplevel(root)
         create_event_window.title("Create Event")
-        create_event_window.geometry("300x300")
-
-        window_width = 300
-        window_height = 300
-        window_x = root_x + (root_width // 2) - (window_width // 2)
-        window_y = root_y + (root_height // 2) - (window_height // 2)
-        create_event_window.geometry(f"{window_width}x{window_height}+{window_x}+{window_y}")
+        create_event_window.resizable(False, False)
+        center_toplevel(create_event_window, 420, 320)
 
         def on_create_event_close():
             create_event_window.destroy()
@@ -1433,17 +1423,20 @@ def open_events_window():
 
         create_event_window.protocol("WM_DELETE_WINDOW", on_create_event_close)
 
-        tk.Label(create_event_window, text="Event Name").pack(pady=5)
-        event_name_entry = tk.Entry(create_event_window)
-        event_name_entry.pack(pady=5)
+        form_frame = ttk.Frame(create_event_window, style="App.TFrame", padding=(12, 10))
+        form_frame.pack(fill="both", expand=True)
 
-        tk.Label(create_event_window, text="Event Start Date").pack(pady=5)
-        event_start_entry = DateEntry(create_event_window, date_pattern='y-mm-dd')
-        event_start_entry.pack(pady=5)
+        ttk.Label(form_frame, text="Event Name").grid(row=0, column=0, sticky="w", pady=(0, 4))
+        event_name_entry = ttk.Entry(form_frame, width=34)
+        event_name_entry.grid(row=1, column=0, sticky="ew", pady=(0, 10))
 
-        tk.Label(create_event_window, text="Event End Date").pack(pady=5)
-        event_end_entry = DateEntry(create_event_window, date_pattern='y-mm-dd')
-        event_end_entry.pack(pady=5)
+        ttk.Label(form_frame, text="Event Start Date").grid(row=2, column=0, sticky="w", pady=(0, 4))
+        event_start_entry = DateEntry(form_frame, date_pattern='y-mm-dd', width=20)
+        event_start_entry.grid(row=3, column=0, sticky="w", pady=(0, 10))
+
+        ttk.Label(form_frame, text="Event End Date").grid(row=4, column=0, sticky="w", pady=(0, 4))
+        event_end_entry = DateEntry(form_frame, date_pattern='y-mm-dd', width=20)
+        event_end_entry.grid(row=5, column=0, sticky="w", pady=(0, 12))
 
         def create_event():
             event_name = event_name_entry.get()
@@ -1475,8 +1468,11 @@ def open_events_window():
                 except requests.RequestException as e:
                     messagebox.showerror("Error", f"Failed to create event: {e}")
 
-        tk.Button(create_event_window, text="Create Event", command=create_event).pack(pady=10)
-        tk.Button(create_event_window, text="Cancel", command=on_create_event_close).pack(pady=5)
+        button_row = ttk.Frame(form_frame, style="App.TFrame")
+        button_row.grid(row=6, column=0, sticky="e")
+
+        ttk.Button(button_row, text="Create Event", command=create_event, style="Primary.TButton").pack(side="left", padx=(0, 8))
+        ttk.Button(button_row, text="Cancel", command=on_create_event_close).pack(side="left")
 
     create_event_button = tk.Button(events_window, text="Create Event", command=open_create_event_window)
     create_event_button.pack(pady=5)
