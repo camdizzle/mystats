@@ -56,7 +56,7 @@ bot = None
 GLOBAL_SOCKET = None
 DEBUG = False
 HAS_TTKBOOTSTRAP = importlib.util.find_spec("ttkbootstrap") is not None
-DEFAULT_UI_THEME = "flatly"
+DEFAULT_UI_THEME = "darkly"
 app_style = None
 
 
@@ -103,7 +103,12 @@ def apply_ui_styles(style):
     style.configure("Card.TLabelframe.Label", font=("Segoe UI", 10, "bold"))
     style.configure("Heading.TLabel", font=("Segoe UI", 16, "bold"))
     style.configure("Small.TLabel", font=("Segoe UI", 8))
-    style.configure("Primary.TButton", padding=6)
+
+    # Beveled/raised button look across ttk buttons.
+    style.configure("TButton", padding=6, relief="raised", borderwidth=2)
+    style.map("TButton", relief=[("pressed", "sunken"), ("active", "raised")])
+    style.configure("Primary.TButton", padding=6, relief="raised", borderwidth=2)
+    style.map("Primary.TButton", relief=[("pressed", "sunken"), ("active", "raised")])
 
 
 def get_available_ui_themes():
@@ -1163,6 +1168,10 @@ def initialize_main_window():
 
     root_window, app_style = create_root_window()
     apply_ui_styles(app_style)
+
+    # Beveled look for classic tk.Button widgets too.
+    root_window.option_add("*Button.relief", "raised")
+    root_window.option_add("*Button.borderWidth", 2)
 
     root_window.protocol("WM_DELETE_WINDOW", on_close)
     root_window.title("MyStats - Marbles On Stream Companion Application")
