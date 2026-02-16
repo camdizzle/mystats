@@ -992,8 +992,9 @@ def on_close():
     # Create the "Please Wait" window
     wait_window = show_wait_window()
 
-    # Schedule bot shutdown in the bot's event loop
-    asyncio.run_coroutine_threadsafe(bot.shutdown(), bot.loop)
+    # Schedule bot shutdown in the bot's event loop (when available)
+    if bot is not None and getattr(bot, "loop", None) is not None:
+        asyncio.run_coroutine_threadsafe(bot.shutdown(), bot.loop)
 
     # Destroy the Tkinter windows after a delay
     def close_windows():
@@ -4713,13 +4714,12 @@ if __name__ == "__main__":
 
     # Ensure the lock file is removed when the application exits
 
-    bot = Bot()
-
-
     # Function to start the bot in a separate asyncio event loop
     def start_bot():
+        global bot
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+        bot = Bot()
         bot.run()
 
 
