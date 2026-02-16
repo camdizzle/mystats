@@ -134,9 +134,9 @@ def is_chat_response_enabled(setting_key):
 
 def get_chat_max_names():
     try:
-        value = int(config.get_setting("chat_max_names") or 10)
+        value = int(config.get_setting("chat_max_names") or 25)
     except (TypeError, ValueError):
-        value = 10
+        value = 25
 
     return min(25, max(3, value))
 
@@ -1224,7 +1224,14 @@ def initialize_main_window():
 
     root_window.protocol("WM_DELETE_WINDOW", on_close)
     root_window.title("MyStats - Marbles On Stream Companion Application")
-    root_window.geometry("800x500")
+
+    window_width = 800
+    window_height = 500
+    screen_width = root_window.winfo_screenwidth()
+    screen_height = root_window.winfo_screenheight()
+    pos_x = (screen_width // 2) - (window_width // 2)
+    pos_y = (screen_height // 2) - (window_height // 2)
+    root_window.geometry(f"{window_width}x{window_height}+{pos_x}+{pos_y}")
     root_window.resizable(False, False)
 
     root_window.grid_rowconfigure(1, weight=1)
