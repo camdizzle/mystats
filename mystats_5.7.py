@@ -4,7 +4,7 @@ from tkinter import ttk
 from tkinter import Menu
 from tkinter import filedialog
 from tkinter import messagebox
-from tkcalendar import DateEntry
+from tkcalendar import Calendar
 import asyncio
 import sys
 import os
@@ -41,12 +41,15 @@ import pandas as pd
 import babel
 from babel import numbers
 from twitchio import errors
+import io
 from io import BytesIO
 from dateutil import parser
 from datetime import datetime, timedelta
 import atexit
 import socket
 import subprocess
+import importlib.util
+import logging
 
 # Global Variables
 version = '5.7.0'
@@ -54,6 +57,566 @@ text_widget = None
 bot = None
 GLOBAL_SOCKET = None
 DEBUG = False
+HAS_TTKBOOTSTRAP = importlib.util.find_spec("ttkbootstrap") is not None
+DEFAULT_UI_THEME = "darkly"
+app_style = None
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s"
+)
+logger = logging.getLogger("mystats")
+
+
+def get_initial_ui_theme():
+    try:
+        with open("settings.txt", "r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                if line.startswith("UI_THEME="):
+                    theme_name = line.split("=", 1)[1].strip()
+                    if theme_name:
+                        return theme_name
+    except FileNotFoundError:
+        pass
+
+    return DEFAULT_UI_THEME
+
+
+def create_root_window():
+    """Create the root window, preferring ttkbootstrap when installed."""
+    initial_theme = get_initial_ui_theme()
+
+    if HAS_TTKBOOTSTRAP:
+        ttkbootstrap_module = __import__("ttkbootstrap")
+        root_window = ttkbootstrap_module.Window(themename=DEFAULT_UI_THEME)
+        style = root_window.style
+
+        try:
+            style.theme_use(initial_theme)
+        except Exception:
+            style.theme_use(DEFAULT_UI_THEME)
+    else:
+        root_window = tk.Tk()
+        style = ttk.Style(root_window)
+        available_themes = style.theme_names()
+        style.theme_use(initial_theme if initial_theme in available_themes else "clam")
+
+    return root_window, style
+
+
+def apply_ui_styles(style):
+    """Central app styles for a modern, cleaner UI."""
+    style.configure("App.TFrame", padding=8)
+    style.configure("Card.TLabelframe", padding=12)
+    style.configure("Card.TLabelframe.Label", font=("Segoe UI", 10, "bold"))
+    style.configure("Heading.TLabel", font=("Segoe UI", 16, "bold"))
+    style.configure("Small.TLabel", font=("Segoe UI", 9))
+
+    # Modern flat button look (no bevel), with subtle interactive states.
+    style.configure("TButton", padding=(10, 6), relief="flat", borderwidth=0)
+    style.map("TButton", relief=[("pressed", "flat"), ("active", "flat")])
+    style.configure("Primary.TButton", padding=(12, 7), relief="flat", borderwidth=0)
+    style.map("Primary.TButton", relief=[("pressed", "flat"), ("active", "flat")])
+
+    # Improve field density/readability.
+    style.configure("TEntry", padding=4)
+    style.configure("TCombobox", padding=3)
+    style.configure("TCheckbutton", padding=2)
+
+
+def get_available_ui_themes():
+    return sorted(app_style.theme_names())
+
+
+def apply_theme(theme_name):
+    global app_style
+
+    if not theme_name:
+        return
+
+    app_style.theme_use(theme_name)
+    apply_ui_styles(app_style)
+
+
+def is_chat_response_enabled(setting_key):
+    setting_value = config.get_setting(setting_key)
+
+    # Backward compatibility for old setting name.
+    if setting_value is None and setting_key == "chat_all_commands":
+        setting_value = config.get_setting("chat_mystats_command")
+
+    if setting_value is None:
+        return True
+    return str(setting_value).strip().lower() == "true"
+
+
+def get_chat_max_names():
+    try:
+        value = int(config.get_setting("chat_max_names") or 25)
+    except (TypeError, ValueError):
+        value = 25
+
+    return min(25, max(3, value))
+
+
+def get_int_setting(setting_key, default=0):
+    try:
+        return int(config.get_setting(setting_key) or default)
+    except (TypeError, ValueError):
+        return default
+
+
+def get_season_quest_updates():
+    if not is_chat_response_enabled("season_quests_enabled"):
+        return []
+
+    quest_definitions = [
+        {
+            'target_key': 'season_quest_target_races',
+            'complete_key': 'season_quest_complete_races',
+            'value': get_int_setting('totalcountseason', 0),
+            'message': "🎯 Season Quest Complete: {value:,} / {target:,} season races finished!"
+        },
+        {
+            'target_key': 'season_quest_target_points',
+            'complete_key': 'season_quest_complete_points',
+            'value': get_int_setting('totalpointsseason', 0),
+            'message': "🎯 Season Quest Complete: {value:,} / {target:,} season points earned!"
+        },
+        {
+            'target_key': 'season_quest_target_race_hs',
+            'complete_key': 'season_quest_complete_race_hs',
+            'value': get_int_setting('race_hs_season', 0),
+            'message': "🎯 Season Quest Complete: Race high score reached {value:,} (target {target:,})!"
+        },
+        {
+            'target_key': 'season_quest_target_br_hs',
+            'complete_key': 'season_quest_complete_br_hs',
+            'value': get_int_setting('br_hs_season', 0),
+            'message': "🎯 Season Quest Complete: BR high score reached {value:,} (target {target:,})!"
+        },
+    ]
+
+    quest_messages = []
+
+    for quest in quest_definitions:
+        target_value = get_int_setting(quest['target_key'], 0)
+        already_complete = str(config.get_setting(quest['complete_key']) or 'False').lower() == 'true'
+
+        if target_value <= 0 or already_complete:
+            continue
+
+        if quest['value'] >= target_value:
+            config.set_setting(quest['complete_key'], 'True', persistent=True)
+            quest_messages.append(quest['message'].format(value=quest['value'], target=target_value))
+
+    return quest_messages
+
+
+def get_season_quest_targets():
+    return {
+        'races': get_int_setting('season_quest_target_races', 0),
+        'points': get_int_setting('season_quest_target_points', 0),
+        'race_hs': get_int_setting('season_quest_target_race_hs', 0),
+        'br_hs': get_int_setting('season_quest_target_br_hs', 0),
+    }
+
+
+def get_user_season_stats():
+    user_stats = {}
+    for allraces in glob.glob(os.path.join(config.get_setting('directory'), "allraces_*.csv")):
+        try:
+            with open(allraces, 'rb') as f:
+                raw_data = f.read()
+            result = chardet.detect(raw_data)
+            encoding = result['encoding'] if result['encoding'] else 'utf-8'
+
+            with open(allraces, 'r', encoding=encoding, errors='ignore') as f:
+                reader = csv.reader(f)
+                for row in reader:
+                    if len(row) < 5:
+                        continue
+                    username = row[1].strip().lower()
+                    display_name = row[2].strip() if len(row) > 2 else username
+                    if not username:
+                        continue
+
+                    if username not in user_stats:
+                        user_stats[username] = {
+                            'display_name': display_name or username,
+                            'races': 0,
+                            'points': 0,
+                            'race_hs': 0,
+                            'br_hs': 0,
+                        }
+
+                    if display_name:
+                        user_stats[username]['display_name'] = display_name
+
+                    user_stats[username]['races'] += 1
+                    try:
+                        points = int(row[3])
+                    except (TypeError, ValueError):
+                        points = 0
+
+                    user_stats[username]['points'] += points
+                    mode = row[4].strip().lower()
+                    if mode == 'race' and points > user_stats[username]['race_hs']:
+                        user_stats[username]['race_hs'] = points
+                    elif mode == 'br' and points > user_stats[username]['br_hs']:
+                        user_stats[username]['br_hs'] = points
+
+        except FileNotFoundError:
+            continue
+        except Exception as e:
+            print(f"Error reading season stats from {allraces}: {e}")
+
+    return user_stats
+
+
+def get_user_quest_progress(username):
+    user_stats = get_user_season_stats()
+    if not user_stats:
+        return None
+
+    username_lookup = (username or '').strip().lower()
+    target_username = None
+
+    if username_lookup in user_stats:
+        target_username = username_lookup
+    else:
+        for uname, stats in user_stats.items():
+            if stats.get('display_name', '').strip().lower() == username_lookup:
+                target_username = uname
+                break
+
+    if target_username is None:
+        return None
+
+    targets = get_season_quest_targets()
+    stats = user_stats[target_username]
+    quest_rows = [
+        ("Season Races", stats['races'], targets['races']),
+        ("Season Points", stats['points'], targets['points']),
+        ("Race High Score", stats['race_hs'], targets['race_hs']),
+        ("BR High Score", stats['br_hs'], targets['br_hs']),
+    ]
+
+    completed = 0
+    active_quests = 0
+    progress_lines = []
+    for quest_name, current, target in quest_rows:
+        if target <= 0:
+            progress_lines.append(f"{quest_name}: disabled")
+            continue
+        active_quests += 1
+        if current >= target:
+            completed += 1
+            progress_lines.append(f"{quest_name}: ✅ {current:,}/{target:,}")
+        else:
+            progress_lines.append(f"{quest_name}: {current:,}/{target:,}")
+
+    return {
+        'username': target_username,
+        'display_name': stats['display_name'] or target_username,
+        'completed': completed,
+        'active_quests': active_quests,
+        'progress_lines': progress_lines,
+        'stats': stats,
+    }
+
+
+def get_quest_completion_leaderboard(limit=100):
+    user_stats = get_user_season_stats()
+    targets = get_season_quest_targets()
+
+    leaderboard = []
+    for username, stats in user_stats.items():
+        completed = 0
+        active_quests = 0
+
+        checks = [
+            ('races', stats['races']),
+            ('points', stats['points']),
+            ('race_hs', stats['race_hs']),
+            ('br_hs', stats['br_hs']),
+        ]
+
+        for key, current_value in checks:
+            target = targets[key]
+            if target <= 0:
+                continue
+            active_quests += 1
+            if current_value >= target:
+                completed += 1
+
+        if active_quests == 0:
+            completed = 0
+
+        leaderboard.append({
+            'username': username,
+            'display_name': stats['display_name'] or username,
+            'completed': completed,
+            'active_quests': active_quests,
+            'races': stats['races'],
+            'points': stats['points'],
+            'race_hs': stats['race_hs'],
+            'br_hs': stats['br_hs'],
+        })
+
+    leaderboard.sort(key=lambda row: (row['completed'], row['points'], row['races']), reverse=True)
+    return leaderboard[:limit]
+
+
+def open_quest_completion_window(parent_window):
+    leaderboard = get_quest_completion_leaderboard(limit=200)
+    if not leaderboard:
+        messagebox.showinfo("Season Quests", "No season race data found yet.")
+        return
+
+    popup = tk.Toplevel(parent_window)
+    popup.title("Season Quest Completion")
+    popup.transient(parent_window)
+    popup.attributes('-topmost', True)
+    center_toplevel(popup, 760, 520)
+
+    ttk.Label(popup, text="Season Quest Completion Leaderboard", style="Small.TLabel").pack(anchor="w", padx=12, pady=(10, 4))
+
+    columns = ("rank", "user", "completed", "races", "points", "race_hs", "br_hs")
+    tree = ttk.Treeview(popup, columns=columns, show="headings", height=18)
+    tree.heading("rank", text="#")
+    tree.heading("user", text="User")
+    tree.heading("completed", text="Completed")
+    tree.heading("races", text="Races")
+    tree.heading("points", text="Points")
+    tree.heading("race_hs", text="Race HS")
+    tree.heading("br_hs", text="BR HS")
+
+    tree.column("rank", width=50, anchor="center")
+    tree.column("user", width=190, anchor="w")
+    tree.column("completed", width=110, anchor="center")
+    tree.column("races", width=90, anchor="e")
+    tree.column("points", width=120, anchor="e")
+    tree.column("race_hs", width=90, anchor="e")
+    tree.column("br_hs", width=90, anchor="e")
+
+    for idx, row in enumerate(leaderboard, start=1):
+        completed_text = f"{row['completed']}/{row['active_quests']}" if row['active_quests'] > 0 else "0/0"
+        tree.insert("", "end", values=(
+            idx,
+            row['display_name'],
+            completed_text,
+            f"{row['races']:,}",
+            f"{row['points']:,}",
+            f"{row['race_hs']:,}",
+            f"{row['br_hs']:,}",
+        ))
+
+    scrollbar = ttk.Scrollbar(popup, orient="vertical", command=tree.yview)
+    tree.configure(yscrollcommand=scrollbar.set)
+
+    tree.pack(side="left", fill="both", expand=True, padx=(12, 0), pady=(0, 12))
+    scrollbar.pack(side="right", fill="y", padx=(0, 12), pady=(0, 12))
+
+
+def get_rival_settings():
+    return {
+        'min_races': max(1, get_int_setting('rivals_min_races', 50)),
+        'max_point_gap': max(0, get_int_setting('rivals_max_point_gap', 1500)),
+        'pair_count': max(1, get_int_setting('rivals_pair_count', 25)),
+    }
+
+
+def resolve_user_in_stats(user_stats, username):
+    lookup = (username or '').strip().lower()
+    if not lookup:
+        return None
+    if lookup in user_stats:
+        return lookup
+    for uname, stats in user_stats.items():
+        if stats.get('display_name', '').strip().lower() == lookup:
+            return uname
+    return None
+
+
+def get_global_rivalries(limit=None):
+    user_stats = get_user_season_stats()
+    settings = get_rival_settings()
+
+    qualified = [
+        (username, stats) for username, stats in user_stats.items()
+        if stats.get('races', 0) >= settings['min_races']
+    ]
+
+    rivalries = []
+    for i in range(len(qualified)):
+        user_a, stats_a = qualified[i]
+        for j in range(i + 1, len(qualified)):
+            user_b, stats_b = qualified[j]
+            gap = abs(stats_a['points'] - stats_b['points'])
+            if gap <= settings['max_point_gap']:
+                rivalries.append({
+                    'user_a': user_a,
+                    'display_a': stats_a.get('display_name') or user_a,
+                    'points_a': stats_a.get('points', 0),
+                    'races_a': stats_a.get('races', 0),
+                    'user_b': user_b,
+                    'display_b': stats_b.get('display_name') or user_b,
+                    'points_b': stats_b.get('points', 0),
+                    'races_b': stats_b.get('races', 0),
+                    'point_gap': gap,
+                })
+
+    rivalries.sort(key=lambda row: (row['point_gap'], -(row['points_a'] + row['points_b'])))
+    cap = limit if limit is not None else settings['pair_count']
+    return rivalries[:cap]
+
+
+def get_user_rivals(username, limit=5):
+    user_stats = get_user_season_stats()
+    settings = get_rival_settings()
+    user_key = resolve_user_in_stats(user_stats, username)
+
+    if user_key is None:
+        return None
+
+    base = user_stats[user_key]
+    if base.get('races', 0) < settings['min_races']:
+        return {
+            'user': user_key,
+            'display_name': base.get('display_name') or user_key,
+            'races': base.get('races', 0),
+            'points': base.get('points', 0),
+            'min_races_required': settings['min_races'],
+            'rivals': [],
+        }
+
+    rivals = []
+    for other_key, other_stats in user_stats.items():
+        if other_key == user_key:
+            continue
+        if other_stats.get('races', 0) < settings['min_races']:
+            continue
+
+        gap = abs(base.get('points', 0) - other_stats.get('points', 0))
+        if gap > settings['max_point_gap']:
+            continue
+
+        rivals.append({
+            'username': other_key,
+            'display_name': other_stats.get('display_name') or other_key,
+            'points': other_stats.get('points', 0),
+            'races': other_stats.get('races', 0),
+            'point_gap': gap,
+        })
+
+    rivals.sort(key=lambda row: (row['point_gap'], -row['points']))
+
+    return {
+        'user': user_key,
+        'display_name': base.get('display_name') or user_key,
+        'races': base.get('races', 0),
+        'points': base.get('points', 0),
+        'min_races_required': settings['min_races'],
+        'rivals': rivals[:limit],
+    }
+
+
+def open_rivalries_window(parent_window):
+    rivalries = get_global_rivalries(limit=200)
+    if not rivalries:
+        messagebox.showinfo("Rivals", "No rivalries found with current settings.")
+        return
+
+    popup = tk.Toplevel(parent_window)
+    popup.title("Rivalries")
+    popup.transient(parent_window)
+    popup.attributes('-topmost', True)
+    center_toplevel(popup, 800, 520)
+
+    ttk.Label(popup, text="Rivalries Leaderboard (sorted by closest point gap)", style="Small.TLabel").pack(anchor="w", padx=12, pady=(10, 4))
+
+    columns = ("rank", "player_a", "points_a", "player_b", "points_b", "gap")
+    tree = ttk.Treeview(popup, columns=columns, show="headings", height=18)
+    tree.heading("rank", text="#")
+    tree.heading("player_a", text="Player A")
+    tree.heading("points_a", text="Points A")
+    tree.heading("player_b", text="Player B")
+    tree.heading("points_b", text="Points B")
+    tree.heading("gap", text="Point Gap")
+
+    tree.column("rank", width=50, anchor="center")
+    tree.column("player_a", width=200, anchor="w")
+    tree.column("points_a", width=110, anchor="e")
+    tree.column("player_b", width=200, anchor="w")
+    tree.column("points_b", width=110, anchor="e")
+    tree.column("gap", width=110, anchor="e")
+
+    for idx, row in enumerate(rivalries, start=1):
+        tree.insert("", "end", values=(
+            idx,
+            row['display_a'],
+            f"{row['points_a']:,}",
+            row['display_b'],
+            f"{row['points_b']:,}",
+            f"{row['point_gap']:,}",
+        ))
+
+    scrollbar = ttk.Scrollbar(popup, orient="vertical", command=tree.yview)
+    tree.configure(yscrollcommand=scrollbar.set)
+
+    tree.pack(side="left", fill="both", expand=True, padx=(12, 0), pady=(0, 12))
+    scrollbar.pack(side="right", fill="y", padx=(0, 12), pady=(0, 12))
+
+
+async def send_chat_message(channel, message, category=None, apply_delay=False):
+    category_map = {
+        "br": "chat_br_results",
+        "race": "chat_race_results",
+        "tilt": "chat_tilt_results",
+        "mystats": "chat_all_commands",
+    }
+
+    if category in category_map and not is_chat_response_enabled(category_map[category]):
+        return False
+
+    if apply_delay and config.get_setting('announcedelay') == 'True':
+        try:
+            await asyncio.sleep(int(config.get_setting('announcedelayseconds') or 0))
+        except ValueError:
+            await asyncio.sleep(0)
+
+    try:
+        await channel.send(message)
+        return True
+    except Exception as e:
+        logger.exception(f"Failed to send chat message ({category}): {e}")
+        return False
+
+
+def center_toplevel(window, width, height):
+    """Center a Toplevel against the main root window."""
+    root.update_idletasks()
+    root_x = root.winfo_x()
+    root_y = root.winfo_y()
+    root_width = root.winfo_width()
+    root_height = root.winfo_height()
+    pos_x = root_x + (root_width // 2) - (width // 2)
+    pos_y = root_y + (root_height // 2) - (height // 2)
+    window.geometry(f"{width}x{height}+{pos_x}+{pos_y}")
+
+def build_stats_labels(parent):
+    labels = {
+        "total_points": ttk.Label(parent, text="Total Points: 0"),
+        "total_count": ttk.Label(parent, text="Total Count: 0"),
+        "avg_points": ttk.Label(parent, text="Avg Points: 0"),
+        "race_hs": ttk.Label(parent, text="Race HS: 0"),
+        "br_hs": ttk.Label(parent, text="BR HS: 0"),
+    }
+    for label in labels.values():
+        label.pack(anchor='w')
+    return labels
+
 
 def is_already_running():
     global GLOBAL_SOCKET
@@ -568,263 +1131,59 @@ def play_audio_file(filename, device_name=None):
 
 
 def open_settings_window():
-    # Create a new Toplevel window
     settings_window = tk.Toplevel(root)
     settings_window.title("Settings")
-
-    # Make the settings window stay on top of the main window
     settings_window.transient(root)
     settings_window.attributes('-topmost', True)
 
-    # Get the main window's position and size
-    main_x = root.winfo_x()
-    main_y = root.winfo_y()
-    main_width = root.winfo_width()
-    main_height = root.winfo_height()
+    window_width = 760
+    window_height = 700
+    center_toplevel(settings_window, window_width, window_height)
+    settings_window.minsize(720, 640)
 
-    # Calculate the position for the settings window to be centered
-    window_width = 475  # Set to 475 pixels wide
-    window_height = 400
-    pos_x = main_x + (main_width // 2) - (window_width // 2)
-    pos_y = main_y + (main_height // 2) - (window_height // 2)
+    content_frame = ttk.Frame(settings_window, style="App.TFrame")
+    content_frame.pack(fill="both", expand=True, padx=10, pady=(10, 0))
 
-    settings_window.geometry(f"{window_width}x{window_height}+{pos_x}+{pos_y}")
+    notebook = ttk.Notebook(content_frame)
+    notebook.pack(fill="both", expand=True)
 
-    # Create a frame to contain the canvas and scrollbar
-    frame_with_scrollbar = tk.Frame(settings_window)
-    frame_with_scrollbar.pack(fill="both", expand=True)
+    general_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
+    audio_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
+    chat_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
+    season_quests_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
+    rivals_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
+    appearance_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
 
-    # Create a Canvas and Scrollbar
-    canvas = tk.Canvas(frame_with_scrollbar)
-    scrollbar = tk.Scrollbar(frame_with_scrollbar, orient="vertical", command=canvas.yview)
-    scrollable_frame = tk.Frame(canvas)
+    notebook.add(general_tab, text="General")
+    notebook.add(audio_tab, text="Audio")
+    notebook.add(chat_tab, text="Chat")
+    notebook.add(season_quests_tab, text="Season Quests")
+    notebook.add(rivals_tab, text="Rivals")
+    notebook.add(appearance_tab, text="Appearance")
 
-    scrollable_frame.bind(
-        "<Configure>",
-        lambda e: canvas.configure(
-            scrollregion=canvas.bbox("all")
-        )
-    )
+    # --- General tab ---
+    ttk.Label(general_tab, text="Core app settings", style="Small.TLabel").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
 
-    canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-    canvas.configure(yscrollcommand=scrollbar.set)
+    ttk.Label(general_tab, text="Channel").grid(row=1, column=0, sticky="w", pady=(0, 4))
+    channel_entry = ttk.Entry(general_tab, width=28)
+    channel_entry.grid(row=1, column=1, sticky="w", pady=(0, 4))
+    channel_entry.insert(0, config.get_setting("CHANNEL") or "")
 
-    # Pack the Canvas and Scrollbar
-    canvas.pack(side="left", fill="both", expand=True)
-    scrollbar.pack(side="right", fill="y")
+    ttk.Label(general_tab, text="Marble Day").grid(row=2, column=0, sticky="w", pady=(0, 4))
+    ttk.Label(general_tab, text=config.get_setting("marble_day") or "-").grid(row=2, column=1, sticky="w", pady=(0, 4))
 
-    # Create a top frame to hold individual frames for Channel, Marble Day, and Season
-    top_frame = tk.Frame(scrollable_frame)
-    top_frame.grid(row=0, column=0, columnspan=2, padx=10, pady=5, sticky='ew')
+    ttk.Label(general_tab, text="Season").grid(row=3, column=0, sticky="w", pady=(0, 8))
+    ttk.Label(general_tab, text=config.get_setting("season") or "-").grid(row=3, column=1, sticky="w", pady=(0, 8))
 
-    # Create individual frames for each item
-    channel_frame = tk.Frame(top_frame)
-    channel_frame.grid(row=0, column=0, padx=10, pady=(0, 5))
+    ttk.Separator(general_tab, orient="horizontal").grid(row=4, column=0, columnspan=2, sticky="ew", pady=8)
 
-    marble_day_frame = tk.Frame(top_frame)
-    marble_day_frame.grid(row=0, column=1, padx=10, pady=(0, 5))
-
-    season_frame = tk.Frame(top_frame)
-    season_frame.grid(row=0, column=2, padx=10, pady=(0, 5))
-
-    # Configure the grid to center the frames without expansion
-    top_frame.grid_columnconfigure(0, weight=1)
-    top_frame.grid_columnconfigure(1, weight=1)
-    top_frame.grid_columnconfigure(2, weight=1)
-
-    # Add Channel label and entry to channel_frame
-    channel_label = tk.Label(channel_frame, text="Channel")
-    channel_label.pack(anchor="center")
-
-    channel_entry = tk.Entry(channel_frame, width=16, justify="center")
-    channel_entry.pack(anchor="center")
-    channel_entry.insert(0, config.get_setting("CHANNEL"))
-
-    # Add a label for "Marble Day"
-    marble_day_text_label = tk.Label(marble_day_frame, text="Marble Day", font=("Arial", 10))
-    marble_day_text_label.pack(anchor="center")
-
-    # Add a label to display the marble day value
-    marble_day_value = config.get_setting("marble_day")  # Get the current marble day value
-    marble_day_value_label = tk.Label(marble_day_frame, text=marble_day_value, anchor="center", font=("Arial", 10))
-    marble_day_value_label.pack(anchor="center")
-
-
-    # Add a label for "Season"
-    season_text_label = tk.Label(season_frame, text="Season", font=("Arial", 10))
-    season_text_label.pack(anchor="center")
-
-    # Add a label to display the season value
-    season_value = config.get_setting("season")  # Get the current season value
-    season_label = tk.Label(season_frame, text=season_value, anchor="center", font=("Arial", 10))
-    season_label.pack(anchor="center")
-
-
-    # Create a middle frame to hold the chunk alert settings and other frames
-    middle_frame = tk.Frame(scrollable_frame)
-    middle_frame.grid(row=1, column=0, columnspan=2, pady=(0, 10), sticky="nsew")
-
-    # Configure the grid to distribute space equally among the three rows
-    middle_frame.grid_rowconfigure(0, weight=1)
-
-    # Create a frame for Chunk Alert settings inside the middle_frame
-    chunk_alert_frame = tk.LabelFrame(middle_frame, text="Chunk Alert", padx=15, pady=15, labelanchor="n", font=("Arial", 10, "bold"))
-    chunk_alert_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
-
-    # Convert the config value to a boolean
-    chunk_alert_value = config.get_setting("chunk_alert") == 'True'
-
-    # Chunk Alert Toggle Button (first item)
-    chunk_alert_button = tk.Button(
-        chunk_alert_frame,
-        text="ON" if chunk_alert_value else "OFF",
-        command=lambda: toggle_chunk_alert(chunk_alert_button),
-        bg="green" if chunk_alert_value else "red",
-        width=8,
-        font=("Arial", 10)
-    )
-    chunk_alert_button.pack(anchor="center", pady=(5, 5))
-
-    # Add the Chunk Alert Trigger label (second item)
-    chunk_alert_trigger_label = tk.Label(chunk_alert_frame, text="Trigger Amt", font=("Arial", 8))
-    chunk_alert_trigger_label.pack(anchor="center", pady=(5, 0))
-
-    # Entry for the Chunk Alert Trigger value (third item)
-    chunk_alert_trigger_entry = tk.Entry(chunk_alert_frame, width=10, justify='center', font=("Arial", 10))
-    chunk_alert_trigger_entry.pack(anchor="center", pady=(5, 5))
-    chunk_alert_trigger_entry.insert(0, config.get_setting("chunk_alert_value"))
-
-    # Chunk Alert Settings label (fourth item)
-    chunk_alert_label = tk.Label(chunk_alert_frame, text="No file selected", anchor="center", font=("Arial", 8))
-    chunk_alert_label.pack(anchor="center", pady=(5, 5))
-
-    # Create a frame for the file and test buttons (fifth item, side by side)
-    file_button_frame = tk.Frame(chunk_alert_frame)
-    file_button_frame.pack(anchor="center", pady=(5, 0))
-
-    # File selection button with file folder emoji, centered
-    file_button = tk.Button(
-        file_button_frame,
-        text="📁",
-        command=lambda: select_chunk_alert_sound(chunk_alert_label, settings_window),
-        font=("Arial", 12),
-        width=3,
-        anchor='center'
-    )
-    file_button.pack(side="left", padx=5)
-
-    # New test audio playback button with speaker emoji, centered
-    test_audio_button = tk.Button(
-        file_button_frame,
-        text="🔊",
-        command=test_chunkaudio_playback,
-        font=("Arial", 12),
-        width=3,
-        anchor='center'
-    )
-    test_audio_button.pack(side="left", padx=5)
-
-    # Set the label to the saved file name if it exists when the settings window is opened
-    saved_chunk_alert_file_path = config.get_setting("chunk_alert_sound")
-    if saved_chunk_alert_file_path:
-        update_chunk_alert_audio_label(chunk_alert_label, saved_chunk_alert_file_path)
-
-    # Create a frame for Message Delay settings inside the middle_frame
-    message_delay_frame = tk.LabelFrame(middle_frame, text="Message Delay", padx=15, pady=15, labelanchor="n", font=("Arial", 10, "bold"))
-    message_delay_frame.grid(row=0, column=1, padx=10, pady=10, sticky="nsew")
-
-    # Announce Delay toggle button (first item)
-    announce_delay_value = config.get_setting("announcedelay") == "True"
-    announce_delay_button = tk.Button(
-        message_delay_frame,
-        text="ON" if announce_delay_value else "OFF",
-        command=lambda: toggle_announce_delay(announce_delay_button),
-        bg="green" if announce_delay_value else "red",
-        width=8,
-        font=("Arial", 10)
-    )
-    announce_delay_button.pack(anchor="center", pady=(5, 5))
-
-    # Delay Seconds label (second item)
-    delay_seconds_label = tk.Label(message_delay_frame, text="Delay Seconds", font=("Arial", 8))
-    delay_seconds_label.pack(anchor="center", pady=(5, 0))
-
-    # Delay Seconds entry box (third item)
-    delay_seconds_entry = tk.Entry(message_delay_frame, width=10, justify='center', font=("Arial", 10))
-    delay_seconds_entry.pack(anchor="center", pady=(5, 5))
-    delay_seconds_entry.insert(0, config.get_setting("announcedelayseconds"))
-
-    # Create a new frame for Marbles Reset Settings inside the middle_frame
-    marbles_reset_frame = tk.LabelFrame(middle_frame, text="Marbles Reset", padx=15, pady=15, labelanchor="n", font=("Arial", 10, "bold"))
-    marbles_reset_frame.grid(row=0, column=2, padx=10, pady=10, sticky="nsew")
-
-    # Reset Audio Toggle Button (first item)
-    reset_audio_value = config.get_setting("reset_audio") == "True"
-    reset_audio_button = tk.Button(
-        marbles_reset_frame,
-        text="ON" if reset_audio_value else "OFF",
-        command=lambda: toggle_reset_audio(reset_audio_button),
-        bg="green" if reset_audio_value else "red",
-        width=8,
-        font=("Arial", 10)
-    )
-    reset_audio_button.pack(anchor="center", pady=(5, 5))
-
-    # Reset Audio Label (second item)
-    reset_audio_label = tk.Label(marbles_reset_frame, text="No file selected", anchor="center", font=("Arial", 8))
-    reset_audio_label.pack(anchor="center", pady=(5, 5))
-
-    # Create a frame for side-by-side buttons (third item)
-    reset_button_frame = tk.Frame(marbles_reset_frame)
-    reset_button_frame.pack(anchor="center", pady=(5, 0))
-
-    # Placeholder button for potential testing or other functionality
-    test_reset_button = tk.Button(
-        reset_button_frame,
-        text="📁",  # Placeholder button, can be replaced with actual functionality
-        command=lambda: select_reset_audio_sound(reset_audio_label, settings_window),
-        font=("Arial", 12),
-        width=3,
-        anchor='center'
-    )
-    test_reset_button.pack(side="left", padx=5)
-
-    # Button for selecting reset audio sound, side by side
-    reset_speaker_button = tk.Button(
-        reset_button_frame,
-        text="🔊",
-        command=lambda: test_audio_playback(),
-        font=("Arial", 12),
-        width=3,
-        anchor='center'
-    )
-    reset_speaker_button.pack(side="left", padx=5)
-
-    # Set the label to the saved file name if it exists when the settings window is opened
-    saved_reset_file_path = config.get_setting("reset_audio_sound")
-    if saved_reset_file_path:
-        update_reset_audio_label(reset_audio_label, saved_reset_file_path)
-
-    # Centering the contents within the frame
-    marbles_reset_frame.grid_columnconfigure(0, weight=1)
-
-
-    # Create a frame for the Directory setting inside the scrollable_frame
-    directory_frame = tk.Frame(scrollable_frame)
-    directory_frame.grid(row=2, column=0, columnspan=2, pady=(0, 10), sticky="nsew")
-
-    # Add the Directory label
-    directory_label = tk.Label(directory_frame, text="Mystats Directory", wraplength=300, anchor="nw", justify="left")
-    directory_label.grid(row=0, column=0, sticky="w", padx=(10, 10), pady=(5, 5))
-
-    # Add the Directory entry
+    ttk.Label(general_tab, text="Mystats Directory").grid(row=5, column=0, sticky="w", pady=(0, 4))
     directory_value = os.path.expandvars(r"%localappdata%/mystats/")
-    directory_entry = tk.Entry(directory_frame, width=60)
-    directory_entry.grid(row=1, column=0, sticky="w", padx=(5,0), pady=(5, 5))
+    directory_entry = ttk.Entry(general_tab, width=55)
+    directory_entry.grid(row=6, column=0, sticky="ew", pady=(0, 4), columnspan=2)
     directory_entry.insert(0, directory_value)
     directory_entry.config(state="readonly")
 
-    # Function to open the directory in Windows Explorer
     def open_directory():
         directory_path = os.path.expandvars(r"%localappdata%/mystats/")
         if os.path.exists(directory_path):
@@ -832,71 +1191,289 @@ def open_settings_window():
         else:
             messagebox.showerror("Error", "Directory path does not exist.")
 
-    # Add the Open Location button with folder icon
-    open_location_button = tk.Button(directory_frame, text="📁", command=open_directory)
-    open_location_button.grid(row=1, column=1, padx=(10, 0), pady=(5, 5))
+    ttk.Button(general_tab, text="Open Location", command=open_directory).grid(row=7, column=0, sticky="w", pady=(4, 0))
+    general_tab.grid_columnconfigure(0, weight=1)
 
-    # Create a new row in top_frame and merge all three columns for the audio device selection
-    label = tk.Label(top_frame, text="Select Audio Output Device:")
-    label.grid(row=1, column=0, columnspan=3, sticky="w", padx=10, pady=(10, 5))
+    # --- Audio tab ---
+    ttk.Label(audio_tab, text="Audio alerts and output device settings", style="Small.TLabel").grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 8))
 
+    chunk_alert_frame = ttk.LabelFrame(audio_tab, text="Chunk Alert", style="Card.TLabelframe")
+    chunk_alert_frame.grid(row=1, column=0, padx=(0, 10), pady=6, sticky="nsew")
+
+    chunk_alert_var = tk.BooleanVar(value=config.get_setting("chunk_alert") == 'True')
+    ttk.Checkbutton(chunk_alert_frame, text="Enable Chunk Alert", variable=chunk_alert_var).pack(anchor="w", padx=10, pady=(8, 6))
+
+    ttk.Label(chunk_alert_frame, text="Trigger Amount", style="Small.TLabel").pack(anchor="w", padx=10)
+    chunk_alert_trigger_entry = ttk.Entry(chunk_alert_frame, width=12, justify='center')
+    chunk_alert_trigger_entry.pack(anchor="w", padx=10, pady=(2, 8))
+    chunk_alert_trigger_entry.insert(0, config.get_setting("chunk_alert_value") or "")
+
+    chunk_alert_label = ttk.Label(chunk_alert_frame, text="No file selected", style="Small.TLabel")
+    chunk_alert_label.pack(anchor="w", padx=10, pady=(0, 6))
+
+    file_button_frame = ttk.Frame(chunk_alert_frame, style="App.TFrame")
+    file_button_frame.pack(anchor="w", padx=10, pady=(0, 8))
+    ttk.Button(file_button_frame, text="📁", width=3,
+               command=lambda: select_chunk_alert_sound(chunk_alert_label, settings_window)).pack(side="left", padx=(0, 6))
+    ttk.Button(file_button_frame, text="🔊", width=3, command=test_chunkaudio_playback).pack(side="left")
+
+    saved_chunk_alert_file_path = config.get_setting("chunk_alert_sound")
+    if saved_chunk_alert_file_path:
+        update_chunk_alert_audio_label(chunk_alert_label, saved_chunk_alert_file_path)
+
+    marbles_reset_frame = ttk.LabelFrame(audio_tab, text="Marbles Reset", style="Card.TLabelframe")
+    marbles_reset_frame.grid(row=1, column=1, pady=6, sticky="nsew")
+
+    reset_audio_var = tk.BooleanVar(value=config.get_setting("reset_audio") == "True")
+    ttk.Checkbutton(marbles_reset_frame, text="Enable Reset Audio", variable=reset_audio_var).pack(anchor="w", padx=10, pady=(8, 6))
+
+    reset_audio_label = ttk.Label(marbles_reset_frame, text="No file selected", style="Small.TLabel")
+    reset_audio_label.pack(anchor="w", padx=10, pady=(0, 6))
+
+    reset_button_frame = ttk.Frame(marbles_reset_frame, style="App.TFrame")
+    reset_button_frame.pack(anchor="w", padx=10, pady=(0, 8))
+    ttk.Button(reset_button_frame, text="📁", width=3,
+               command=lambda: select_reset_audio_sound(reset_audio_label, settings_window)).pack(side="left", padx=(0, 6))
+    ttk.Button(reset_button_frame, text="🔊", width=3, command=test_audio_playback).pack(side="left")
+
+    saved_reset_file_path = config.get_setting("reset_audio_sound")
+    if saved_reset_file_path:
+        update_reset_audio_label(reset_audio_label, saved_reset_file_path)
+
+    ttk.Label(audio_tab, text="Select Audio Output Device").grid(row=2, column=0, columnspan=3, sticky="w", pady=(8, 4))
     audio_devices = get_audio_devices()
     selected_device = tk.StringVar()
-
-    # Retrieve the current audio device setting or use "Primary Sound Driver" as default
     current_device = config.get_setting('audio_device')
     if not current_device:
         current_device = "Primary Sound Driver"
         config.set_setting('audio_device', current_device)
-
     selected_device.set(current_device)
 
-    device_combobox = ttk.Combobox(top_frame, textvariable=selected_device, values=audio_devices, width=60)
-    device_combobox.grid(row=2, column=0, columnspan=3, sticky="w", padx=10, pady=(0, 10))
+    device_combobox = ttk.Combobox(audio_tab, textvariable=selected_device, values=audio_devices, width=62)
+    device_combobox.grid(row=3, column=0, columnspan=3, sticky="w")
 
-    # Save the selection back to config when user makes a selection
     def on_device_change(event):
         config.set_setting('audio_device', selected_device.get())
 
     device_combobox.bind('<<ComboboxSelected>>', on_device_change)
 
+    for idx in range(2):
+        audio_tab.grid_columnconfigure(idx, weight=1)
+
+    # --- Chat tab ---
+    ttk.Label(chat_tab, text="Control what MyStats announces in chat", style="Small.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 8))
+
+    chat_br_results_var = tk.BooleanVar(value=is_chat_response_enabled("chat_br_results"))
+    chat_race_results_var = tk.BooleanVar(value=is_chat_response_enabled("chat_race_results"))
+    chat_tilt_results_var = tk.BooleanVar(value=is_chat_response_enabled("chat_tilt_results"))
+    chat_all_commands_var = tk.BooleanVar(value=is_chat_response_enabled("chat_all_commands"))
+    chat_narrative_alerts_var = tk.BooleanVar(value=is_chat_response_enabled("chat_narrative_alerts"))
+    narrative_alert_grinder_var = tk.BooleanVar(value=is_chat_response_enabled("narrative_alert_grinder_enabled"))
+    narrative_alert_winmilestone_var = tk.BooleanVar(value=is_chat_response_enabled("narrative_alert_winmilestone_enabled"))
+    narrative_alert_leadchange_var = tk.BooleanVar(value=is_chat_response_enabled("narrative_alert_leadchange_enabled"))
+
+    ttk.Checkbutton(chat_tab, text="BR Results", variable=chat_br_results_var).grid(row=1, column=0, sticky="w", pady=2)
+    ttk.Checkbutton(chat_tab, text="Race Results", variable=chat_race_results_var).grid(row=2, column=0, sticky="w", pady=2)
+    ttk.Checkbutton(chat_tab, text="Tilt Results", variable=chat_tilt_results_var).grid(row=3, column=0, sticky="w", pady=2)
+    ttk.Checkbutton(chat_tab, text="All !commands", variable=chat_all_commands_var).grid(row=4, column=0, sticky="w", pady=2)
+    ttk.Checkbutton(chat_tab, text="Narrative Alerts", variable=chat_narrative_alerts_var).grid(row=5, column=0, sticky="w", pady=(2, 6))
+
+    narrative_alert_frame = ttk.LabelFrame(chat_tab, text="Narrative Alert Frequency", style="Card.TLabelframe")
+    narrative_alert_frame.grid(row=6, column=0, columnspan=2, sticky="ew", pady=(2, 8))
+
+    ttk.Checkbutton(narrative_alert_frame, text="Grinder milestones", variable=narrative_alert_grinder_var).grid(row=0, column=0, sticky="w", padx=10, pady=(8, 4))
+    ttk.Checkbutton(narrative_alert_frame, text="Win milestones", variable=narrative_alert_winmilestone_var).grid(row=1, column=0, sticky="w", padx=10, pady=2)
+    ttk.Checkbutton(narrative_alert_frame, text="Lead changes", variable=narrative_alert_leadchange_var).grid(row=2, column=0, sticky="w", padx=10, pady=(2, 8))
+
+    ttk.Label(narrative_alert_frame, text="Cooldown (races)", style="Small.TLabel").grid(row=0, column=1, sticky="w", padx=(12, 8), pady=(8, 2))
+    narrative_alert_cooldown_entry = ttk.Entry(narrative_alert_frame, width=8, justify='center')
+    narrative_alert_cooldown_entry.grid(row=0, column=2, sticky="w", padx=(0, 10), pady=(8, 2))
+    narrative_alert_cooldown_entry.insert(0, config.get_setting("narrative_alert_cooldown_races") or "3")
+
+    ttk.Label(narrative_alert_frame, text="Min lead gap", style="Small.TLabel").grid(row=1, column=1, sticky="w", padx=(12, 8), pady=2)
+    narrative_alert_min_gap_entry = ttk.Entry(narrative_alert_frame, width=8, justify='center')
+    narrative_alert_min_gap_entry.grid(row=1, column=2, sticky="w", padx=(0, 10), pady=2)
+    narrative_alert_min_gap_entry.insert(0, config.get_setting("narrative_alert_min_lead_change_points") or "500")
+
+    ttk.Label(narrative_alert_frame, text="Max items per alert", style="Small.TLabel").grid(row=2, column=1, sticky="w", padx=(12, 8), pady=(2, 8))
+    narrative_alert_max_items_entry = ttk.Entry(narrative_alert_frame, width=8, justify='center')
+    narrative_alert_max_items_entry.grid(row=2, column=2, sticky="w", padx=(0, 10), pady=(2, 8))
+    narrative_alert_max_items_entry.insert(0, config.get_setting("narrative_alert_max_items") or "3")
+
+    ttk.Label(chat_tab, text="Max names announced (Race/Tilt)").grid(row=7, column=0, sticky="w", pady=(4, 4))
+    max_name_values = [str(i) for i in range(3, 26)]
+    selected_max_names = tk.StringVar(value=str(get_chat_max_names()))
+    max_names_combobox = ttk.Combobox(chat_tab, textvariable=selected_max_names, values=max_name_values, width=5, state="readonly")
+    max_names_combobox.grid(row=7, column=1, sticky="w", pady=(4, 4), padx=(8, 0))
+
+    message_delay_frame = ttk.LabelFrame(chat_tab, text="Message Delay", style="Card.TLabelframe")
+    message_delay_frame.grid(row=8, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+
+    announce_delay_var = tk.BooleanVar(value=config.get_setting("announcedelay") == "True")
+    ttk.Checkbutton(message_delay_frame, text="Enable Delay", variable=announce_delay_var).grid(row=0, column=0, sticky="w", padx=10, pady=(8, 6))
+    ttk.Label(message_delay_frame, text="Delay Seconds", style="Small.TLabel").grid(row=1, column=0, sticky="w", padx=10)
+    delay_seconds_entry = ttk.Entry(message_delay_frame, width=12, justify='center')
+    delay_seconds_entry.grid(row=1, column=1, sticky="w", padx=(8, 10), pady=(0, 8))
+    delay_seconds_entry.insert(0, config.get_setting("announcedelayseconds") or "")
+
+    # --- Season Quests tab ---
+    ttk.Label(season_quests_tab, text="Configure long-term season goals and chat announcements", style="Small.TLabel").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
+
+    season_quests_enabled_var = tk.BooleanVar(value=is_chat_response_enabled("season_quests_enabled"))
+    ttk.Checkbutton(season_quests_tab, text="Enable Season Quests", variable=season_quests_enabled_var).grid(row=1, column=0, sticky="w", pady=(0, 10), columnspan=2)
+
+    ttk.Label(season_quests_tab, text="Season Race Target").grid(row=2, column=0, sticky="w", pady=(2, 4))
+    season_quest_races_entry = ttk.Entry(season_quests_tab, width=12, justify='center')
+    season_quest_races_entry.grid(row=2, column=1, sticky="w", pady=(2, 4))
+    season_quest_races_entry.insert(0, config.get_setting("season_quest_target_races") or "1000")
+
+    ttk.Label(season_quests_tab, text="Season Points Target").grid(row=3, column=0, sticky="w", pady=(2, 4))
+    season_quest_points_entry = ttk.Entry(season_quests_tab, width=12, justify='center')
+    season_quest_points_entry.grid(row=3, column=1, sticky="w", pady=(2, 4))
+    season_quest_points_entry.insert(0, config.get_setting("season_quest_target_points") or "500000")
+
+    ttk.Label(season_quests_tab, text="Race High Score Target").grid(row=4, column=0, sticky="w", pady=(2, 4))
+    season_quest_race_hs_entry = ttk.Entry(season_quests_tab, width=12, justify='center')
+    season_quest_race_hs_entry.grid(row=4, column=1, sticky="w", pady=(2, 4))
+    season_quest_race_hs_entry.insert(0, config.get_setting("season_quest_target_race_hs") or "3000")
+
+    ttk.Label(season_quests_tab, text="BR High Score Target").grid(row=5, column=0, sticky="w", pady=(2, 4))
+    season_quest_br_hs_entry = ttk.Entry(season_quests_tab, width=12, justify='center')
+    season_quest_br_hs_entry.grid(row=5, column=1, sticky="w", pady=(2, 4))
+    season_quest_br_hs_entry.insert(0, config.get_setting("season_quest_target_br_hs") or "3000")
+
+    ttk.Label(season_quests_tab, text="Tip: Set any target to 0 to disable that specific quest.", style="Small.TLabel").grid(row=6, column=0, columnspan=2, sticky="w", pady=(8, 4))
+
+    def reset_season_quest_progress():
+        for completion_key in ("season_quest_complete_races", "season_quest_complete_points", "season_quest_complete_race_hs", "season_quest_complete_br_hs"):
+            config.set_setting(completion_key, "False", persistent=True)
+        messagebox.showinfo("Season Quests", "Season quest completion flags have been reset.")
+
+    ttk.Button(season_quests_tab, text="Reset Quest Progress", command=reset_season_quest_progress).grid(row=7, column=0, sticky="w", pady=(8, 0))
+    ttk.Button(season_quests_tab, text="View Quest Completion", command=lambda: open_quest_completion_window(settings_window)).grid(row=7, column=1, sticky="w", pady=(8, 0))
+
+    # --- Rivals tab ---
+    ttk.Label(rivals_tab, text="Configure rivalry detection and commands", style="Small.TLabel").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
+
+    rivals_enabled_var = tk.BooleanVar(value=is_chat_response_enabled("rivals_enabled"))
+    ttk.Checkbutton(rivals_tab, text="Enable Rivals", variable=rivals_enabled_var).grid(row=1, column=0, sticky="w", pady=(0, 10), columnspan=2)
+
+    ttk.Label(rivals_tab, text="Minimum Season Races").grid(row=2, column=0, sticky="w", pady=(2, 4))
+    rivals_min_races_entry = ttk.Entry(rivals_tab, width=12, justify='center')
+    rivals_min_races_entry.grid(row=2, column=1, sticky="w", pady=(2, 4))
+    rivals_min_races_entry.insert(0, config.get_setting("rivals_min_races") or "50")
+
+    ttk.Label(rivals_tab, text="Maximum Point Gap").grid(row=3, column=0, sticky="w", pady=(2, 4))
+    rivals_max_gap_entry = ttk.Entry(rivals_tab, width=12, justify='center')
+    rivals_max_gap_entry.grid(row=3, column=1, sticky="w", pady=(2, 4))
+    rivals_max_gap_entry.insert(0, config.get_setting("rivals_max_point_gap") or "1500")
+
+    ttk.Label(rivals_tab, text="Pairs to Show").grid(row=4, column=0, sticky="w", pady=(2, 4))
+    rivals_pair_count_entry = ttk.Entry(rivals_tab, width=12, justify='center')
+    rivals_pair_count_entry.grid(row=4, column=1, sticky="w", pady=(2, 4))
+    rivals_pair_count_entry.insert(0, config.get_setting("rivals_pair_count") or "25")
+
+    ttk.Button(rivals_tab, text="View Rivalries", command=lambda: open_rivalries_window(settings_window)).grid(row=5, column=0, sticky="w", pady=(8, 0))
+
+    # --- Appearance tab ---
+    ttk.Label(appearance_tab, text="Theme and visual preferences", style="Small.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 8))
+    ttk.Label(appearance_tab, text="UI Theme").grid(row=1, column=0, sticky="w", pady=(0, 4))
+
+    selected_theme = tk.StringVar(value=config.get_setting("UI_THEME") or app_style.theme_use())
+    available_themes = get_available_ui_themes()
+    if selected_theme.get() not in available_themes:
+        available_themes = [selected_theme.get()] + available_themes
+
+    theme_combobox = ttk.Combobox(appearance_tab, textvariable=selected_theme, values=available_themes, width=24, state="readonly")
+    theme_combobox.grid(row=1, column=1, sticky="w", pady=(0, 4), padx=(8, 0))
+
+    def apply_selected_theme(event=None):
+        try:
+            apply_theme(selected_theme.get())
+            config.set_setting("UI_THEME", selected_theme.get(), persistent=True)
+        except Exception as e:
+            messagebox.showerror("Theme Error", f"Could not apply theme: {e}")
+
+    theme_combobox.bind('<<ComboboxSelected>>', apply_selected_theme)
+
+    def reset_settings_defaults():
+        chunk_alert_var.set(True)
+        announce_delay_var.set(False)
+        reset_audio_var.set(False)
+        chat_br_results_var.set(True)
+        chat_race_results_var.set(True)
+        chat_tilt_results_var.set(True)
+        chat_all_commands_var.set(True)
+        chat_narrative_alerts_var.set(True)
+        narrative_alert_grinder_var.set(True)
+        narrative_alert_winmilestone_var.set(True)
+        narrative_alert_leadchange_var.set(True)
+        narrative_alert_cooldown_entry.delete(0, tk.END)
+        narrative_alert_cooldown_entry.insert(0, "3")
+        narrative_alert_min_gap_entry.delete(0, tk.END)
+        narrative_alert_min_gap_entry.insert(0, "500")
+        narrative_alert_max_items_entry.delete(0, tk.END)
+        narrative_alert_max_items_entry.insert(0, "3")
+        season_quests_enabled_var.set(True)
+        rivals_enabled_var.set(True)
+        selected_max_names.set("25")
+        rivals_min_races_entry.delete(0, tk.END)
+        rivals_min_races_entry.insert(0, "50")
+        rivals_max_gap_entry.delete(0, tk.END)
+        rivals_max_gap_entry.insert(0, "1500")
+        rivals_pair_count_entry.delete(0, tk.END)
+        rivals_pair_count_entry.insert(0, "25")
+        season_quest_races_entry.delete(0, tk.END)
+        season_quest_races_entry.insert(0, "1000")
+        season_quest_points_entry.delete(0, tk.END)
+        season_quest_points_entry.insert(0, "500000")
+        season_quest_race_hs_entry.delete(0, tk.END)
+        season_quest_race_hs_entry.insert(0, "3000")
+        season_quest_br_hs_entry.delete(0, tk.END)
+        season_quest_br_hs_entry.insert(0, "3000")
+        chunk_alert_trigger_entry.delete(0, tk.END)
+        chunk_alert_trigger_entry.insert(0, "1000")
+        delay_seconds_entry.delete(0, tk.END)
+        delay_seconds_entry.insert(0, "0")
+
+    footer = ttk.Frame(settings_window, style="App.TFrame")
+    footer.pack(side="bottom", fill="x", padx=20, pady=10)
+
+    ttk.Button(footer, text="Reset Defaults", command=reset_settings_defaults).pack(side="left")
+
     def save_settings_and_close():
-        # -- Example: Channel entry --
         config.set_setting("CHANNEL", channel_entry.get(), persistent=True)
-
-        # -- Example: Chunk Alert Toggle --
-        chunk_alert_is_on = (chunk_alert_button["text"] == "ON")
-        config.set_setting("chunk_alert", str(chunk_alert_is_on), persistent=True)
-
-        # -- Example: Chunk Alert Trigger Amount --
+        config.set_setting("chunk_alert", str(chunk_alert_var.get()), persistent=True)
         config.set_setting("chunk_alert_value", chunk_alert_trigger_entry.get(), persistent=True)
-
-        # -- Example: Announce Delay Toggle and Seconds --
-        announce_delay_is_on = (announce_delay_button["text"] == "ON")
-        config.set_setting("announcedelay", str(announce_delay_is_on), persistent=True)
+        config.set_setting("announcedelay", str(announce_delay_var.get()), persistent=True)
         config.set_setting("announcedelayseconds", delay_seconds_entry.get(), persistent=True)
-
-        # -- Example: Reset Audio Toggle --
-        reset_audio_is_on = (reset_audio_button["text"] == "ON")
-        config.set_setting("reset_audio", str(reset_audio_is_on), persistent=True)
-
-        # -- Example: Audio Device Selection --
+        config.set_setting("reset_audio", str(reset_audio_var.get()), persistent=True)
         config.set_setting("audio_device", selected_device.get(), persistent=True)
-        
-        # Since set_setting(persistent=True) automatically calls config.save_settings() 
-        # for each item that is in persistent_keys, we do *not* need to manually call
-        # config.save_settings() again (unless you want to).
-
-        # 2) Close the settings window
+        config.set_setting("UI_THEME", selected_theme.get(), persistent=True)
+        config.set_setting("chat_br_results", str(chat_br_results_var.get()), persistent=True)
+        config.set_setting("chat_race_results", str(chat_race_results_var.get()), persistent=True)
+        config.set_setting("chat_tilt_results", str(chat_tilt_results_var.get()), persistent=True)
+        config.set_setting("chat_all_commands", str(chat_all_commands_var.get()), persistent=True)
+        config.set_setting("chat_narrative_alerts", str(chat_narrative_alerts_var.get()), persistent=True)
+        config.set_setting("narrative_alert_grinder_enabled", str(narrative_alert_grinder_var.get()), persistent=True)
+        config.set_setting("narrative_alert_winmilestone_enabled", str(narrative_alert_winmilestone_var.get()), persistent=True)
+        config.set_setting("narrative_alert_leadchange_enabled", str(narrative_alert_leadchange_var.get()), persistent=True)
+        config.set_setting("narrative_alert_cooldown_races", narrative_alert_cooldown_entry.get(), persistent=True)
+        config.set_setting("narrative_alert_min_lead_change_points", narrative_alert_min_gap_entry.get(), persistent=True)
+        config.set_setting("narrative_alert_max_items", narrative_alert_max_items_entry.get(), persistent=True)
+        config.set_setting("season_quests_enabled", str(season_quests_enabled_var.get()), persistent=True)
+        config.set_setting("season_quest_target_races", season_quest_races_entry.get(), persistent=True)
+        config.set_setting("season_quest_target_points", season_quest_points_entry.get(), persistent=True)
+        config.set_setting("season_quest_target_race_hs", season_quest_race_hs_entry.get(), persistent=True)
+        config.set_setting("season_quest_target_br_hs", season_quest_br_hs_entry.get(), persistent=True)
+        config.set_setting("rivals_enabled", str(rivals_enabled_var.get()), persistent=True)
+        config.set_setting("rivals_min_races", rivals_min_races_entry.get(), persistent=True)
+        config.set_setting("rivals_max_point_gap", rivals_max_gap_entry.get(), persistent=True)
+        config.set_setting("rivals_pair_count", rivals_pair_count_entry.get(), persistent=True)
+        config.set_setting("chat_max_names", selected_max_names.get(), persistent=True)
         settings_window.destroy()
 
-    # 3) Create a Save button that calls 'save_settings_and_close'
-    #    Or you can modify your existing "Close" button to do this instead of just destroying the window.
-    close_button_frame = tk.Frame(settings_window)
-    close_button_frame.pack(side="bottom", fill="x", padx=20, pady=10)
-
-    close_button = tk.Button(close_button_frame, text="Save and Close", command=save_settings_and_close)
-    close_button.pack(side="right")
+    ttk.Button(footer, text="Save and Close", command=save_settings_and_close, style="Primary.TButton").pack(side="right")
 
 def test_chunkaudio_playback():
     """
@@ -949,8 +1526,9 @@ def on_close():
     # Create the "Please Wait" window
     wait_window = show_wait_window()
 
-    # Schedule bot shutdown in the bot's event loop
-    asyncio.run_coroutine_threadsafe(bot.shutdown(), bot.loop)
+    # Schedule bot shutdown in the bot's event loop (when available)
+    if bot is not None and getattr(bot, "loop", None) is not None:
+        asyncio.run_coroutine_threadsafe(bot.shutdown(), bot.loop)
 
     # Destroy the Tkinter windows after a delay
     def close_windows():
@@ -963,107 +1541,123 @@ def on_close():
 
 
 
-# Tkinter Initialization
-root = tk.Tk()
-root.protocol("WM_DELETE_WINDOW", on_close)
-root.title("MyStats - Marbles On Stream Companion Application")
-root.geometry("800x500")
-root.resizable(False, False)
-
-root.grid_rowconfigure(1, weight=1)
-root.grid_columnconfigure(1, weight=1)
-
-stats_container_frame = tk.Frame(root)
-stats_container_frame.grid(row=0, column=0, rowspan=2, sticky='nw', padx=10, pady=10)
-
-# Stats Frame on the left
-season_stats_frame = tk.LabelFrame(stats_container_frame, text="Season Statistics", padx=10, pady=10, bd=2,
-                                   relief=tk.GROOVE, labelanchor='n')
-season_stats_frame.pack(fill='x', pady=(0, 10))  # Pack them vertically within the container
-
-# Add statistics labels to stats_frame
-total_points_label = tk.Label(season_stats_frame, text="Total Points: 0")
-total_points_label.pack(anchor='w')
-
-total_count_label = tk.Label(season_stats_frame, text="Total Count: 0")
-total_count_label.pack(anchor='w')
-
-avg_points_label = tk.Label(season_stats_frame, text="Avg Points: 0")
-avg_points_label.pack(anchor='w')
-
-race_hs_label = tk.Label(season_stats_frame, text="Race HS: 0")
-race_hs_label.pack(anchor='w')
-
-br_hs_label = tk.Label(season_stats_frame, text="BR HS: 0")
-br_hs_label.pack(anchor='w')
-
-# Today's Statistics Frame under Season Statistics
-todays_stats_frame = tk.LabelFrame(stats_container_frame, text="Today's Statistics", padx=10, pady=10, bd=2,
-                                   relief=tk.GROOVE, labelanchor='n')
-todays_stats_frame.pack(fill='x')
-
-# Add today's statistics labels to todays_stats_frame
-total_points_t_label = tk.Label(todays_stats_frame, text="Total Points: 0")
-total_points_t_label.pack(anchor='w')
-
-total_count_t_label = tk.Label(todays_stats_frame, text="Total Count: 0")
-total_count_t_label.pack(anchor='w')
-
-avg_points_t_label = tk.Label(todays_stats_frame, text="Avg Points: 0")
-avg_points_t_label.pack(anchor='w')
-
-race_hs_t_label = tk.Label(todays_stats_frame, text="Race HS: 0")
-race_hs_t_label.pack(anchor='w')
-
-br_hs_t_label = tk.Label(todays_stats_frame, text="BR HS: 0")
-br_hs_t_label.pack(anchor='w')
-
-# Button Frame under the stats_frame for settings events mpl buttons
-button_frame = tk.Frame(stats_container_frame)
-button_frame.pack(pady=(20, 0))
-
-button_width = 8
-
-# Add buttons to button_frame
-settings_button = tk.Button(button_frame, text="Settings", command=open_settings_window, width=button_width)
-settings_button.grid(row=0, column=0, padx=5, pady=(0, 5))
-button_frame.grid_rowconfigure(3, weight=1)
-
-url_label = tk.Label(button_frame, text="https://mystats.camwow.tv", fg="blue", cursor="hand2", font=("Arial", 10, "underline"))
-url_label.grid(row=3, column=0, columnspan=2, pady=(85, 0), sticky="s")
-
-# Make the URL clickable
 def open_url(event):
-    import webbrowser
     webbrowser.open("https://mystats.camwow.tv")
 
-url_label.bind("<Button-1>", open_url)
 
-# Top Frame (for MyStats title and Login)
-top_frame1 = tk.Frame(root)
-top_frame1.grid(row=0, column=1, sticky='ew', padx=(5, 0))
+def build_stats_sidebar(parent):
+    global total_points_label, total_count_label, avg_points_label, race_hs_label, br_hs_label
+    global total_points_t_label, total_count_t_label, avg_points_t_label, race_hs_t_label, br_hs_t_label
 
-# MyStats title label in top_frame1
-title_label = tk.Label(top_frame1, text="MyStats", font=("Arial", 16, "bold"))
-title_label.grid(row=0, column=0, sticky='w', padx=(5, 0))
-top_frame1.grid_columnconfigure(0, weight=1)
+    stats_container_frame = ttk.Frame(parent, style="App.TFrame")
+    stats_container_frame.grid(row=0, column=0, rowspan=2, sticky='nw', padx=10, pady=10)
 
-# Login Frame within top_frame1
-login_button_frame = tk.Frame(top_frame1)
-login_button_frame.grid(row=0, column=1, sticky='e')
+    season_stats_frame = ttk.LabelFrame(stats_container_frame, text="Season Statistics", style="Card.TLabelframe")
+    season_stats_frame.pack(fill='x', pady=(0, 10))
 
-chatbot_label = tk.Label(login_button_frame, text="Current ChatBot", font=("Arial", 8))
-chatbot_label.grid(row=0, column=1, sticky='e', padx=(0, 5))
+    season_stat_labels = build_stats_labels(season_stats_frame)
+    total_points_label = season_stat_labels["total_points"]
+    total_count_label = season_stat_labels["total_count"]
+    avg_points_label = season_stat_labels["avg_points"]
+    race_hs_label = season_stat_labels["race_hs"]
+    br_hs_label = season_stat_labels["br_hs"]
 
-login_button = tk.Button(login_button_frame, text="Custom Bot Login", command=open_login_url)
-login_button.grid(row=1, column=1, sticky='e', padx=(0, 5))
+    todays_stats_frame = ttk.LabelFrame(stats_container_frame, text="Today's Statistics", style="Card.TLabelframe")
+    todays_stats_frame.pack(fill='x')
 
-# Text area below the top frame, filling the remaining space
-text_area = tk.Text(root, wrap='word', height=30, width=60, bg="black", fg="white")
-text_area.grid(row=1, column=1, sticky='nsew', padx=(0, 5), pady=5)
-root.update_idletasks()
+    today_stat_labels = build_stats_labels(todays_stats_frame)
+    total_points_t_label = today_stat_labels["total_points"]
+    total_count_t_label = today_stat_labels["total_count"]
+    avg_points_t_label = today_stat_labels["avg_points"]
+    race_hs_t_label = today_stat_labels["race_hs"]
+    br_hs_t_label = today_stat_labels["br_hs"]
 
-root.grid_columnconfigure(1, weight=1)
+    button_frame = ttk.Frame(stats_container_frame, style="App.TFrame")
+    button_frame.pack(pady=(20, 0))
+
+    button_width = 8
+
+    settings_button = ttk.Button(
+        button_frame,
+        text="Settings",
+        command=open_settings_window,
+        width=button_width,
+        style="Primary.TButton"
+    )
+    settings_button.grid(row=0, column=0, padx=5, pady=(0, 5))
+
+    events_button = ttk.Button(
+        button_frame,
+        text="Events",
+        command=open_events_window,
+        width=button_width,
+        style="Primary.TButton"
+    )
+    events_button.grid(row=0, column=1, padx=5, pady=(0, 5))
+
+    button_frame.grid_rowconfigure(3, weight=1)
+
+    url_label = tk.Label(button_frame, text="https://mystats.camwow.tv", fg="blue", cursor="hand2", font=("Arial", 10, "underline"))
+    url_label.grid(row=3, column=0, columnspan=2, pady=(85, 0), sticky="s")
+    url_label.bind("<Button-1>", open_url)
+
+
+def build_main_content(parent):
+    global chatbot_label, login_button, text_area
+
+    top_frame1 = ttk.Frame(parent, style="App.TFrame")
+    top_frame1.grid(row=0, column=1, sticky='ew', padx=(5, 0))
+
+    title_label = ttk.Label(top_frame1, text="MyStats", style="Heading.TLabel")
+    title_label.grid(row=0, column=0, sticky='w', padx=(5, 0))
+    top_frame1.grid_columnconfigure(0, weight=1)
+
+    login_button_frame = ttk.Frame(top_frame1, style="App.TFrame")
+    login_button_frame.grid(row=0, column=1, sticky='e')
+
+    chatbot_label = ttk.Label(login_button_frame, text="Current ChatBot", style="Small.TLabel")
+    chatbot_label.grid(row=0, column=1, sticky='e', padx=(0, 5))
+
+    login_button = ttk.Button(login_button_frame, text="Custom Bot Login", command=open_login_url, style="Primary.TButton")
+    login_button.grid(row=1, column=1, sticky='e', padx=(0, 5))
+
+    text_area = tk.Text(parent, wrap='word', height=30, width=60, bg="black", fg="white")
+    text_area.grid(row=1, column=1, sticky='nsew', padx=(0, 5), pady=5)
+
+
+def initialize_main_window():
+    global app_style
+
+    root_window, app_style = create_root_window()
+    apply_ui_styles(app_style)
+
+    # Keep classic tk.Button widgets visually flatter to match ttk style.
+    root_window.option_add("*Button.relief", "flat")
+    root_window.option_add("*Button.borderWidth", 0)
+    root_window.option_add("*Button.highlightThickness", 0)
+
+    root_window.protocol("WM_DELETE_WINDOW", on_close)
+    root_window.title("MyStats - Marbles On Stream Companion Application")
+
+    window_width = 800
+    window_height = 500
+    screen_width = root_window.winfo_screenwidth()
+    screen_height = root_window.winfo_screenheight()
+    pos_x = (screen_width // 2) - (window_width // 2)
+    pos_y = (screen_height // 2) - (window_height // 2)
+    root_window.geometry(f"{window_width}x{window_height}+{pos_x}+{pos_y}")
+    root_window.resizable(False, False)
+
+    root_window.grid_rowconfigure(1, weight=1)
+    root_window.grid_columnconfigure(1, weight=1)
+
+    build_stats_sidebar(root_window)
+    build_main_content(root_window)
+
+    root_window.update_idletasks()
+    root_window.grid_columnconfigure(1, weight=1)
+
+    return root_window
 
 
 def open_events_window():
@@ -1318,21 +1912,11 @@ def open_events_window():
 
     def open_create_event_window():
         events_window.destroy()
-        root.update_idletasks()
-        root_width = root.winfo_width()
-        root_height = root.winfo_height()
-        root_x = root.winfo_x()
-        root_y = root.winfo_y()
 
         create_event_window = tk.Toplevel(root)
         create_event_window.title("Create Event")
-        create_event_window.geometry("300x300")
-
-        window_width = 300
-        window_height = 300
-        window_x = root_x + (root_width // 2) - (window_width // 2)
-        window_y = root_y + (root_height // 2) - (window_height // 2)
-        create_event_window.geometry(f"{window_width}x{window_height}+{window_x}+{window_y}")
+        create_event_window.resizable(False, False)
+        center_toplevel(create_event_window, 420, 320)
 
         def on_create_event_close():
             create_event_window.destroy()
@@ -1340,22 +1924,62 @@ def open_events_window():
 
         create_event_window.protocol("WM_DELETE_WINDOW", on_create_event_close)
 
-        tk.Label(create_event_window, text="Event Name").pack(pady=5)
-        event_name_entry = tk.Entry(create_event_window)
-        event_name_entry.pack(pady=5)
+        form_frame = ttk.Frame(create_event_window, style="App.TFrame", padding=(12, 10))
+        form_frame.pack(fill="both", expand=True)
 
-        tk.Label(create_event_window, text="Event Start Date").pack(pady=5)
-        event_start_entry = DateEntry(create_event_window, date_pattern='y-mm-dd')
-        event_start_entry.pack(pady=5)
+        ttk.Label(form_frame, text="Event Name").grid(row=0, column=0, sticky="w", pady=(0, 4))
+        event_name_entry = ttk.Entry(form_frame, width=34)
+        event_name_entry.grid(row=1, column=0, sticky="ew", pady=(0, 10))
 
-        tk.Label(create_event_window, text="Event End Date").pack(pady=5)
-        event_end_entry = DateEntry(create_event_window, date_pattern='y-mm-dd')
-        event_end_entry.pack(pady=5)
+        def build_date_picker(parent, row_index, label_text):
+            ttk.Label(parent, text=label_text).grid(row=row_index, column=0, sticky="w", pady=(0, 4))
+
+            value = tk.StringVar(value=datetime.now().strftime('%Y-%m-%d'))
+            field_frame = ttk.Frame(parent, style="App.TFrame")
+            field_frame.grid(row=row_index + 1, column=0, sticky="w", pady=(0, 10))
+
+            date_entry = ttk.Entry(field_frame, textvariable=value, width=22)
+            date_entry.pack(side="left")
+
+            def open_calendar_popup():
+                popup = tk.Toplevel(create_event_window)
+                popup.title("Select Date")
+                popup.resizable(False, False)
+                popup.transient(create_event_window)
+
+                calendar = Calendar(popup, date_pattern='y-mm-dd', selectmode='day')
+                calendar.pack(padx=10, pady=10)
+
+                if value.get():
+                    try:
+                        calendar.selection_set(datetime.strptime(value.get(), '%Y-%m-%d').date())
+                    except ValueError:
+                        pass
+
+                def use_selected_date():
+                    value.set(calendar.get_date())
+                    popup.destroy()
+
+                ttk.Button(popup, text="Use Date", command=use_selected_date, style="Primary.TButton").pack(pady=(0, 10))
+
+                popup.update_idletasks()
+                popup_width = popup.winfo_width()
+                popup_height = popup.winfo_height()
+                popup_x = create_event_window.winfo_x() + (create_event_window.winfo_width() // 2) - (popup_width // 2)
+                popup_y = create_event_window.winfo_y() + (create_event_window.winfo_height() // 2) - (popup_height // 2)
+                popup.geometry(f"{popup_width}x{popup_height}+{popup_x}+{popup_y}")
+                popup.grab_set()
+
+            ttk.Button(field_frame, text="📅", width=3, command=open_calendar_popup).pack(side="left", padx=(6, 0))
+            return value
+
+        event_start_value = build_date_picker(form_frame, 2, "Event Start Date")
+        event_end_value = build_date_picker(form_frame, 4, "Event End Date")
 
         def create_event():
             event_name = event_name_entry.get()
-            event_start = event_start_entry.get_date().strftime('%Y-%m-%d')
-            event_end = event_end_entry.get_date().strftime('%Y-%m-%d')
+            event_start = event_start_value.get()
+            event_end = event_end_value.get()
 
             confirm = messagebox.askyesno(
                 "Confirm Event Creation",
@@ -1382,8 +2006,11 @@ def open_events_window():
                 except requests.RequestException as e:
                     messagebox.showerror("Error", f"Failed to create event: {e}")
 
-        tk.Button(create_event_window, text="Create Event", command=create_event).pack(pady=10)
-        tk.Button(create_event_window, text="Cancel", command=on_create_event_close).pack(pady=5)
+        button_row = ttk.Frame(form_frame, style="App.TFrame")
+        button_row.grid(row=6, column=0, sticky="e")
+
+        ttk.Button(button_row, text="Create Event", command=create_event, style="Primary.TButton").pack(side="left", padx=(0, 8))
+        ttk.Button(button_row, text="Cancel", command=on_create_event_close).pack(side="left")
 
     create_event_button = tk.Button(events_window, text="Create Event", command=open_create_event_window)
     create_event_button.pack(pady=5)
@@ -1396,10 +2023,8 @@ def open_events_window():
     update_event_list()
 
 
-# Call the open_events_window function to open the events window
-# Add the events button next to the settings button in the main window
-events_button = tk.Button(button_frame, text="Events", command=open_events_window, width=button_width)
-events_button.grid(row=0, column=1, padx=5, pady=(0, 5))
+# Tkinter Initialization
+root = initialize_main_window()
 
 # Start Flask server in a separate thread
 flask_thread = threading.Thread(target=run_flask)
@@ -1473,8 +2098,49 @@ class ConfigManager:
                                 'directory', 'race_file', 'br_file', 'season', 'reset_audio', 'sync', 'MPL',
                                 'chunk_alert_sound', 'reset_audio_sound', 'audio_device', 'checkpoint_file',
                                 'tilt_player_file', 'active_event_ids', 'paused_event_ids', 'checkpoint_results_file',
-                                'tilts_results_file', 'tilt_level_file', 'map_data_file', 'map_results_file'}
+                                'tilts_results_file', 'tilt_level_file', 'map_data_file', 'map_results_file',
+                                'UI_THEME', 'chat_br_results', 'chat_race_results', 'chat_tilt_results',
+                                'chat_mystats_command', 'chat_all_commands', 'chat_narrative_alerts',
+                                'narrative_alert_grinder_enabled', 'narrative_alert_winmilestone_enabled',
+                                'narrative_alert_leadchange_enabled', 'narrative_alert_cooldown_races',
+                                'narrative_alert_min_lead_change_points', 'narrative_alert_max_items', 'chat_max_names',
+                                'season_quests_enabled', 'season_quest_target_races', 'season_quest_target_points',
+                                'season_quest_target_race_hs', 'season_quest_target_br_hs', 'season_quest_complete_races',
+                                'season_quest_complete_points', 'season_quest_complete_race_hs', 'season_quest_complete_br_hs',
+                                'rivals_enabled', 'rivals_min_races', 'rivals_max_point_gap', 'rivals_pair_count'}
         self.transient_keys = set([])
+        self.defaults = {
+            'chat_br_results': 'True',
+            'chat_race_results': 'True',
+            'chat_tilt_results': 'True',
+            'chat_mystats_command': 'True',
+            'chat_all_commands': 'True',
+            'chat_narrative_alerts': 'True',
+            'narrative_alert_grinder_enabled': 'True',
+            'narrative_alert_winmilestone_enabled': 'True',
+            'narrative_alert_leadchange_enabled': 'True',
+            'narrative_alert_cooldown_races': '3',
+            'narrative_alert_min_lead_change_points': '500',
+            'narrative_alert_max_items': '3',
+            'chat_max_names': '25',
+            'season_quests_enabled': 'True',
+            'season_quest_target_races': '1000',
+            'season_quest_target_points': '500000',
+            'season_quest_target_race_hs': '3000',
+            'season_quest_target_br_hs': '3000',
+            'season_quest_complete_races': 'False',
+            'season_quest_complete_points': 'False',
+            'season_quest_complete_race_hs': 'False',
+            'season_quest_complete_br_hs': 'False',
+            'rivals_enabled': 'True',
+            'rivals_min_races': '50',
+            'rivals_max_point_gap': '1500',
+            'rivals_pair_count': '25',
+            'UI_THEME': DEFAULT_UI_THEME,
+            'announcedelay': 'False',
+            'announcedelayseconds': '0',
+            'chunk_alert_value': '1000'
+        }
         self.load_settings()
 
     def load_settings(self):
@@ -1496,7 +2162,9 @@ class ConfigManager:
     def get_setting(self, key):
         if key in self.transient_settings:
             return self.transient_settings[key]
-        return self.settings.get(key, None)
+        if key in self.settings:
+            return self.settings[key]
+        return self.defaults.get(key, None)
 
     def set_setting(self, key, value, persistent=True):
         if key == "CHANNEL":
@@ -1520,13 +2188,24 @@ class ConfigManager:
             else:
                 print(f"Invalid value for {key}: {value}. Resetting to default (1000).")
                 return False
+
+        if key in {"season_quest_target_races", "season_quest_target_points", "season_quest_target_race_hs", "season_quest_target_br_hs",
+                   "rivals_min_races", "rivals_max_point_gap", "rivals_pair_count",
+                   "narrative_alert_cooldown_races", "narrative_alert_min_lead_change_points", "narrative_alert_max_items"}:
+            if isinstance(value, int) or (isinstance(value, str) and value.isdigit()):
+                return True
+            print(f"Invalid value for {key}: {value}. Value must be a whole number.")
+            return False
+
         return True
 
     def save_settings(self):
-        with open(self.settings_file, "w") as f:
+        temp_file = f"{self.settings_file}.tmp"
+        with open(temp_file, "w") as f:
             for key, value in self.settings.items():
                 if key in self.persistent_keys:
                     f.write(f"{key}={value}\n")
+        os.replace(temp_file, self.settings_file)
 
 
 config = ConfigManager()
@@ -2168,12 +2847,11 @@ def ver_season_only():
 
     def retry_popup():
         """Show retry popup to prompt user login and retry."""
-        retry_window = tk.Tk()
-        retry_window.withdraw()  # Hide root window
-        result = messagebox.askretrycancel("Login Required",
-                                           "You must log in to the website to use MyStats. Click Retry to try again.")
-        retry_window.destroy()  # Close the popup window
-        return result
+        return messagebox.askretrycancel(
+            "Login Required",
+            "You must log in to the website to use MyStats. Click Retry to try again.",
+            parent=root
+        )
 
     retry_request()  # Initial API call
 
@@ -2341,6 +3019,10 @@ class Bot(commands.Bot):
             return
 
         content = message.content.lower()
+
+        if content.startswith('!') and not is_chat_response_enabled("chat_all_commands"):
+            return
+
         new_message = copy.copy(message)
         new_message.content = content
         await self.handle_commands(new_message)
@@ -2507,6 +3189,10 @@ class Bot(commands.Bot):
         await ctx.channel.send(
             "Purchase Skins or Coins for yourself, or gift them to a friend!  https://pixelbypixel.studio/shop")
 
+    @commands.command(name='wiki')
+    async def wiki(self, ctx):
+        await ctx.channel.send("Marbles on Stream Wiki - https://wiki.pixelbypixel.studio/")
+
     @commands.command(name='commands')
     async def list_commands(self, ctx):
         excluded_commands = ['commands', 'mplreset']
@@ -2518,6 +3204,101 @@ class Bot(commands.Bot):
     def get_commands(self):
         excluded_commands = ['commands', 'mplreset']
         return [f'!{cmd.name}' for cmd in self.commands.values() if cmd.name not in excluded_commands]
+
+    @commands.command(name='rivals')
+    async def rivals_command(self, ctx, username: str = None):
+        if not is_chat_response_enabled("rivals_enabled"):
+            await ctx.channel.send("Rivals are currently disabled.")
+            return
+
+        if username:
+            rival_data = get_user_rivals(username, limit=5)
+            if rival_data is None:
+                await ctx.channel.send(f"{username}: no season rival data found.")
+                return
+
+            if rival_data['races'] < rival_data['min_races_required']:
+                await ctx.channel.send(
+                    f"{rival_data['display_name']}: {rival_data['races']:,} races so far. "
+                    f"Need {rival_data['min_races_required']:,}+ races for rivals tracking."
+                )
+                return
+
+            if not rival_data['rivals']:
+                await ctx.channel.send(
+                    f"{rival_data['display_name']}: no close rivals found within configured point gap."
+                )
+                return
+
+            entries = [
+                f"{row['display_name']} (gap {row['point_gap']:,})"
+                for row in rival_data['rivals']
+            ]
+            await ctx.channel.send(
+                f"Top rivals for {rival_data['display_name']}: " + " | ".join(entries)
+            )
+            return
+
+        rivalries = get_global_rivalries(limit=5)
+        if not rivalries:
+            await ctx.channel.send("No rivalries found yet with current rival settings.")
+            return
+
+        entries = [
+            f"{row['display_a']} vs {row['display_b']} (gap {row['point_gap']:,})"
+            for row in rivalries
+        ]
+        await ctx.channel.send("Top Rivalries: " + " | ".join(entries))
+
+    @commands.command(name='h2h')
+    async def head_to_head_command(self, ctx, user_a: str = None, user_b: str = None):
+        if not is_chat_response_enabled("rivals_enabled"):
+            await ctx.channel.send("Rivals are currently disabled.")
+            return
+
+        if not user_a or not user_b:
+            await ctx.channel.send("Usage: !h2h <user1> <user2>")
+            return
+
+        user_stats = get_user_season_stats()
+        user_a_key = resolve_user_in_stats(user_stats, user_a)
+        user_b_key = resolve_user_in_stats(user_stats, user_b)
+
+        if user_a_key is None or user_b_key is None:
+            await ctx.channel.send("Could not find one or both users in season stats.")
+            return
+
+        stats_a = user_stats[user_a_key]
+        stats_b = user_stats[user_b_key]
+
+        leader_name = stats_a['display_name'] if stats_a['points'] >= stats_b['points'] else stats_b['display_name']
+        point_gap = abs(stats_a['points'] - stats_b['points'])
+
+        await ctx.channel.send(
+            f"H2H {stats_a['display_name']} vs {stats_b['display_name']} | "
+            f"Points: {stats_a['points']:,}-{stats_b['points']:,} | "
+            f"Races: {stats_a['races']:,}-{stats_b['races']:,} | "
+            f"Race HS: {stats_a['race_hs']:,}-{stats_b['race_hs']:,} | "
+            f"BR HS: {stats_a['br_hs']:,}-{stats_b['br_hs']:,} | "
+            f"Leader: {leader_name} by {point_gap:,}"
+        )
+
+    @commands.command(name='myquests')
+    async def myquests_command(self, ctx, username: str = None):
+        lookup_name = username if username else ctx.author.name
+        progress = get_user_quest_progress(lookup_name)
+
+        if progress is None:
+            await ctx.channel.send(f"{lookup_name}: No quest progress found yet.")
+            return
+
+        headline = (
+            f"{progress['display_name']} Quest Progress: "
+            f"{progress['completed']}/{progress['active_quests'] if progress['active_quests'] > 0 else 0} quests complete"
+        )
+        details = " | ".join(progress['progress_lines'])
+        await ctx.channel.send(f"{headline} | {details}")
+
 
     @commands.command(name='top10ppr')
     async def top10ppr_command(self, ctx):
@@ -2724,9 +3505,11 @@ class Bot(commands.Bot):
             f"World Records - {counts['world_record_count']}"
         )
 
-        await ctx.channel.send(
+        await send_chat_message(
+            ctx.channel,
             f"{winnersdisplayname}: Today: {counts['winstoday']} {wins_str}, {pointstoday_formatted} points, {racestoday_formatted} races. "
-            f"PPR: {today_avg_points_formatted} | Season total: {output_msg}"
+            f"PPR: {today_avg_points_formatted} | Season total: {output_msg}",
+            category="mystats"
         )
 
 
@@ -3312,24 +4095,29 @@ async def tilted(bot):
                                     run_results[username] = run_results.get(username, 0) + points
 
                     sorted_run_results = sorted(run_results.items(), key=lambda x: x[1], reverse=True)
+                    max_names = get_chat_max_names()
+                    limited_run_results = sorted_run_results[:max_names]
 
                     if sorted_run_results:
                         full_summary_message = f"Run {run_id[:6]} is over! Final standings: "
-                        for username, points in sorted_run_results:
+                        for username, points in limited_run_results:
                             player_summary = f"{username} - {points} points, "
                             if len(full_summary_message) + len(player_summary) > MAX_MESSAGE_LENGTH:
-                                await bot.channel.send(full_summary_message.strip(", "))
+                                if is_chat_response_enabled("chat_tilt_results"):
+                                    await send_chat_message(bot.channel, full_summary_message.strip(", "), category="tilt")
                                 full_summary_message = player_summary
                             else:
                                 full_summary_message += player_summary
 
                         if full_summary_message:
-                            await bot.channel.send(full_summary_message.strip(", "))
+                            if is_chat_response_enabled("chat_tilt_results"):
+                                await send_chat_message(bot.channel, full_summary_message.strip(", "), category="tilt")
 
-                        text_area.insert('end', f"\nRun {run_id[:6]} is over! Final standings: {', '.join([f'{username} - {points} points' for username, points in sorted_run_results])}\n")
+                        text_area.insert('end', f"\nRun {run_id[:6]} is over! Final standings: {', '.join([f'{username} - {points} points' for username, points in limited_run_results])}\n")
                     else:
                         # If no results found for the run_id
-                        await bot.channel.send(f"Run {run_id[:6]} is over! No results to display.")
+                        if is_chat_response_enabled("chat_tilt_results"):
+                            await send_chat_message(bot.channel, f"Run {run_id[:6]} is over! No results to display.", category="tilt")
                         text_area.insert('end', f"\nRun {run_id[:6]} is over! No results to display.\n")
                         print("No results found for this run.")
 
@@ -3347,6 +4135,8 @@ async def tilted(bot):
                         tiltdata = list(reader)
 
                     current_level_data = [row for row in tiltdata[1:] if int(row[4]) == current_level and int(row[2]) > 0]
+                    max_names = get_chat_max_names()
+                    limited_level_data = current_level_data[:max_names]
 
                     top_tiltee_message = f"End of Tilt Level {current_level} | Level Completion Time: {elapsed_time} | " \
                                          f"Top Tiltee: {top_tiltee} | Points Earned: {level_xp} | Finishers: " if top_tiltee \
@@ -3354,19 +4144,21 @@ async def tilted(bot):
 
                     if current_level_data:
                         full_message = top_tiltee_message
-                        for row in current_level_data:
+                        for row in limited_level_data:
                             player_result = f"{row[0]}, "
                             if len(full_message) + len(player_result) > MAX_MESSAGE_LENGTH:
-                                await bot.channel.send(full_message.strip(", "))
+                                if is_chat_response_enabled("chat_tilt_results"):
+                                    await send_chat_message(bot.channel, full_message.strip(", "), category="tilt")
                                 full_message = player_result
                             else:
                                 full_message += player_result
 
                         if full_message:
-                            await bot.channel.send(full_message.strip(", "))
+                            if is_chat_response_enabled("chat_tilt_results"):
+                                await send_chat_message(bot.channel, full_message.strip(", "), category="tilt")
                         # print("Sent current level results to chat.")
 
-                        text_area.insert('end', f"\n{top_tiltee_message} | Finishers: {', '.join([f'{row[0]}' for row in current_level_data])}\n")
+                        text_area.insert('end', f"\n{top_tiltee_message} | Finishers: {', '.join([f'{row[0]}' for row in limited_level_data])}\n")
                     else:
                         print("No player data to send for current level.")
 
@@ -3475,6 +4267,8 @@ async def checkpoints(bot):
                 df_sorted = df_cleaned.sort_values(by=0, ascending=True)
 
                 checkpointplayers = df_sorted.values.tolist()
+                max_names = get_chat_max_names()
+                checkpointplayers = checkpointplayers[:max_names]
 
                 # Concatenated messages
                 concatenated_message = ""
@@ -3504,7 +4298,7 @@ async def checkpoints(bot):
 
                 # Send the message to Twitch chat
                 if concatenated_message:
-                    await bot.channel.send(concatenated_message)
+                    await send_chat_message(bot.channel, concatenated_message, category="race")
 
                 # Update the Tkinter text_area in the main thread
                 if concatenated_text_area_message:
@@ -3545,10 +4339,99 @@ def append_to_csv(file_path, data):
         writer.writerows(data)
 
 
+def _parse_mos_date(raw_value):
+    value = (raw_value or '').strip().strip('"')
+    if not value:
+        return None
+
+    for date_format in ('%Y-%m-%dT%H:%M:%S.%fZ', '%Y.%m.%d-%H.%M.%S'):
+        try:
+            return datetime.strptime(value, date_format).date()
+        except ValueError:
+            continue
+    return None
+
+
+def read_latest_map_data(map_data_file):
+    with open(map_data_file, 'rb') as f:
+        map_data = f.read()
+
+    encoding_result = chardet.detect(map_data)
+    map_encoding = encoding_result['encoding'] or 'utf-8'
+    map_text = map_data.decode(map_encoding, errors='ignore')
+
+    if DEBUG == True:
+        print('Debug: Read Map Data File')
+
+    sample = '\n'.join(map_text.splitlines()[:3])
+    delimiter = ','
+    try:
+        sniffed = csv.Sniffer().sniff(sample, delimiters=',\t;')
+        delimiter = sniffed.delimiter
+    except csv.Error:
+        if '\t' in sample:
+            delimiter = '\t'
+
+    reader = csv.DictReader(io.StringIO(map_text), delimiter=delimiter)
+    first_row = next(reader, None)
+    if not first_row:
+        return None
+
+    map_name = (first_row.get('MapName') or '').strip()
+    map_builder = (first_row.get('CreatorName') or '').strip()
+
+    try:
+        play_count = int(float((first_row.get('TotalRaces') or '0').strip() or 0))
+    except ValueError:
+        play_count = 0
+
+    try:
+        elim_rate = float((first_row.get('ElimRate') or '0').strip() or 0)
+    except ValueError:
+        elim_rate = 0.0
+
+    try:
+        avg_finish_time = float((first_row.get('AverageFinishTime') or '0').strip() or 0)
+    except ValueError:
+        avg_finish_time = 0.0
+
+    try:
+        record_time = float((first_row.get('RecordTime') or '0').strip() or 0)
+    except ValueError:
+        record_time = 0.0
+
+    return {
+        'MapName': map_name,
+        'MapBuilder': map_builder,
+        'MapCreatedDate': _parse_mos_date(first_row.get('DateCreated')),
+        'PlayCount': play_count,
+        'ElimRate': elim_rate,
+        'AvgFinishTime': avg_finish_time,
+        'RecordTime': record_time,
+        'RecordHolder': (first_row.get('RecordHolderName') or '').strip() or None,
+        'RecordSetDate': _parse_mos_date(first_row.get('DateSet')),
+        'RecordStreamer': (first_row.get('StreamerRecordHolder') or '').strip() or None,
+    }
+
+
 async def race(bot):
     last_modified_race = None
     last_map_file_mod_time = None
     totalpointsrace = 0
+    current_daily_points_leader = None
+    last_narrative_alert_race_count = 0
+    cached_map_data = {
+        'MapName': None,
+        'MapBuilder': None,
+        'MapCreatedDate': None,
+        'PlayCount': 0,
+        'ElimRate': 0.0,
+        'AvgFinishTime': 0.0,
+        'RecordTime': 0.0,
+        'RecordHolder': None,
+        'RecordSetDate': None,
+        'RecordStreamer': None,
+    }
     while True:
         if DEBUG == True:
             print('Debug: Race file check')
@@ -3570,7 +4453,10 @@ async def race(bot):
             print()
             print("Marble Day Reset Is Upon Us!")
             print()
-            await bot.channel.send("🎺 Marble Day Reset! 🎺")
+            if is_chat_response_enabled("chat_race_results"):
+                await send_chat_message(bot.channel, "🎺 Marble Day Reset! 🎺", category="race")
+            current_daily_points_leader = None
+            last_narrative_alert_race_count = 0
             config.set_setting('data_sync', 'yes', persistent=False)
             await asyncio.sleep(3)
             reset()
@@ -3586,10 +4472,6 @@ async def race(bot):
             s_t_points = int(config.get_setting('totalpointsseason'))
             s_t_count = int(config.get_setting('totalcountseason'))
 
-            # Initialize variables to store map data
-            MapName, MapBuilder, MapCreatedDate, PlayCount, ElimRate, AvgFinishTime, RecordTime, RecordHolder, RecordSetDate, RecordStreamer = (
-                None, None, None, 0, 0.0, 0.0, 0.0, None, None, None)
-
             # Step 1: Process the map file only if the modification time has changed
             map_data_file = config.get_setting('map_data_file')
             map_results_file = config.get_setting('map_results_file')
@@ -3602,85 +4484,36 @@ async def race(bot):
                 if last_map_file_mod_time is None or current_mod_time > last_map_file_mod_time:
                     last_map_file_mod_time = current_mod_time  # Update the last modification time
 
-                    # Read the map data file with encoding detection
-                    with open(map_data_file, 'rb') as f:
-                        map_data = f.read()
-
-                    encoding_result = chardet.detect(map_data)
-                    map_encoding = encoding_result['encoding'] or 'utf-8'  # Default to 'utf-8' if detection fails
-
-                    # Read the file using the detected encoding
-                    with open(map_data_file, 'r', encoding=map_encoding, errors='ignore') as f:
-                        map_lines = f.readlines()
-                        if DEBUG == True:
-                            print('Debug: Read Map Data File')
-                        else:
-                            pass
-
-                    if len(map_lines) > 1:
-                        # Ignore the header row and get the first data row
-                        map_data_first_row = map_lines[1].strip()
-                        map_data_fields = [field.strip().strip('"') for field in map_data_first_row.split(',')]
-
-                        if len(map_data_fields) >= 10:
-                            # Parse map data fields
-                            MapName = map_data_fields[0]
-                            MapBuilder = map_data_fields[1]
-
-                            try:
-                                MapCreatedDate = datetime.strptime(map_data_fields[2], '%Y-%m-%dT%H:%M:%S.%fZ').date()
-                            except ValueError:
-                                MapCreatedDate = None
-
-                            try:
-                                PlayCount = int(map_data_fields[3])
-                            except ValueError:
-                                PlayCount = 0
-
-                            try:
-                                ElimRate = float(map_data_fields[4])
-                            except ValueError:
-                                ElimRate = 0.0
-
-                            try:
-                                AvgFinishTime = float(map_data_fields[5])
-                            except ValueError:
-                                AvgFinishTime = 0.0
-
-                            try:
-                                RecordTime = float(map_data_fields[6])
-                            except ValueError:
-                                RecordTime = 0.0
-
-                            RecordHolder = map_data_fields[7]
-
-                            try:
-                                RecordSetDate = datetime.strptime(map_data_fields[8], '%Y-%m-%dT%H:%M:%S.%fZ').date()
-                            except ValueError:
-                                RecordSetDate = None
-
-                            RecordStreamer = map_data_fields[9]
-
-                            # Write the parsed data to the map_results_file
-                            with open(map_results_file, 'a', encoding='utf-8', errors='ignore', newline='') as f:
-                                f.write(
-                                    f'{MapName},{MapBuilder},{MapCreatedDate},{PlayCount},{ElimRate},'
-                                    f'{AvgFinishTime},{RecordTime},{RecordHolder},{RecordSetDate},'
-                                    f'{RecordStreamer}\n')
-                        else:
-                            print("Not enough data fields in map_data_first_row.")
+                    parsed_map_data = read_latest_map_data(map_data_file)
+                    if parsed_map_data:
+                        cached_map_data.update(parsed_map_data)
+                        with open(map_results_file, 'a', encoding='utf-8', errors='ignore', newline='') as f:
+                            f.write(
+                                f"{cached_map_data['MapName']},{cached_map_data['MapBuilder']},{cached_map_data['MapCreatedDate']},"
+                                f"{cached_map_data['PlayCount']},{cached_map_data['ElimRate']},{cached_map_data['AvgFinishTime']},"
+                                f"{cached_map_data['RecordTime']},{cached_map_data['RecordHolder']},{cached_map_data['RecordSetDate']},"
+                                f"{cached_map_data['RecordStreamer']}\n")
                     else:
                         print(f"The map data file {map_data_file} does not contain enough data.")
                 else:
-                    print("Map file has not been modified since last read.")
-                    # Reset map data since we're not reading the file
-                    MapName, MapBuilder, PlayCount, ElimRate, AvgFinishTime, RecordTime, RecordHolder, RecordSetDate, RecordStreamer = (
-                        None, None, 0, 0.0, 0.0, 0.0, None, None, None)
+                    if DEBUG == True:
+                        print("Debug: Map file has not been modified; reusing cached map data.")
 
             except FileNotFoundError:
                 print(f"Map data file {map_data_file} not found.")
             except Exception as e:
                 print(f"An error occurred while processing the map data file: {e}")
+
+            MapName = cached_map_data['MapName']
+            MapBuilder = cached_map_data['MapBuilder']
+            MapCreatedDate = cached_map_data['MapCreatedDate']
+            PlayCount = cached_map_data['PlayCount']
+            ElimRate = cached_map_data['ElimRate']
+            AvgFinishTime = cached_map_data['AvgFinishTime']
+            RecordTime = cached_map_data['RecordTime']
+            RecordHolder = cached_map_data['RecordHolder']
+            RecordSetDate = cached_map_data['RecordSetDate']
+            RecordStreamer = cached_map_data['RecordStreamer']
 
             with open(config.get_setting('race_file'), 'rb') as f:
                 data = f.read()
@@ -3788,11 +4621,23 @@ async def race(bot):
                 pass
 
             race_counts = {row[1]: 0 for row in racedata}
+            points_by_player = {}
+            wins_by_player = {}
             with open(config.get_setting('allraces_file'), 'r', encoding='utf-8', errors='ignore') as f:
                 reader = csv.reader(f)
                 for row in reader:
-                    if row[1] in race_counts:
-                        race_counts[row[1]] += 1
+                    if len(row) < 4:
+                        continue
+                    racer_username = row[1]
+                    if racer_username in race_counts:
+                        race_counts[racer_username] += 1
+                    if len(row) > 0 and row[0] == '1':
+                        wins_by_player[racer_username] = wins_by_player.get(racer_username, 0) + 1
+                    try:
+                        racer_points = int(row[3])
+                    except ValueError:
+                        continue
+                    points_by_player[racer_username] = points_by_player.get(racer_username, 0) + racer_points
 
             if DEBUG == True:
                 print('Debug: Check for 120 Race Checkmark')
@@ -3805,7 +4650,8 @@ async def race(bot):
                         f"🎉 {player_name} has just completed their "
                         f"120th race today! Congratulations! 🎉"
                     )
-                    await bot.channel.send(announcement_message)
+                    if is_chat_response_enabled("chat_race_results"):
+                        await send_chat_message(bot.channel, announcement_message, category="race")
 
             # MPL Code
             if DEBUG == True:
@@ -4054,6 +4900,51 @@ async def race(bot):
             # Prepare messages for Twitch chat
             messages = []
 
+            narrative_messages = []
+            if not nowinner and is_chat_response_enabled("chat_narrative_alerts"):
+                winner_username = first_row[1]
+                winner_display_name = first_row[2] if first_row[1] != first_row[2].lower() else first_row[1]
+
+                if is_chat_response_enabled("narrative_alert_grinder_enabled"):
+                    winner_race_count = race_counts.get(winner_username, 0)
+                    if winner_race_count in (10, 25, 50, 75, 100):
+                        narrative_messages.append(
+                            f"🏁 Grinder: {winner_display_name} hit race #{winner_race_count} today"
+                        )
+
+                if is_chat_response_enabled("narrative_alert_winmilestone_enabled"):
+                    winner_win_count = wins_by_player.get(winner_username, 0)
+                    if winner_win_count in (3, 5, 10, 15):
+                        narrative_messages.append(
+                            f"🏆 Win Milestone: {winner_display_name} reached win #{winner_win_count} today"
+                        )
+
+                if is_chat_response_enabled("narrative_alert_leadchange_enabled") and points_by_player:
+                    sorted_points = sorted(points_by_player.items(), key=lambda item: item[1], reverse=True)
+                    leader_username, leader_points = sorted_points[0]
+                    second_place_points = sorted_points[1][1] if len(sorted_points) > 1 else 0
+                    lead_gap = leader_points - second_place_points
+                    min_lead_gap = max(0, get_int_setting("narrative_alert_min_lead_change_points", 500))
+                    tied_for_lead = len(sorted_points) > 1 and second_place_points == leader_points
+                    if (not tied_for_lead and leader_username != current_daily_points_leader
+                            and lead_gap >= min_lead_gap):
+                        current_daily_points_leader = leader_username
+                        leader_display_name = next(
+                            (row[2] for row in namecolordata if row[1] == leader_username and row[2]),
+                            leader_username
+                        )
+                        narrative_messages.append(
+                            f"📈 Lead Change: {leader_display_name} now leads by {lead_gap:,} points"
+                        )
+
+            if narrative_messages:
+                cooldown_races = max(0, get_int_setting("narrative_alert_cooldown_races", 3))
+                max_items = max(1, get_int_setting("narrative_alert_max_items", 3))
+                if cooldown_races == 0 or (t_count - last_narrative_alert_race_count) >= cooldown_races:
+                    combined_narrative = "📣 Player Alerts: " + " | ".join(narrative_messages[:max_items]) + "."
+                    messages.append(combined_narrative)
+                    last_narrative_alert_race_count = t_count
+
             # --- CHUNK ALERT BLOCK ---
             if int(first_row[3]) >= int(config.get_setting('chunk_alert_value')) and config.get_setting('chunk_alert') == 'True':
                 if DEBUG:
@@ -4190,6 +5081,7 @@ async def race(bot):
                         temp_messages.append(message.rstrip(', '))
                         messages.extend(temp_messages)
 
+
             # ---- After building up messages, do config updates, etc. ----
             config.set_setting('totalpointstoday', t_points, persistent=False)
             config.set_setting('totalcounttoday', t_count, persistent=False)
@@ -4202,6 +5094,8 @@ async def race(bot):
                 avgptstoday = 0
 
             config.set_setting('avgpointstoday', avgptstoday, persistent=False)
+
+            messages.extend(get_season_quest_updates())
 
             channel = bot.get_channel(config.get_setting('CHANNEL'))
             if not channel:
@@ -4444,7 +5338,8 @@ async def royale(bot):
                                 f"🎉 {player_name} has just completed their "
                                 f"120th race today! Congratulations! 🎉"
                             )
-                            await bot.channel.send(announcement_message)
+                            if is_chat_response_enabled("chat_br_results"):
+                                await send_chat_message(bot.channel, announcement_message, category="br")
 
                     if int(br_winner[4]) >= int(config.get_setting('chunk_alert_value')) and config.get_setting(
                             'chunk_alert') == 'True':
@@ -4629,16 +5524,18 @@ async def royale(bot):
                             print('Debug: Announcement Delay: True')
                         else:
                             pass
-                        await asyncio.sleep(int(config.get_setting('announcedelayseconds')))
-                        await bot.channel.send(message)
+                        await send_chat_message(bot.channel, message, category="br", apply_delay=True)
                         write_overlays()
                     else:
                         if DEBUG == True:
                             print('Debug: Announcement Delay: False')
                         else:
                             pass
-                        await bot.channel.send(message)
+                        await send_chat_message(bot.channel, message, category="br")
                         write_overlays()
+
+                    for quest_message in get_season_quest_updates():
+                        await send_chat_message(bot.channel, quest_message, category="br")
 
                     if crownwin:
                         # Determine the name color based on the br_winner color code
@@ -4687,13 +5584,12 @@ if __name__ == "__main__":
 
     # Ensure the lock file is removed when the application exits
 
-    bot = Bot()
-
-
     # Function to start the bot in a separate asyncio event loop
     def start_bot():
+        global bot
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+        bot = Bot()
         bot.run()
 
 
