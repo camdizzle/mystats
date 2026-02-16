@@ -56,13 +56,15 @@ bot = None
 GLOBAL_SOCKET = None
 DEBUG = False
 HAS_TTKBOOTSTRAP = importlib.util.find_spec("ttkbootstrap") is not None
+DEFAULT_UI_THEME = "flatly"
+app_style = None
 
 
 def create_root_window():
     """Create the root window, preferring ttkbootstrap when installed."""
     if HAS_TTKBOOTSTRAP:
         ttkbootstrap_module = __import__("ttkbootstrap")
-        root_window = ttkbootstrap_module.Window(themename="flatly")
+        root_window = ttkbootstrap_module.Window(themename=DEFAULT_UI_THEME)
         style = root_window.style
     else:
         root_window = tk.Tk()
@@ -80,6 +82,26 @@ def apply_ui_styles(style):
     style.configure("Heading.TLabel", font=("Segoe UI", 16, "bold"))
     style.configure("Small.TLabel", font=("Segoe UI", 8))
     style.configure("Primary.TButton", padding=6)
+
+
+def get_available_ui_themes():
+    if HAS_TTKBOOTSTRAP:
+        return [
+            "flatly", "litera", "cosmo", "minty", "lumen",
+            "darkly", "superhero", "cyborg", "solar", "vapor"
+        ]
+
+    return sorted(ttk.Style(root).theme_names())
+
+
+def apply_theme(theme_name):
+    global app_style
+
+    if not theme_name:
+        return
+
+    app_style.theme_use(theme_name)
+    apply_ui_styles(app_style)
 
 
 def center_toplevel(window, width, height):
@@ -903,6 +925,23 @@ def open_settings_window():
 
     device_combobox.bind('<<ComboboxSelected>>', on_device_change)
 
+    theme_label = ttk.Label(top_frame, text="UI Theme:")
+    theme_label.grid(row=3, column=0, columnspan=1, sticky="w", padx=10, pady=(0, 5))
+
+    selected_theme = tk.StringVar(value=app_style.theme_use())
+    available_themes = get_available_ui_themes()
+
+    theme_combobox = ttk.Combobox(top_frame, textvariable=selected_theme, values=available_themes, width=30, state="readonly")
+    theme_combobox.grid(row=3, column=1, columnspan=2, sticky="w", padx=10, pady=(0, 5))
+
+    def apply_selected_theme(event=None):
+        try:
+            apply_theme(selected_theme.get())
+        except Exception as e:
+            messagebox.showerror("Theme Error", f"Could not apply theme: {e}")
+
+    theme_combobox.bind('<<ComboboxSelected>>', apply_selected_theme)
+
     def save_settings_and_close():
         # -- Example: Channel entry --
         config.set_setting("CHANNEL", channel_entry.get(), persistent=True)
@@ -1092,6 +1131,8 @@ def build_main_content(parent):
 
 
 def initialize_main_window():
+    global app_style
+
     root_window, app_style = create_root_window()
     apply_ui_styles(app_style)
 
