@@ -1007,90 +1007,101 @@ def on_close():
 
 
 
-# Tkinter Initialization
-root, app_style = create_root_window()
-apply_ui_styles(app_style)
-root.protocol("WM_DELETE_WINDOW", on_close)
-root.title("MyStats - Marbles On Stream Companion Application")
-root.geometry("800x500")
-root.resizable(False, False)
-
-root.grid_rowconfigure(1, weight=1)
-root.grid_columnconfigure(1, weight=1)
-
-stats_container_frame = ttk.Frame(root, style="App.TFrame")
-stats_container_frame.grid(row=0, column=0, rowspan=2, sticky='nw', padx=10, pady=10)
-
-# Stats Frame on the left
-season_stats_frame = ttk.LabelFrame(stats_container_frame, text="Season Statistics", style="Card.TLabelframe")
-season_stats_frame.pack(fill='x', pady=(0, 10))  # Pack them vertically within the container
-
-# Add statistics labels to stats_frame
-season_stat_labels = build_stats_labels(season_stats_frame)
-total_points_label = season_stat_labels["total_points"]
-total_count_label = season_stat_labels["total_count"]
-avg_points_label = season_stat_labels["avg_points"]
-race_hs_label = season_stat_labels["race_hs"]
-br_hs_label = season_stat_labels["br_hs"]
-
-# Today's Statistics Frame under Season Statistics
-todays_stats_frame = ttk.LabelFrame(stats_container_frame, text="Today's Statistics", style="Card.TLabelframe")
-todays_stats_frame.pack(fill='x')
-
-# Add today's statistics labels to todays_stats_frame
-today_stat_labels = build_stats_labels(todays_stats_frame)
-total_points_t_label = today_stat_labels["total_points"]
-total_count_t_label = today_stat_labels["total_count"]
-avg_points_t_label = today_stat_labels["avg_points"]
-race_hs_t_label = today_stat_labels["race_hs"]
-br_hs_t_label = today_stat_labels["br_hs"]
-
-# Button Frame under the stats_frame for settings events mpl buttons
-button_frame = ttk.Frame(stats_container_frame, style="App.TFrame")
-button_frame.pack(pady=(20, 0))
-
-button_width = 8
-
-# Add buttons to button_frame
-settings_button = ttk.Button(button_frame, text="Settings", command=open_settings_window, width=button_width, style="Primary.TButton")
-settings_button.grid(row=0, column=0, padx=5, pady=(0, 5))
-button_frame.grid_rowconfigure(3, weight=1)
-
-url_label = tk.Label(button_frame, text="https://mystats.camwow.tv", fg="blue", cursor="hand2", font=("Arial", 10, "underline"))
-url_label.grid(row=3, column=0, columnspan=2, pady=(85, 0), sticky="s")
-
-# Make the URL clickable
 def open_url(event):
-    import webbrowser
     webbrowser.open("https://mystats.camwow.tv")
 
-url_label.bind("<Button-1>", open_url)
 
-# Top Frame (for MyStats title and Login)
-top_frame1 = ttk.Frame(root, style="App.TFrame")
-top_frame1.grid(row=0, column=1, sticky='ew', padx=(5, 0))
+def build_stats_sidebar(parent):
+    global total_points_label, total_count_label, avg_points_label, race_hs_label, br_hs_label
+    global total_points_t_label, total_count_t_label, avg_points_t_label, race_hs_t_label, br_hs_t_label
 
-# MyStats title label in top_frame1
-title_label = ttk.Label(top_frame1, text="MyStats", style="Heading.TLabel")
-title_label.grid(row=0, column=0, sticky='w', padx=(5, 0))
-top_frame1.grid_columnconfigure(0, weight=1)
+    stats_container_frame = ttk.Frame(parent, style="App.TFrame")
+    stats_container_frame.grid(row=0, column=0, rowspan=2, sticky='nw', padx=10, pady=10)
 
-# Login Frame within top_frame1
-login_button_frame = ttk.Frame(top_frame1, style="App.TFrame")
-login_button_frame.grid(row=0, column=1, sticky='e')
+    season_stats_frame = ttk.LabelFrame(stats_container_frame, text="Season Statistics", style="Card.TLabelframe")
+    season_stats_frame.pack(fill='x', pady=(0, 10))
 
-chatbot_label = ttk.Label(login_button_frame, text="Current ChatBot", style="Small.TLabel")
-chatbot_label.grid(row=0, column=1, sticky='e', padx=(0, 5))
+    season_stat_labels = build_stats_labels(season_stats_frame)
+    total_points_label = season_stat_labels["total_points"]
+    total_count_label = season_stat_labels["total_count"]
+    avg_points_label = season_stat_labels["avg_points"]
+    race_hs_label = season_stat_labels["race_hs"]
+    br_hs_label = season_stat_labels["br_hs"]
 
-login_button = ttk.Button(login_button_frame, text="Custom Bot Login", command=open_login_url, style="Primary.TButton")
-login_button.grid(row=1, column=1, sticky='e', padx=(0, 5))
+    todays_stats_frame = ttk.LabelFrame(stats_container_frame, text="Today's Statistics", style="Card.TLabelframe")
+    todays_stats_frame.pack(fill='x')
 
-# Text area below the top frame, filling the remaining space
-text_area = tk.Text(root, wrap='word', height=30, width=60, bg="black", fg="white")
-text_area.grid(row=1, column=1, sticky='nsew', padx=(0, 5), pady=5)
-root.update_idletasks()
+    today_stat_labels = build_stats_labels(todays_stats_frame)
+    total_points_t_label = today_stat_labels["total_points"]
+    total_count_t_label = today_stat_labels["total_count"]
+    avg_points_t_label = today_stat_labels["avg_points"]
+    race_hs_t_label = today_stat_labels["race_hs"]
+    br_hs_t_label = today_stat_labels["br_hs"]
 
-root.grid_columnconfigure(1, weight=1)
+    button_frame = ttk.Frame(stats_container_frame, style="App.TFrame")
+    button_frame.pack(pady=(20, 0))
+
+    settings_button = ttk.Button(
+        button_frame,
+        text="Settings",
+        command=open_settings_window,
+        width=8,
+        style="Primary.TButton"
+    )
+    settings_button.grid(row=0, column=0, padx=5, pady=(0, 5))
+    button_frame.grid_rowconfigure(3, weight=1)
+
+    url_label = tk.Label(button_frame, text="https://mystats.camwow.tv", fg="blue", cursor="hand2", font=("Arial", 10, "underline"))
+    url_label.grid(row=3, column=0, columnspan=2, pady=(85, 0), sticky="s")
+    url_label.bind("<Button-1>", open_url)
+
+
+def build_main_content(parent):
+    global chatbot_label, login_button, text_area
+
+    top_frame1 = ttk.Frame(parent, style="App.TFrame")
+    top_frame1.grid(row=0, column=1, sticky='ew', padx=(5, 0))
+
+    title_label = ttk.Label(top_frame1, text="MyStats", style="Heading.TLabel")
+    title_label.grid(row=0, column=0, sticky='w', padx=(5, 0))
+    top_frame1.grid_columnconfigure(0, weight=1)
+
+    login_button_frame = ttk.Frame(top_frame1, style="App.TFrame")
+    login_button_frame.grid(row=0, column=1, sticky='e')
+
+    chatbot_label = ttk.Label(login_button_frame, text="Current ChatBot", style="Small.TLabel")
+    chatbot_label.grid(row=0, column=1, sticky='e', padx=(0, 5))
+
+    login_button = ttk.Button(login_button_frame, text="Custom Bot Login", command=open_login_url, style="Primary.TButton")
+    login_button.grid(row=1, column=1, sticky='e', padx=(0, 5))
+
+    text_area = tk.Text(parent, wrap='word', height=30, width=60, bg="black", fg="white")
+    text_area.grid(row=1, column=1, sticky='nsew', padx=(0, 5), pady=5)
+
+
+def initialize_main_window():
+    root_window, app_style = create_root_window()
+    apply_ui_styles(app_style)
+
+    root_window.protocol("WM_DELETE_WINDOW", on_close)
+    root_window.title("MyStats - Marbles On Stream Companion Application")
+    root_window.geometry("800x500")
+    root_window.resizable(False, False)
+
+    root_window.grid_rowconfigure(1, weight=1)
+    root_window.grid_columnconfigure(1, weight=1)
+
+    build_stats_sidebar(root_window)
+    build_main_content(root_window)
+
+    root_window.update_idletasks()
+    root_window.grid_columnconfigure(1, weight=1)
+
+    return root_window
+
+
+# Tkinter Initialization
+root = initialize_main_window()
 
 
 def open_events_window():
