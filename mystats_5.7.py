@@ -57,19 +57,41 @@ GLOBAL_SOCKET = None
 DEBUG = False
 HAS_TTKBOOTSTRAP = importlib.util.find_spec("ttkbootstrap") is not None
 DEFAULT_UI_THEME = "flatly"
+BOOTSTRAP_THEMES = {
+    "flatly", "litera", "cosmo", "minty", "lumen",
+    "darkly", "superhero", "cyborg", "solar", "vapor"
+}
 app_style = None
+
+
+def get_initial_ui_theme():
+    try:
+        with open("settings.txt", "r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                if line.startswith("UI_THEME="):
+                    theme_name = line.split("=", 1)[1].strip()
+                    if theme_name:
+                        return theme_name
+    except FileNotFoundError:
+        pass
+
+    return DEFAULT_UI_THEME
 
 
 def create_root_window():
     """Create the root window, preferring ttkbootstrap when installed."""
+    initial_theme = get_initial_ui_theme()
+
     if HAS_TTKBOOTSTRAP:
         ttkbootstrap_module = __import__("ttkbootstrap")
-        root_window = ttkbootstrap_module.Window(themename=DEFAULT_UI_THEME)
+        theme_name = initial_theme if initial_theme in BOOTSTRAP_THEMES else DEFAULT_UI_THEME
+        root_window = ttkbootstrap_module.Window(themename=theme_name)
         style = root_window.style
     else:
         root_window = tk.Tk()
         style = ttk.Style(root_window)
-        style.theme_use("clam")
+        available_themes = style.theme_names()
+        style.theme_use(initial_theme if initial_theme in available_themes else "clam")
 
     return root_window, style
 
@@ -86,10 +108,7 @@ def apply_ui_styles(style):
 
 def get_available_ui_themes():
     if HAS_TTKBOOTSTRAP:
-        return [
-            "flatly", "litera", "cosmo", "minty", "lumen",
-            "darkly", "superhero", "cyborg", "solar", "vapor"
-        ]
+        return sorted(BOOTSTRAP_THEMES)
 
     return sorted(ttk.Style(root).theme_names())
 
@@ -890,36 +909,9 @@ def open_settings_window():
     open_location_button = ttk.Button(directory_frame, text="📁", command=open_directory, width=3)
     open_location_button.grid(row=1, column=1, padx=(10, 0), pady=(5, 5))
 
-    # UI theme selection (placed near top to keep it visible)
-    theme_label = ttk.Label(top_frame, text="UI Theme")
-    theme_label.grid(row=1, column=0, sticky="w", padx=10, pady=(8, 4))
-
-    selected_theme = tk.StringVar(value=app_style.theme_use())
-    available_themes = get_available_ui_themes()
-
-    if selected_theme.get() not in available_themes:
-        available_themes = [selected_theme.get()] + available_themes
-
-    theme_combobox = ttk.Combobox(
-        top_frame,
-        textvariable=selected_theme,
-        values=available_themes,
-        width=24,
-        state="readonly"
-    )
-    theme_combobox.grid(row=1, column=1, columnspan=2, sticky="w", padx=10, pady=(8, 4))
-
-    def apply_selected_theme(event=None):
-        try:
-            apply_theme(selected_theme.get())
-        except Exception as e:
-            messagebox.showerror("Theme Error", f"Could not apply theme: {e}")
-
-    theme_combobox.bind('<<ComboboxSelected>>', apply_selected_theme)
-
     # Audio device selection
     label = ttk.Label(top_frame, text="Select Audio Output Device:")
-    label.grid(row=2, column=0, columnspan=3, sticky="w", padx=10, pady=(8, 5))
+    label.grid(row=1, column=0, columnspan=3, sticky="w", padx=10, pady=(8, 5))
 
     audio_devices = get_audio_devices()
     selected_device = tk.StringVar()
@@ -933,13 +925,43 @@ def open_settings_window():
     selected_device.set(current_device)
 
     device_combobox = ttk.Combobox(top_frame, textvariable=selected_device, values=audio_devices, width=60)
-    device_combobox.grid(row=3, column=0, columnspan=3, sticky="w", padx=10, pady=(0, 10))
+    device_combobox.grid(row=2, column=0, columnspan=3, sticky="w", padx=10, pady=(0, 10))
 
     # Save the selection back to config when user makes a selection
     def on_device_change(event):
         config.set_setting('audio_device', selected_device.get())
 
     device_combobox.bind('<<ComboboxSelected>>', on_device_change)
+
+    # Theme selection moved to the bottom of settings
+    theme_frame = ttk.LabelFrame(scrollable_frame, text="Appearance", style="Card.TLabelframe")
+    theme_frame.grid(row=3, column=0, columnspan=2, pady=(0, 10), padx=10, sticky="ew")
+
+    ttk.Label(theme_frame, text="UI Theme").grid(row=0, column=0, sticky="w", padx=10, pady=(8, 6))
+
+    selected_theme = tk.StringVar(value=config.get_setting("UI_THEME") or app_style.theme_use())
+    available_themes = get_available_ui_themes()
+
+    if selected_theme.get() not in available_themes:
+        available_themes = [selected_theme.get()] + available_themes
+
+    theme_combobox = ttk.Combobox(
+        theme_frame,
+        textvariable=selected_theme,
+        values=available_themes,
+        width=24,
+        state="readonly"
+    )
+    theme_combobox.grid(row=0, column=1, sticky="w", padx=10, pady=(8, 6))
+
+    def apply_selected_theme(event=None):
+        try:
+            apply_theme(selected_theme.get())
+            config.set_setting("UI_THEME", selected_theme.get(), persistent=True)
+        except Exception as e:
+            messagebox.showerror("Theme Error", f"Could not apply theme: {e}")
+
+    theme_combobox.bind('<<ComboboxSelected>>', apply_selected_theme)
 
     def save_settings_and_close():
         # -- Example: Channel entry --
@@ -963,7 +985,10 @@ def open_settings_window():
 
         # -- Example: Audio Device Selection --
         config.set_setting("audio_device", selected_device.get(), persistent=True)
-        
+
+        # -- Example: UI Theme Selection --
+        config.set_setting("UI_THEME", selected_theme.get(), persistent=True)
+
         # Since set_setting(persistent=True) automatically calls config.save_settings() 
         # for each item that is in persistent_keys, we do *not* need to manually call
         # config.save_settings() again (unless you want to).
@@ -1597,7 +1622,8 @@ class ConfigManager:
                                 'directory', 'race_file', 'br_file', 'season', 'reset_audio', 'sync', 'MPL',
                                 'chunk_alert_sound', 'reset_audio_sound', 'audio_device', 'checkpoint_file',
                                 'tilt_player_file', 'active_event_ids', 'paused_event_ids', 'checkpoint_results_file',
-                                'tilts_results_file', 'tilt_level_file', 'map_data_file', 'map_results_file'}
+                                'tilts_results_file', 'tilt_level_file', 'map_data_file', 'map_results_file',
+                                'UI_THEME'}
         self.transient_keys = set([])
         self.load_settings()
 
