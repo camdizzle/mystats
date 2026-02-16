@@ -678,244 +678,55 @@ def play_audio_file(filename, device_name=None):
 
 
 def open_settings_window():
-    # Create a new Toplevel window
     settings_window = tk.Toplevel(root)
     settings_window.title("Settings")
-
-    # Make the settings window stay on top of the main window
     settings_window.transient(root)
     settings_window.attributes('-topmost', True)
 
-    # Start with a larger base size and recenter once content is measured
-    center_toplevel(settings_window, 560, 620)
+    window_width = 760
+    window_height = 700
+    center_toplevel(settings_window, window_width, window_height)
+    settings_window.minsize(720, 640)
 
-    # Create a frame to contain the canvas and scrollbar
-    frame_with_scrollbar = ttk.Frame(settings_window, style="App.TFrame")
-    frame_with_scrollbar.pack(fill="both", expand=True)
+    content_frame = ttk.Frame(settings_window, style="App.TFrame")
+    content_frame.pack(fill="both", expand=True, padx=10, pady=(10, 0))
 
-    # Create a Canvas and Scrollbar
-    canvas = tk.Canvas(frame_with_scrollbar)
-    scrollbar = tk.Scrollbar(frame_with_scrollbar, orient="vertical", command=canvas.yview)
-    scrollable_frame = tk.Frame(canvas)
+    notebook = ttk.Notebook(content_frame)
+    notebook.pack(fill="both", expand=True)
 
-    scrollable_frame.bind(
-        "<Configure>",
-        lambda e: canvas.configure(
-            scrollregion=canvas.bbox("all")
-        )
-    )
+    general_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
+    audio_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
+    chat_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
+    appearance_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
 
-    canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-    canvas.configure(yscrollcommand=scrollbar.set)
+    notebook.add(general_tab, text="General")
+    notebook.add(audio_tab, text="Audio")
+    notebook.add(chat_tab, text="Chat")
+    notebook.add(appearance_tab, text="Appearance")
 
-    # Pack the Canvas and Scrollbar
-    canvas.pack(side="left", fill="both", expand=True)
-    scrollbar.pack(side="right", fill="y")
+    # --- General tab ---
+    ttk.Label(general_tab, text="Core app settings", style="Small.TLabel").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
 
-    # Create a top frame to hold individual frames for Channel, Marble Day, and Season
-    top_frame = ttk.Frame(scrollable_frame, style="App.TFrame")
-    top_frame.grid(row=0, column=0, columnspan=2, padx=10, pady=5, sticky='ew')
+    ttk.Label(general_tab, text="Channel").grid(row=1, column=0, sticky="w", pady=(0, 4))
+    channel_entry = ttk.Entry(general_tab, width=28)
+    channel_entry.grid(row=1, column=1, sticky="w", pady=(0, 4))
+    channel_entry.insert(0, config.get_setting("CHANNEL") or "")
 
-    # Create individual frames for each item
-    channel_frame = ttk.Frame(top_frame, style="App.TFrame")
-    channel_frame.grid(row=0, column=0, padx=10, pady=(0, 5))
+    ttk.Label(general_tab, text="Marble Day").grid(row=2, column=0, sticky="w", pady=(0, 4))
+    ttk.Label(general_tab, text=config.get_setting("marble_day") or "-").grid(row=2, column=1, sticky="w", pady=(0, 4))
 
-    marble_day_frame = ttk.Frame(top_frame, style="App.TFrame")
-    marble_day_frame.grid(row=0, column=1, padx=10, pady=(0, 5))
+    ttk.Label(general_tab, text="Season").grid(row=3, column=0, sticky="w", pady=(0, 8))
+    ttk.Label(general_tab, text=config.get_setting("season") or "-").grid(row=3, column=1, sticky="w", pady=(0, 8))
 
-    season_frame = ttk.Frame(top_frame, style="App.TFrame")
-    season_frame.grid(row=0, column=2, padx=10, pady=(0, 5))
+    ttk.Separator(general_tab, orient="horizontal").grid(row=4, column=0, columnspan=2, sticky="ew", pady=8)
 
-    # Configure the grid to center the frames without expansion
-    top_frame.grid_columnconfigure(0, weight=1)
-    top_frame.grid_columnconfigure(1, weight=1)
-    top_frame.grid_columnconfigure(2, weight=1)
-
-    # Add Channel label and entry to channel_frame
-    channel_label = ttk.Label(channel_frame, text="Channel")
-    channel_label.pack(anchor="center")
-
-    channel_entry = ttk.Entry(channel_frame, width=16, justify="center")
-    channel_entry.pack(anchor="center")
-    channel_entry.insert(0, config.get_setting("CHANNEL"))
-
-    # Add a label for "Marble Day"
-    marble_day_text_label = ttk.Label(marble_day_frame, text="Marble Day")
-    marble_day_text_label.pack(anchor="center")
-
-    # Add a label to display the marble day value
-    marble_day_value = config.get_setting("marble_day")  # Get the current marble day value
-    marble_day_value_label = ttk.Label(marble_day_frame, text=marble_day_value, anchor="center")
-    marble_day_value_label.pack(anchor="center")
-
-
-    # Add a label for "Season"
-    season_text_label = ttk.Label(season_frame, text="Season")
-    season_text_label.pack(anchor="center")
-
-    # Add a label to display the season value
-    season_value = config.get_setting("season")  # Get the current season value
-    season_label = ttk.Label(season_frame, text=season_value, anchor="center")
-    season_label.pack(anchor="center")
-
-
-    # Create a middle frame to hold the chunk alert settings and other frames
-    middle_frame = ttk.Frame(scrollable_frame, style="App.TFrame")
-    middle_frame.grid(row=1, column=0, columnspan=2, pady=(0, 10), sticky="nsew")
-
-    # Configure the grid to distribute space equally among the three rows
-    middle_frame.grid_rowconfigure(0, weight=1)
-
-    # Create a frame for Chunk Alert settings inside the middle_frame
-    chunk_alert_frame = ttk.LabelFrame(middle_frame, text="Chunk Alert", style="Card.TLabelframe")
-    chunk_alert_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
-
-    # Convert the config value to a boolean
-    chunk_alert_value = config.get_setting("chunk_alert") == 'True'
-
-    # Chunk Alert Toggle Button (first item)
-    chunk_alert_button = tk.Button(
-        chunk_alert_frame,
-        text="ON" if chunk_alert_value else "OFF",
-        command=lambda: toggle_chunk_alert(chunk_alert_button),
-        bg="green" if chunk_alert_value else "red",
-        width=8,
-        font=("Arial", 10)
-    )
-    chunk_alert_button.pack(anchor="center", pady=(5, 5))
-
-    # Add the Chunk Alert Trigger label (second item)
-    chunk_alert_trigger_label = ttk.Label(chunk_alert_frame, text="Trigger Amt", style="Small.TLabel")
-    chunk_alert_trigger_label.pack(anchor="center", pady=(5, 0))
-
-    # Entry for the Chunk Alert Trigger value (third item)
-    chunk_alert_trigger_entry = ttk.Entry(chunk_alert_frame, width=10, justify='center')
-    chunk_alert_trigger_entry.pack(anchor="center", pady=(5, 5))
-    chunk_alert_trigger_entry.insert(0, config.get_setting("chunk_alert_value"))
-
-    # Chunk Alert Settings label (fourth item)
-    chunk_alert_label = ttk.Label(chunk_alert_frame, text="No file selected", anchor="center", style="Small.TLabel")
-    chunk_alert_label.pack(anchor="center", pady=(5, 5))
-
-    # Create a frame for the file and test buttons (fifth item, side by side)
-    file_button_frame = ttk.Frame(chunk_alert_frame, style="App.TFrame")
-    file_button_frame.pack(anchor="center", pady=(5, 0))
-
-    # File selection button with file folder emoji, centered
-    file_button = ttk.Button(
-        file_button_frame,
-        text="📁",
-        command=lambda: select_chunk_alert_sound(chunk_alert_label, settings_window),
-        width=3
-    )
-    file_button.pack(side="left", padx=5)
-
-    # New test audio playback button with speaker emoji, centered
-    test_audio_button = ttk.Button(
-        file_button_frame,
-        text="🔊",
-        command=test_chunkaudio_playback,
-        width=3
-    )
-    test_audio_button.pack(side="left", padx=5)
-
-    # Set the label to the saved file name if it exists when the settings window is opened
-    saved_chunk_alert_file_path = config.get_setting("chunk_alert_sound")
-    if saved_chunk_alert_file_path:
-        update_chunk_alert_audio_label(chunk_alert_label, saved_chunk_alert_file_path)
-
-    # Create a frame for Message Delay settings inside the middle_frame
-    message_delay_frame = ttk.LabelFrame(middle_frame, text="Message Delay", style="Card.TLabelframe")
-    message_delay_frame.grid(row=0, column=1, padx=10, pady=10, sticky="nsew")
-
-    # Announce Delay toggle button (first item)
-    announce_delay_value = config.get_setting("announcedelay") == "True"
-    announce_delay_button = tk.Button(
-        message_delay_frame,
-        text="ON" if announce_delay_value else "OFF",
-        command=lambda: toggle_announce_delay(announce_delay_button),
-        bg="green" if announce_delay_value else "red",
-        width=8,
-        font=("Arial", 10)
-    )
-    announce_delay_button.pack(anchor="center", pady=(5, 5))
-
-    # Delay Seconds label (second item)
-    delay_seconds_label = ttk.Label(message_delay_frame, text="Delay Seconds", style="Small.TLabel")
-    delay_seconds_label.pack(anchor="center", pady=(5, 0))
-
-    # Delay Seconds entry box (third item)
-    delay_seconds_entry = ttk.Entry(message_delay_frame, width=10, justify='center')
-    delay_seconds_entry.pack(anchor="center", pady=(5, 5))
-    delay_seconds_entry.insert(0, config.get_setting("announcedelayseconds"))
-
-    # Create a new frame for Marbles Reset Settings inside the middle_frame
-    marbles_reset_frame = ttk.LabelFrame(middle_frame, text="Marbles Reset", style="Card.TLabelframe")
-    marbles_reset_frame.grid(row=0, column=2, padx=10, pady=10, sticky="nsew")
-
-    # Reset Audio Toggle Button (first item)
-    reset_audio_value = config.get_setting("reset_audio") == "True"
-    reset_audio_button = tk.Button(
-        marbles_reset_frame,
-        text="ON" if reset_audio_value else "OFF",
-        command=lambda: toggle_reset_audio(reset_audio_button),
-        bg="green" if reset_audio_value else "red",
-        width=8,
-        font=("Arial", 10)
-    )
-    reset_audio_button.pack(anchor="center", pady=(5, 5))
-
-    # Reset Audio Label (second item)
-    reset_audio_label = ttk.Label(marbles_reset_frame, text="No file selected", anchor="center", style="Small.TLabel")
-    reset_audio_label.pack(anchor="center", pady=(5, 5))
-
-    # Create a frame for side-by-side buttons (third item)
-    reset_button_frame = ttk.Frame(marbles_reset_frame, style="App.TFrame")
-    reset_button_frame.pack(anchor="center", pady=(5, 0))
-
-    # Placeholder button for potential testing or other functionality
-    test_reset_button = ttk.Button(
-        reset_button_frame,
-        text="📁",  # Placeholder button, can be replaced with actual functionality
-        command=lambda: select_reset_audio_sound(reset_audio_label, settings_window),
-        width=3
-    )
-    test_reset_button.pack(side="left", padx=5)
-
-    # Button for selecting reset audio sound, side by side
-    reset_speaker_button = ttk.Button(
-        reset_button_frame,
-        text="🔊",
-        command=lambda: test_audio_playback(),
-        width=3
-    )
-    reset_speaker_button.pack(side="left", padx=5)
-
-    # Set the label to the saved file name if it exists when the settings window is opened
-    saved_reset_file_path = config.get_setting("reset_audio_sound")
-    if saved_reset_file_path:
-        update_reset_audio_label(reset_audio_label, saved_reset_file_path)
-
-    # Centering the contents within the frame
-    marbles_reset_frame.grid_columnconfigure(0, weight=1)
-
-
-    # Create a frame for the Directory setting inside the scrollable_frame
-    directory_frame = ttk.Frame(scrollable_frame, style="App.TFrame")
-    directory_frame.grid(row=2, column=0, columnspan=2, pady=(0, 10), sticky="nsew")
-
-    # Add the Directory label
-    directory_label = ttk.Label(directory_frame, text="Mystats Directory", wraplength=300, anchor="nw", justify="left")
-    directory_label.grid(row=0, column=0, sticky="w", padx=(10, 10), pady=(5, 5))
-
-    # Add the Directory entry
+    ttk.Label(general_tab, text="Mystats Directory").grid(row=5, column=0, sticky="w", pady=(0, 4))
     directory_value = os.path.expandvars(r"%localappdata%/mystats/")
-    directory_entry = ttk.Entry(directory_frame, width=60)
-    directory_entry.grid(row=1, column=0, sticky="w", padx=(5,0), pady=(5, 5))
+    directory_entry = ttk.Entry(general_tab, width=55)
+    directory_entry.grid(row=6, column=0, sticky="ew", pady=(0, 4), columnspan=2)
     directory_entry.insert(0, directory_value)
     directory_entry.config(state="readonly")
 
-    # Function to open the directory in Windows Explorer
     def open_directory():
         directory_path = os.path.expandvars(r"%localappdata%/mystats/")
         if os.path.exists(directory_path):
@@ -923,54 +734,115 @@ def open_settings_window():
         else:
             messagebox.showerror("Error", "Directory path does not exist.")
 
-    # Add the Open Location button with folder icon
-    open_location_button = ttk.Button(directory_frame, text="📁", command=open_directory, width=3)
-    open_location_button.grid(row=1, column=1, padx=(10, 0), pady=(5, 5))
+    ttk.Button(general_tab, text="Open Location", command=open_directory).grid(row=7, column=0, sticky="w", pady=(4, 0))
+    general_tab.grid_columnconfigure(0, weight=1)
 
-    # Audio device selection
-    label = ttk.Label(top_frame, text="Select Audio Output Device:")
-    label.grid(row=1, column=0, columnspan=3, sticky="w", padx=10, pady=(8, 5))
+    # --- Audio tab ---
+    ttk.Label(audio_tab, text="Audio alerts and delay settings", style="Small.TLabel").grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 8))
 
+    chunk_alert_frame = ttk.LabelFrame(audio_tab, text="Chunk Alert", style="Card.TLabelframe")
+    chunk_alert_frame.grid(row=1, column=0, padx=(0, 10), pady=6, sticky="nsew")
+
+    chunk_alert_var = tk.BooleanVar(value=config.get_setting("chunk_alert") == 'True')
+    ttk.Checkbutton(chunk_alert_frame, text="Enable Chunk Alert", variable=chunk_alert_var).pack(anchor="w", padx=10, pady=(8, 6))
+
+    ttk.Label(chunk_alert_frame, text="Trigger Amount", style="Small.TLabel").pack(anchor="w", padx=10)
+    chunk_alert_trigger_entry = ttk.Entry(chunk_alert_frame, width=12, justify='center')
+    chunk_alert_trigger_entry.pack(anchor="w", padx=10, pady=(2, 8))
+    chunk_alert_trigger_entry.insert(0, config.get_setting("chunk_alert_value") or "")
+
+    chunk_alert_label = ttk.Label(chunk_alert_frame, text="No file selected", style="Small.TLabel")
+    chunk_alert_label.pack(anchor="w", padx=10, pady=(0, 6))
+
+    file_button_frame = ttk.Frame(chunk_alert_frame, style="App.TFrame")
+    file_button_frame.pack(anchor="w", padx=10, pady=(0, 8))
+    ttk.Button(file_button_frame, text="📁", width=3,
+               command=lambda: select_chunk_alert_sound(chunk_alert_label, settings_window)).pack(side="left", padx=(0, 6))
+    ttk.Button(file_button_frame, text="🔊", width=3, command=test_chunkaudio_playback).pack(side="left")
+
+    saved_chunk_alert_file_path = config.get_setting("chunk_alert_sound")
+    if saved_chunk_alert_file_path:
+        update_chunk_alert_audio_label(chunk_alert_label, saved_chunk_alert_file_path)
+
+    message_delay_frame = ttk.LabelFrame(audio_tab, text="Message Delay", style="Card.TLabelframe")
+    message_delay_frame.grid(row=1, column=1, padx=(0, 10), pady=6, sticky="nsew")
+
+    announce_delay_var = tk.BooleanVar(value=config.get_setting("announcedelay") == "True")
+    ttk.Checkbutton(message_delay_frame, text="Enable Delay", variable=announce_delay_var).pack(anchor="w", padx=10, pady=(8, 6))
+    ttk.Label(message_delay_frame, text="Delay Seconds", style="Small.TLabel").pack(anchor="w", padx=10)
+    delay_seconds_entry = ttk.Entry(message_delay_frame, width=12, justify='center')
+    delay_seconds_entry.pack(anchor="w", padx=10, pady=(2, 8))
+    delay_seconds_entry.insert(0, config.get_setting("announcedelayseconds") or "")
+
+    marbles_reset_frame = ttk.LabelFrame(audio_tab, text="Marbles Reset", style="Card.TLabelframe")
+    marbles_reset_frame.grid(row=1, column=2, pady=6, sticky="nsew")
+
+    reset_audio_var = tk.BooleanVar(value=config.get_setting("reset_audio") == "True")
+    ttk.Checkbutton(marbles_reset_frame, text="Enable Reset Audio", variable=reset_audio_var).pack(anchor="w", padx=10, pady=(8, 6))
+
+    reset_audio_label = ttk.Label(marbles_reset_frame, text="No file selected", style="Small.TLabel")
+    reset_audio_label.pack(anchor="w", padx=10, pady=(0, 6))
+
+    reset_button_frame = ttk.Frame(marbles_reset_frame, style="App.TFrame")
+    reset_button_frame.pack(anchor="w", padx=10, pady=(0, 8))
+    ttk.Button(reset_button_frame, text="📁", width=3,
+               command=lambda: select_reset_audio_sound(reset_audio_label, settings_window)).pack(side="left", padx=(0, 6))
+    ttk.Button(reset_button_frame, text="🔊", width=3, command=test_audio_playback).pack(side="left")
+
+    saved_reset_file_path = config.get_setting("reset_audio_sound")
+    if saved_reset_file_path:
+        update_reset_audio_label(reset_audio_label, saved_reset_file_path)
+
+    ttk.Label(audio_tab, text="Select Audio Output Device").grid(row=2, column=0, columnspan=3, sticky="w", pady=(8, 4))
     audio_devices = get_audio_devices()
     selected_device = tk.StringVar()
-
-    # Retrieve the current audio device setting or use "Primary Sound Driver" as default
     current_device = config.get_setting('audio_device')
     if not current_device:
         current_device = "Primary Sound Driver"
         config.set_setting('audio_device', current_device)
-
     selected_device.set(current_device)
 
-    device_combobox = ttk.Combobox(top_frame, textvariable=selected_device, values=audio_devices, width=60)
-    device_combobox.grid(row=2, column=0, columnspan=3, sticky="w", padx=10, pady=(0, 10))
+    device_combobox = ttk.Combobox(audio_tab, textvariable=selected_device, values=audio_devices, width=62)
+    device_combobox.grid(row=3, column=0, columnspan=3, sticky="w")
 
-    # Save the selection back to config when user makes a selection
     def on_device_change(event):
         config.set_setting('audio_device', selected_device.get())
 
     device_combobox.bind('<<ComboboxSelected>>', on_device_change)
 
-    # Theme selection moved to the bottom of settings
-    theme_frame = ttk.LabelFrame(scrollable_frame, text="Appearance", style="Card.TLabelframe")
-    theme_frame.grid(row=3, column=0, columnspan=2, pady=(0, 10), padx=10, sticky="ew")
+    for idx in range(3):
+        audio_tab.grid_columnconfigure(idx, weight=1)
 
-    ttk.Label(theme_frame, text="UI Theme").grid(row=0, column=0, sticky="w", padx=10, pady=(8, 6))
+    # --- Chat tab ---
+    ttk.Label(chat_tab, text="Control what MyStats announces in chat", style="Small.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 8))
+
+    chat_br_results_var = tk.BooleanVar(value=is_chat_response_enabled("chat_br_results"))
+    chat_race_results_var = tk.BooleanVar(value=is_chat_response_enabled("chat_race_results"))
+    chat_tilt_results_var = tk.BooleanVar(value=is_chat_response_enabled("chat_tilt_results"))
+    chat_mystats_command_var = tk.BooleanVar(value=is_chat_response_enabled("chat_mystats_command"))
+
+    ttk.Checkbutton(chat_tab, text="BR Results", variable=chat_br_results_var).grid(row=1, column=0, sticky="w", pady=2)
+    ttk.Checkbutton(chat_tab, text="Race Results", variable=chat_race_results_var).grid(row=2, column=0, sticky="w", pady=2)
+    ttk.Checkbutton(chat_tab, text="Tilt Results", variable=chat_tilt_results_var).grid(row=3, column=0, sticky="w", pady=2)
+    ttk.Checkbutton(chat_tab, text="!mystats Command", variable=chat_mystats_command_var).grid(row=4, column=0, sticky="w", pady=(2, 10))
+
+    ttk.Label(chat_tab, text="Max names announced (Race/Tilt)").grid(row=5, column=0, sticky="w", pady=(4, 4))
+    max_name_values = [str(i) for i in range(3, 26)]
+    selected_max_names = tk.StringVar(value=str(get_chat_max_names()))
+    max_names_combobox = ttk.Combobox(chat_tab, textvariable=selected_max_names, values=max_name_values, width=5, state="readonly")
+    max_names_combobox.grid(row=5, column=1, sticky="w", pady=(4, 4), padx=(8, 0))
+
+    # --- Appearance tab ---
+    ttk.Label(appearance_tab, text="Theme and visual preferences", style="Small.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 8))
+    ttk.Label(appearance_tab, text="UI Theme").grid(row=1, column=0, sticky="w", pady=(0, 4))
 
     selected_theme = tk.StringVar(value=config.get_setting("UI_THEME") or app_style.theme_use())
     available_themes = get_available_ui_themes()
-
     if selected_theme.get() not in available_themes:
         available_themes = [selected_theme.get()] + available_themes
 
-    theme_combobox = ttk.Combobox(
-        theme_frame,
-        textvariable=selected_theme,
-        values=available_themes,
-        width=24,
-        state="readonly"
-    )
-    theme_combobox.grid(row=0, column=1, sticky="w", padx=10, pady=(8, 6))
+    theme_combobox = ttk.Combobox(appearance_tab, textvariable=selected_theme, values=available_themes, width=24, state="readonly")
+    theme_combobox.grid(row=1, column=1, sticky="w", pady=(0, 4), padx=(8, 0))
 
     def apply_selected_theme(event=None):
         try:
@@ -981,86 +853,42 @@ def open_settings_window():
 
     theme_combobox.bind('<<ComboboxSelected>>', apply_selected_theme)
 
-    chat_responses_frame = ttk.LabelFrame(scrollable_frame, text="Chat Responses", style="Card.TLabelframe")
-    chat_responses_frame.grid(row=4, column=0, columnspan=2, pady=(0, 10), padx=10, sticky="ew")
+    def reset_settings_defaults():
+        chunk_alert_var.set(True)
+        announce_delay_var.set(False)
+        reset_audio_var.set(False)
+        chat_br_results_var.set(True)
+        chat_race_results_var.set(True)
+        chat_tilt_results_var.set(True)
+        chat_mystats_command_var.set(True)
+        selected_max_names.set("25")
+        chunk_alert_trigger_entry.delete(0, tk.END)
+        chunk_alert_trigger_entry.insert(0, "1000")
+        delay_seconds_entry.delete(0, tk.END)
+        delay_seconds_entry.insert(0, "0")
 
-    chat_br_results_var = tk.BooleanVar(value=is_chat_response_enabled("chat_br_results"))
-    chat_race_results_var = tk.BooleanVar(value=is_chat_response_enabled("chat_race_results"))
-    chat_tilt_results_var = tk.BooleanVar(value=is_chat_response_enabled("chat_tilt_results"))
-    chat_mystats_command_var = tk.BooleanVar(value=is_chat_response_enabled("chat_mystats_command"))
+    footer = ttk.Frame(settings_window, style="App.TFrame")
+    footer.pack(side="bottom", fill="x", padx=20, pady=10)
 
-    ttk.Checkbutton(chat_responses_frame, text="BR Results", variable=chat_br_results_var).grid(row=0, column=0, sticky="w", padx=10, pady=(8, 2))
-    ttk.Checkbutton(chat_responses_frame, text="Race Results", variable=chat_race_results_var).grid(row=1, column=0, sticky="w", padx=10, pady=2)
-    ttk.Checkbutton(chat_responses_frame, text="Tilt Results", variable=chat_tilt_results_var).grid(row=2, column=0, sticky="w", padx=10, pady=2)
-    ttk.Checkbutton(chat_responses_frame, text="!mystats Command", variable=chat_mystats_command_var).grid(row=3, column=0, sticky="w", padx=10, pady=(2, 8))
-
-    ttk.Label(chat_responses_frame, text="Max names announced (Race/Tilt)").grid(row=4, column=0, sticky="w", padx=10, pady=(8, 4))
-
-    max_name_values = [str(i) for i in range(3, 26)]
-    selected_max_names = tk.StringVar(value=str(get_chat_max_names()))
-    max_names_combobox = ttk.Combobox(
-        chat_responses_frame,
-        textvariable=selected_max_names,
-        values=max_name_values,
-        width=5,
-        state="readonly"
-    )
-    max_names_combobox.grid(row=4, column=1, sticky="w", padx=(0, 10), pady=(8, 4))
+    ttk.Button(footer, text="Reset Defaults", command=reset_settings_defaults).pack(side="left")
 
     def save_settings_and_close():
-        # -- Example: Channel entry --
         config.set_setting("CHANNEL", channel_entry.get(), persistent=True)
-
-        # -- Example: Chunk Alert Toggle --
-        chunk_alert_is_on = (chunk_alert_button["text"] == "ON")
-        config.set_setting("chunk_alert", str(chunk_alert_is_on), persistent=True)
-
-        # -- Example: Chunk Alert Trigger Amount --
+        config.set_setting("chunk_alert", str(chunk_alert_var.get()), persistent=True)
         config.set_setting("chunk_alert_value", chunk_alert_trigger_entry.get(), persistent=True)
-
-        # -- Example: Announce Delay Toggle and Seconds --
-        announce_delay_is_on = (announce_delay_button["text"] == "ON")
-        config.set_setting("announcedelay", str(announce_delay_is_on), persistent=True)
+        config.set_setting("announcedelay", str(announce_delay_var.get()), persistent=True)
         config.set_setting("announcedelayseconds", delay_seconds_entry.get(), persistent=True)
-
-        # -- Example: Reset Audio Toggle --
-        reset_audio_is_on = (reset_audio_button["text"] == "ON")
-        config.set_setting("reset_audio", str(reset_audio_is_on), persistent=True)
-
-        # -- Example: Audio Device Selection --
+        config.set_setting("reset_audio", str(reset_audio_var.get()), persistent=True)
         config.set_setting("audio_device", selected_device.get(), persistent=True)
-
-        # -- Example: UI Theme Selection --
         config.set_setting("UI_THEME", selected_theme.get(), persistent=True)
-
-        # -- Chat response toggles --
         config.set_setting("chat_br_results", str(chat_br_results_var.get()), persistent=True)
         config.set_setting("chat_race_results", str(chat_race_results_var.get()), persistent=True)
         config.set_setting("chat_tilt_results", str(chat_tilt_results_var.get()), persistent=True)
         config.set_setting("chat_mystats_command", str(chat_mystats_command_var.get()), persistent=True)
         config.set_setting("chat_max_names", selected_max_names.get(), persistent=True)
-
-        # Since set_setting(persistent=True) automatically calls config.save_settings() 
-        # for each item that is in persistent_keys, we do *not* need to manually call
-        # config.save_settings() again (unless you want to).
-
-        # 2) Close the settings window
         settings_window.destroy()
 
-    # 3) Create a Save button that calls 'save_settings_and_close'
-    #    Or you can modify your existing "Close" button to do this instead of just destroying the window.
-    close_button_frame = ttk.Frame(settings_window, style="App.TFrame")
-    close_button_frame.pack(side="bottom", fill="x", padx=20, pady=10)
-
-    close_button = ttk.Button(close_button_frame, text="Save and Close", command=save_settings_and_close, style="Primary.TButton")
-    close_button.pack(side="right")
-
-    # Resize settings window to fit content, with sane min/max bounds
-    settings_window.update_idletasks()
-    required_width = max(560, frame_with_scrollbar.winfo_reqwidth() + 32)
-    required_height = min(max(620, frame_with_scrollbar.winfo_reqheight() + 90), 840)
-    settings_window.minsize(560, 620)
-    center_toplevel(settings_window, required_width, required_height)
+    ttk.Button(footer, text="Save and Close", command=save_settings_and_close, style="Primary.TButton").pack(side="right")
 
 def test_chunkaudio_playback():
     """
