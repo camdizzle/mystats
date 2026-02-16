@@ -419,6 +419,156 @@ def open_quest_completion_window(parent_window):
     scrollbar.pack(side="right", fill="y", padx=(0, 12), pady=(0, 12))
 
 
+def get_rival_settings():
+    return {
+        'min_races': max(1, get_int_setting('rivals_min_races', 50)),
+        'max_point_gap': max(0, get_int_setting('rivals_max_point_gap', 1500)),
+        'pair_count': max(1, get_int_setting('rivals_pair_count', 25)),
+    }
+
+
+def resolve_user_in_stats(user_stats, username):
+    lookup = (username or '').strip().lower()
+    if not lookup:
+        return None
+    if lookup in user_stats:
+        return lookup
+    for uname, stats in user_stats.items():
+        if stats.get('display_name', '').strip().lower() == lookup:
+            return uname
+    return None
+
+
+def get_global_rivalries(limit=None):
+    user_stats = get_user_season_stats()
+    settings = get_rival_settings()
+
+    qualified = [
+        (username, stats) for username, stats in user_stats.items()
+        if stats.get('races', 0) >= settings['min_races']
+    ]
+
+    rivalries = []
+    for i in range(len(qualified)):
+        user_a, stats_a = qualified[i]
+        for j in range(i + 1, len(qualified)):
+            user_b, stats_b = qualified[j]
+            gap = abs(stats_a['points'] - stats_b['points'])
+            if gap <= settings['max_point_gap']:
+                rivalries.append({
+                    'user_a': user_a,
+                    'display_a': stats_a.get('display_name') or user_a,
+                    'points_a': stats_a.get('points', 0),
+                    'races_a': stats_a.get('races', 0),
+                    'user_b': user_b,
+                    'display_b': stats_b.get('display_name') or user_b,
+                    'points_b': stats_b.get('points', 0),
+                    'races_b': stats_b.get('races', 0),
+                    'point_gap': gap,
+                })
+
+    rivalries.sort(key=lambda row: (row['point_gap'], -(row['points_a'] + row['points_b'])))
+    cap = limit if limit is not None else settings['pair_count']
+    return rivalries[:cap]
+
+
+def get_user_rivals(username, limit=5):
+    user_stats = get_user_season_stats()
+    settings = get_rival_settings()
+    user_key = resolve_user_in_stats(user_stats, username)
+
+    if user_key is None:
+        return None
+
+    base = user_stats[user_key]
+    if base.get('races', 0) < settings['min_races']:
+        return {
+            'user': user_key,
+            'display_name': base.get('display_name') or user_key,
+            'races': base.get('races', 0),
+            'points': base.get('points', 0),
+            'min_races_required': settings['min_races'],
+            'rivals': [],
+        }
+
+    rivals = []
+    for other_key, other_stats in user_stats.items():
+        if other_key == user_key:
+            continue
+        if other_stats.get('races', 0) < settings['min_races']:
+            continue
+
+        gap = abs(base.get('points', 0) - other_stats.get('points', 0))
+        if gap > settings['max_point_gap']:
+            continue
+
+        rivals.append({
+            'username': other_key,
+            'display_name': other_stats.get('display_name') or other_key,
+            'points': other_stats.get('points', 0),
+            'races': other_stats.get('races', 0),
+            'point_gap': gap,
+        })
+
+    rivals.sort(key=lambda row: (row['point_gap'], -row['points']))
+
+    return {
+        'user': user_key,
+        'display_name': base.get('display_name') or user_key,
+        'races': base.get('races', 0),
+        'points': base.get('points', 0),
+        'min_races_required': settings['min_races'],
+        'rivals': rivals[:limit],
+    }
+
+
+def open_rivalries_window(parent_window):
+    rivalries = get_global_rivalries(limit=200)
+    if not rivalries:
+        messagebox.showinfo("Rivals", "No rivalries found with current settings.")
+        return
+
+    popup = tk.Toplevel(parent_window)
+    popup.title("Rivalries")
+    popup.transient(parent_window)
+    popup.attributes('-topmost', True)
+    center_toplevel(popup, 800, 520)
+
+    ttk.Label(popup, text="Rivalries Leaderboard (sorted by closest point gap)", style="Small.TLabel").pack(anchor="w", padx=12, pady=(10, 4))
+
+    columns = ("rank", "player_a", "points_a", "player_b", "points_b", "gap")
+    tree = ttk.Treeview(popup, columns=columns, show="headings", height=18)
+    tree.heading("rank", text="#")
+    tree.heading("player_a", text="Player A")
+    tree.heading("points_a", text="Points A")
+    tree.heading("player_b", text="Player B")
+    tree.heading("points_b", text="Points B")
+    tree.heading("gap", text="Point Gap")
+
+    tree.column("rank", width=50, anchor="center")
+    tree.column("player_a", width=200, anchor="w")
+    tree.column("points_a", width=110, anchor="e")
+    tree.column("player_b", width=200, anchor="w")
+    tree.column("points_b", width=110, anchor="e")
+    tree.column("gap", width=110, anchor="e")
+
+    for idx, row in enumerate(rivalries, start=1):
+        tree.insert("", "end", values=(
+            idx,
+            row['display_a'],
+            f"{row['points_a']:,}",
+            row['display_b'],
+            f"{row['points_b']:,}",
+            f"{row['point_gap']:,}",
+        ))
+
+    scrollbar = ttk.Scrollbar(popup, orient="vertical", command=tree.yview)
+    tree.configure(yscrollcommand=scrollbar.set)
+
+    tree.pack(side="left", fill="both", expand=True, padx=(12, 0), pady=(0, 12))
+    scrollbar.pack(side="right", fill="y", padx=(0, 12), pady=(0, 12))
+
+
 async def send_chat_message(channel, message, category=None, apply_delay=False):
     category_map = {
         "br": "chat_br_results",
@@ -1001,12 +1151,14 @@ def open_settings_window():
     audio_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
     chat_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
     season_quests_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
+    rivals_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
     appearance_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
 
     notebook.add(general_tab, text="General")
     notebook.add(audio_tab, text="Audio")
     notebook.add(chat_tab, text="Chat")
     notebook.add(season_quests_tab, text="Season Quests")
+    notebook.add(rivals_tab, text="Rivals")
     notebook.add(appearance_tab, text="Appearance")
 
     # --- General tab ---
@@ -1116,21 +1268,46 @@ def open_settings_window():
     chat_tilt_results_var = tk.BooleanVar(value=is_chat_response_enabled("chat_tilt_results"))
     chat_all_commands_var = tk.BooleanVar(value=is_chat_response_enabled("chat_all_commands"))
     chat_narrative_alerts_var = tk.BooleanVar(value=is_chat_response_enabled("chat_narrative_alerts"))
+    narrative_alert_grinder_var = tk.BooleanVar(value=is_chat_response_enabled("narrative_alert_grinder_enabled"))
+    narrative_alert_winmilestone_var = tk.BooleanVar(value=is_chat_response_enabled("narrative_alert_winmilestone_enabled"))
+    narrative_alert_leadchange_var = tk.BooleanVar(value=is_chat_response_enabled("narrative_alert_leadchange_enabled"))
 
     ttk.Checkbutton(chat_tab, text="BR Results", variable=chat_br_results_var).grid(row=1, column=0, sticky="w", pady=2)
     ttk.Checkbutton(chat_tab, text="Race Results", variable=chat_race_results_var).grid(row=2, column=0, sticky="w", pady=2)
     ttk.Checkbutton(chat_tab, text="Tilt Results", variable=chat_tilt_results_var).grid(row=3, column=0, sticky="w", pady=2)
     ttk.Checkbutton(chat_tab, text="All !commands", variable=chat_all_commands_var).grid(row=4, column=0, sticky="w", pady=2)
-    ttk.Checkbutton(chat_tab, text="Narrative Alerts", variable=chat_narrative_alerts_var).grid(row=5, column=0, sticky="w", pady=(2, 10))
+    ttk.Checkbutton(chat_tab, text="Narrative Alerts", variable=chat_narrative_alerts_var).grid(row=5, column=0, sticky="w", pady=(2, 6))
 
-    ttk.Label(chat_tab, text="Max names announced (Race/Tilt)").grid(row=6, column=0, sticky="w", pady=(4, 4))
+    narrative_alert_frame = ttk.LabelFrame(chat_tab, text="Narrative Alert Frequency", style="Card.TLabelframe")
+    narrative_alert_frame.grid(row=6, column=0, columnspan=2, sticky="ew", pady=(2, 8))
+
+    ttk.Checkbutton(narrative_alert_frame, text="Grinder milestones", variable=narrative_alert_grinder_var).grid(row=0, column=0, sticky="w", padx=10, pady=(8, 4))
+    ttk.Checkbutton(narrative_alert_frame, text="Win milestones", variable=narrative_alert_winmilestone_var).grid(row=1, column=0, sticky="w", padx=10, pady=2)
+    ttk.Checkbutton(narrative_alert_frame, text="Lead changes", variable=narrative_alert_leadchange_var).grid(row=2, column=0, sticky="w", padx=10, pady=(2, 8))
+
+    ttk.Label(narrative_alert_frame, text="Cooldown (races)", style="Small.TLabel").grid(row=0, column=1, sticky="w", padx=(12, 8), pady=(8, 2))
+    narrative_alert_cooldown_entry = ttk.Entry(narrative_alert_frame, width=8, justify='center')
+    narrative_alert_cooldown_entry.grid(row=0, column=2, sticky="w", padx=(0, 10), pady=(8, 2))
+    narrative_alert_cooldown_entry.insert(0, config.get_setting("narrative_alert_cooldown_races") or "3")
+
+    ttk.Label(narrative_alert_frame, text="Min lead gap", style="Small.TLabel").grid(row=1, column=1, sticky="w", padx=(12, 8), pady=2)
+    narrative_alert_min_gap_entry = ttk.Entry(narrative_alert_frame, width=8, justify='center')
+    narrative_alert_min_gap_entry.grid(row=1, column=2, sticky="w", padx=(0, 10), pady=2)
+    narrative_alert_min_gap_entry.insert(0, config.get_setting("narrative_alert_min_lead_change_points") or "500")
+
+    ttk.Label(narrative_alert_frame, text="Max items per alert", style="Small.TLabel").grid(row=2, column=1, sticky="w", padx=(12, 8), pady=(2, 8))
+    narrative_alert_max_items_entry = ttk.Entry(narrative_alert_frame, width=8, justify='center')
+    narrative_alert_max_items_entry.grid(row=2, column=2, sticky="w", padx=(0, 10), pady=(2, 8))
+    narrative_alert_max_items_entry.insert(0, config.get_setting("narrative_alert_max_items") or "3")
+
+    ttk.Label(chat_tab, text="Max names announced (Race/Tilt)").grid(row=7, column=0, sticky="w", pady=(4, 4))
     max_name_values = [str(i) for i in range(3, 26)]
     selected_max_names = tk.StringVar(value=str(get_chat_max_names()))
     max_names_combobox = ttk.Combobox(chat_tab, textvariable=selected_max_names, values=max_name_values, width=5, state="readonly")
-    max_names_combobox.grid(row=6, column=1, sticky="w", pady=(4, 4), padx=(8, 0))
+    max_names_combobox.grid(row=7, column=1, sticky="w", pady=(4, 4), padx=(8, 0))
 
     message_delay_frame = ttk.LabelFrame(chat_tab, text="Message Delay", style="Card.TLabelframe")
-    message_delay_frame.grid(row=7, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+    message_delay_frame.grid(row=8, column=0, columnspan=2, sticky="ew", pady=(10, 0))
 
     announce_delay_var = tk.BooleanVar(value=config.get_setting("announcedelay") == "True")
     ttk.Checkbutton(message_delay_frame, text="Enable Delay", variable=announce_delay_var).grid(row=0, column=0, sticky="w", padx=10, pady=(8, 6))
@@ -1175,6 +1352,29 @@ def open_settings_window():
     ttk.Button(season_quests_tab, text="Reset Quest Progress", command=reset_season_quest_progress).grid(row=7, column=0, sticky="w", pady=(8, 0))
     ttk.Button(season_quests_tab, text="View Quest Completion", command=lambda: open_quest_completion_window(settings_window)).grid(row=7, column=1, sticky="w", pady=(8, 0))
 
+    # --- Rivals tab ---
+    ttk.Label(rivals_tab, text="Configure rivalry detection and commands", style="Small.TLabel").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
+
+    rivals_enabled_var = tk.BooleanVar(value=is_chat_response_enabled("rivals_enabled"))
+    ttk.Checkbutton(rivals_tab, text="Enable Rivals", variable=rivals_enabled_var).grid(row=1, column=0, sticky="w", pady=(0, 10), columnspan=2)
+
+    ttk.Label(rivals_tab, text="Minimum Season Races").grid(row=2, column=0, sticky="w", pady=(2, 4))
+    rivals_min_races_entry = ttk.Entry(rivals_tab, width=12, justify='center')
+    rivals_min_races_entry.grid(row=2, column=1, sticky="w", pady=(2, 4))
+    rivals_min_races_entry.insert(0, config.get_setting("rivals_min_races") or "50")
+
+    ttk.Label(rivals_tab, text="Maximum Point Gap").grid(row=3, column=0, sticky="w", pady=(2, 4))
+    rivals_max_gap_entry = ttk.Entry(rivals_tab, width=12, justify='center')
+    rivals_max_gap_entry.grid(row=3, column=1, sticky="w", pady=(2, 4))
+    rivals_max_gap_entry.insert(0, config.get_setting("rivals_max_point_gap") or "1500")
+
+    ttk.Label(rivals_tab, text="Pairs to Show").grid(row=4, column=0, sticky="w", pady=(2, 4))
+    rivals_pair_count_entry = ttk.Entry(rivals_tab, width=12, justify='center')
+    rivals_pair_count_entry.grid(row=4, column=1, sticky="w", pady=(2, 4))
+    rivals_pair_count_entry.insert(0, config.get_setting("rivals_pair_count") or "25")
+
+    ttk.Button(rivals_tab, text="View Rivalries", command=lambda: open_rivalries_window(settings_window)).grid(row=5, column=0, sticky="w", pady=(8, 0))
+
     # --- Appearance tab ---
     ttk.Label(appearance_tab, text="Theme and visual preferences", style="Small.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 8))
     ttk.Label(appearance_tab, text="UI Theme").grid(row=1, column=0, sticky="w", pady=(0, 4))
@@ -1205,8 +1405,24 @@ def open_settings_window():
         chat_tilt_results_var.set(True)
         chat_all_commands_var.set(True)
         chat_narrative_alerts_var.set(True)
+        narrative_alert_grinder_var.set(True)
+        narrative_alert_winmilestone_var.set(True)
+        narrative_alert_leadchange_var.set(True)
+        narrative_alert_cooldown_entry.delete(0, tk.END)
+        narrative_alert_cooldown_entry.insert(0, "3")
+        narrative_alert_min_gap_entry.delete(0, tk.END)
+        narrative_alert_min_gap_entry.insert(0, "500")
+        narrative_alert_max_items_entry.delete(0, tk.END)
+        narrative_alert_max_items_entry.insert(0, "3")
         season_quests_enabled_var.set(True)
+        rivals_enabled_var.set(True)
         selected_max_names.set("25")
+        rivals_min_races_entry.delete(0, tk.END)
+        rivals_min_races_entry.insert(0, "50")
+        rivals_max_gap_entry.delete(0, tk.END)
+        rivals_max_gap_entry.insert(0, "1500")
+        rivals_pair_count_entry.delete(0, tk.END)
+        rivals_pair_count_entry.insert(0, "25")
         season_quest_races_entry.delete(0, tk.END)
         season_quest_races_entry.insert(0, "1000")
         season_quest_points_entry.delete(0, tk.END)
@@ -1239,11 +1455,21 @@ def open_settings_window():
         config.set_setting("chat_tilt_results", str(chat_tilt_results_var.get()), persistent=True)
         config.set_setting("chat_all_commands", str(chat_all_commands_var.get()), persistent=True)
         config.set_setting("chat_narrative_alerts", str(chat_narrative_alerts_var.get()), persistent=True)
+        config.set_setting("narrative_alert_grinder_enabled", str(narrative_alert_grinder_var.get()), persistent=True)
+        config.set_setting("narrative_alert_winmilestone_enabled", str(narrative_alert_winmilestone_var.get()), persistent=True)
+        config.set_setting("narrative_alert_leadchange_enabled", str(narrative_alert_leadchange_var.get()), persistent=True)
+        config.set_setting("narrative_alert_cooldown_races", narrative_alert_cooldown_entry.get(), persistent=True)
+        config.set_setting("narrative_alert_min_lead_change_points", narrative_alert_min_gap_entry.get(), persistent=True)
+        config.set_setting("narrative_alert_max_items", narrative_alert_max_items_entry.get(), persistent=True)
         config.set_setting("season_quests_enabled", str(season_quests_enabled_var.get()), persistent=True)
         config.set_setting("season_quest_target_races", season_quest_races_entry.get(), persistent=True)
         config.set_setting("season_quest_target_points", season_quest_points_entry.get(), persistent=True)
         config.set_setting("season_quest_target_race_hs", season_quest_race_hs_entry.get(), persistent=True)
         config.set_setting("season_quest_target_br_hs", season_quest_br_hs_entry.get(), persistent=True)
+        config.set_setting("rivals_enabled", str(rivals_enabled_var.get()), persistent=True)
+        config.set_setting("rivals_min_races", rivals_min_races_entry.get(), persistent=True)
+        config.set_setting("rivals_max_point_gap", rivals_max_gap_entry.get(), persistent=True)
+        config.set_setting("rivals_pair_count", rivals_pair_count_entry.get(), persistent=True)
         config.set_setting("chat_max_names", selected_max_names.get(), persistent=True)
         settings_window.destroy()
 
@@ -1874,10 +2100,14 @@ class ConfigManager:
                                 'tilt_player_file', 'active_event_ids', 'paused_event_ids', 'checkpoint_results_file',
                                 'tilts_results_file', 'tilt_level_file', 'map_data_file', 'map_results_file',
                                 'UI_THEME', 'chat_br_results', 'chat_race_results', 'chat_tilt_results',
-                                'chat_mystats_command', 'chat_all_commands', 'chat_narrative_alerts', 'chat_max_names',
+                                'chat_mystats_command', 'chat_all_commands', 'chat_narrative_alerts',
+                                'narrative_alert_grinder_enabled', 'narrative_alert_winmilestone_enabled',
+                                'narrative_alert_leadchange_enabled', 'narrative_alert_cooldown_races',
+                                'narrative_alert_min_lead_change_points', 'narrative_alert_max_items', 'chat_max_names',
                                 'season_quests_enabled', 'season_quest_target_races', 'season_quest_target_points',
                                 'season_quest_target_race_hs', 'season_quest_target_br_hs', 'season_quest_complete_races',
-                                'season_quest_complete_points', 'season_quest_complete_race_hs', 'season_quest_complete_br_hs'}
+                                'season_quest_complete_points', 'season_quest_complete_race_hs', 'season_quest_complete_br_hs',
+                                'rivals_enabled', 'rivals_min_races', 'rivals_max_point_gap', 'rivals_pair_count'}
         self.transient_keys = set([])
         self.defaults = {
             'chat_br_results': 'True',
@@ -1886,6 +2116,12 @@ class ConfigManager:
             'chat_mystats_command': 'True',
             'chat_all_commands': 'True',
             'chat_narrative_alerts': 'True',
+            'narrative_alert_grinder_enabled': 'True',
+            'narrative_alert_winmilestone_enabled': 'True',
+            'narrative_alert_leadchange_enabled': 'True',
+            'narrative_alert_cooldown_races': '3',
+            'narrative_alert_min_lead_change_points': '500',
+            'narrative_alert_max_items': '3',
             'chat_max_names': '25',
             'season_quests_enabled': 'True',
             'season_quest_target_races': '1000',
@@ -1896,6 +2132,10 @@ class ConfigManager:
             'season_quest_complete_points': 'False',
             'season_quest_complete_race_hs': 'False',
             'season_quest_complete_br_hs': 'False',
+            'rivals_enabled': 'True',
+            'rivals_min_races': '50',
+            'rivals_max_point_gap': '1500',
+            'rivals_pair_count': '25',
             'UI_THEME': DEFAULT_UI_THEME,
             'announcedelay': 'False',
             'announcedelayseconds': '0',
@@ -1949,10 +2189,12 @@ class ConfigManager:
                 print(f"Invalid value for {key}: {value}. Resetting to default (1000).")
                 return False
 
-        if key in {"season_quest_target_races", "season_quest_target_points", "season_quest_target_race_hs", "season_quest_target_br_hs"}:
+        if key in {"season_quest_target_races", "season_quest_target_points", "season_quest_target_race_hs", "season_quest_target_br_hs",
+                   "rivals_min_races", "rivals_max_point_gap", "rivals_pair_count",
+                   "narrative_alert_cooldown_races", "narrative_alert_min_lead_change_points", "narrative_alert_max_items"}:
             if isinstance(value, int) or (isinstance(value, str) and value.isdigit()):
                 return True
-            print(f"Invalid value for {key}: {value}. Quest targets must be whole numbers.")
+            print(f"Invalid value for {key}: {value}. Value must be a whole number.")
             return False
 
         return True
@@ -2947,6 +3189,10 @@ class Bot(commands.Bot):
         await ctx.channel.send(
             "Purchase Skins or Coins for yourself, or gift them to a friend!  https://pixelbypixel.studio/shop")
 
+    @commands.command(name='wiki')
+    async def wiki(self, ctx):
+        await ctx.channel.send("Marbles on Stream Wiki - https://wiki.pixelbypixel.studio/")
+
     @commands.command(name='commands')
     async def list_commands(self, ctx):
         excluded_commands = ['commands', 'mplreset']
@@ -2958,6 +3204,84 @@ class Bot(commands.Bot):
     def get_commands(self):
         excluded_commands = ['commands', 'mplreset']
         return [f'!{cmd.name}' for cmd in self.commands.values() if cmd.name not in excluded_commands]
+
+    @commands.command(name='rivals')
+    async def rivals_command(self, ctx, username: str = None):
+        if not is_chat_response_enabled("rivals_enabled"):
+            await ctx.channel.send("Rivals are currently disabled.")
+            return
+
+        if username:
+            rival_data = get_user_rivals(username, limit=5)
+            if rival_data is None:
+                await ctx.channel.send(f"{username}: no season rival data found.")
+                return
+
+            if rival_data['races'] < rival_data['min_races_required']:
+                await ctx.channel.send(
+                    f"{rival_data['display_name']}: {rival_data['races']:,} races so far. "
+                    f"Need {rival_data['min_races_required']:,}+ races for rivals tracking."
+                )
+                return
+
+            if not rival_data['rivals']:
+                await ctx.channel.send(
+                    f"{rival_data['display_name']}: no close rivals found within configured point gap."
+                )
+                return
+
+            entries = [
+                f"{row['display_name']} (gap {row['point_gap']:,})"
+                for row in rival_data['rivals']
+            ]
+            await ctx.channel.send(
+                f"Top rivals for {rival_data['display_name']}: " + " | ".join(entries)
+            )
+            return
+
+        rivalries = get_global_rivalries(limit=5)
+        if not rivalries:
+            await ctx.channel.send("No rivalries found yet with current rival settings.")
+            return
+
+        entries = [
+            f"{row['display_a']} vs {row['display_b']} (gap {row['point_gap']:,})"
+            for row in rivalries
+        ]
+        await ctx.channel.send("Top Rivalries: " + " | ".join(entries))
+
+    @commands.command(name='h2h')
+    async def head_to_head_command(self, ctx, user_a: str = None, user_b: str = None):
+        if not is_chat_response_enabled("rivals_enabled"):
+            await ctx.channel.send("Rivals are currently disabled.")
+            return
+
+        if not user_a or not user_b:
+            await ctx.channel.send("Usage: !h2h <user1> <user2>")
+            return
+
+        user_stats = get_user_season_stats()
+        user_a_key = resolve_user_in_stats(user_stats, user_a)
+        user_b_key = resolve_user_in_stats(user_stats, user_b)
+
+        if user_a_key is None or user_b_key is None:
+            await ctx.channel.send("Could not find one or both users in season stats.")
+            return
+
+        stats_a = user_stats[user_a_key]
+        stats_b = user_stats[user_b_key]
+
+        leader_name = stats_a['display_name'] if stats_a['points'] >= stats_b['points'] else stats_b['display_name']
+        point_gap = abs(stats_a['points'] - stats_b['points'])
+
+        await ctx.channel.send(
+            f"H2H {stats_a['display_name']} vs {stats_b['display_name']} | "
+            f"Points: {stats_a['points']:,}-{stats_b['points']:,} | "
+            f"Races: {stats_a['races']:,}-{stats_b['races']:,} | "
+            f"Race HS: {stats_a['race_hs']:,}-{stats_b['race_hs']:,} | "
+            f"BR HS: {stats_a['br_hs']:,}-{stats_b['br_hs']:,} | "
+            f"Leader: {leader_name} by {point_gap:,}"
+        )
 
     @commands.command(name='myquests')
     async def myquests_command(self, ctx, username: str = None):
@@ -4095,6 +4419,7 @@ async def race(bot):
     last_map_file_mod_time = None
     totalpointsrace = 0
     current_daily_points_leader = None
+    last_narrative_alert_race_count = 0
     cached_map_data = {
         'MapName': None,
         'MapBuilder': None,
@@ -4131,6 +4456,7 @@ async def race(bot):
             if is_chat_response_enabled("chat_race_results"):
                 await send_chat_message(bot.channel, "🎺 Marble Day Reset! 🎺", category="race")
             current_daily_points_leader = None
+            last_narrative_alert_race_count = 0
             config.set_setting('data_sync', 'yes', persistent=False)
             await asyncio.sleep(3)
             reset()
@@ -4579,31 +4905,45 @@ async def race(bot):
                 winner_username = first_row[1]
                 winner_display_name = first_row[2] if first_row[1] != first_row[2].lower() else first_row[1]
 
-                winner_race_count = race_counts.get(winner_username, 0)
-                if winner_race_count in (10, 25, 50, 75, 100):
-                    narrative_messages.append(
-                        f"🏁 Grinder Alert: {winner_display_name} just completed race #{winner_race_count} today!"
-                    )
+                if is_chat_response_enabled("narrative_alert_grinder_enabled"):
+                    winner_race_count = race_counts.get(winner_username, 0)
+                    if winner_race_count in (10, 25, 50, 75, 100):
+                        narrative_messages.append(
+                            f"🏁 Grinder: {winner_display_name} hit race #{winner_race_count} today"
+                        )
 
-                winner_win_count = wins_by_player.get(winner_username, 0)
-                if winner_win_count in (3, 5, 10, 15):
-                    narrative_messages.append(
-                        f"🏆 Win Milestone: {winner_display_name} just secured win #{winner_win_count} today!"
-                    )
+                if is_chat_response_enabled("narrative_alert_winmilestone_enabled"):
+                    winner_win_count = wins_by_player.get(winner_username, 0)
+                    if winner_win_count in (3, 5, 10, 15):
+                        narrative_messages.append(
+                            f"🏆 Win Milestone: {winner_display_name} reached win #{winner_win_count} today"
+                        )
 
-                if points_by_player:
+                if is_chat_response_enabled("narrative_alert_leadchange_enabled") and points_by_player:
                     sorted_points = sorted(points_by_player.items(), key=lambda item: item[1], reverse=True)
                     leader_username, leader_points = sorted_points[0]
-                    tied_for_lead = len(sorted_points) > 1 and sorted_points[1][1] == leader_points
-                    if not tied_for_lead and leader_username != current_daily_points_leader:
+                    second_place_points = sorted_points[1][1] if len(sorted_points) > 1 else 0
+                    lead_gap = leader_points - second_place_points
+                    min_lead_gap = max(0, get_int_setting("narrative_alert_min_lead_change_points", 500))
+                    tied_for_lead = len(sorted_points) > 1 and second_place_points == leader_points
+                    if (not tied_for_lead and leader_username != current_daily_points_leader
+                            and lead_gap >= min_lead_gap):
                         current_daily_points_leader = leader_username
                         leader_display_name = next(
                             (row[2] for row in namecolordata if row[1] == leader_username and row[2]),
                             leader_username
                         )
                         narrative_messages.append(
-                            f"📈 Lead Change: {leader_display_name} now leads today with {leader_points:,} points!"
+                            f"📈 Lead Change: {leader_display_name} now leads by {lead_gap:,} points"
                         )
+
+            if narrative_messages:
+                cooldown_races = max(0, get_int_setting("narrative_alert_cooldown_races", 3))
+                max_items = max(1, get_int_setting("narrative_alert_max_items", 3))
+                if cooldown_races == 0 or (t_count - last_narrative_alert_race_count) >= cooldown_races:
+                    combined_narrative = "📣 Player Alerts: " + " | ".join(narrative_messages[:max_items]) + "."
+                    messages.append(combined_narrative)
+                    last_narrative_alert_race_count = t_count
 
             # --- CHUNK ALERT BLOCK ---
             if int(first_row[3]) >= int(config.get_setting('chunk_alert_value')) and config.get_setting('chunk_alert') == 'True':
@@ -4741,7 +5081,6 @@ async def race(bot):
                         temp_messages.append(message.rstrip(', '))
                         messages.extend(temp_messages)
 
-            messages.extend(narrative_messages)
 
             # ---- After building up messages, do config updates, etc. ----
             config.set_setting('totalpointstoday', t_points, persistent=False)
