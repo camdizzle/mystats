@@ -47,6 +47,7 @@ from datetime import datetime, timedelta
 import atexit
 import socket
 import subprocess
+import importlib.util
 
 # Global Variables
 version = '5.7.0'
@@ -54,6 +55,56 @@ text_widget = None
 bot = None
 GLOBAL_SOCKET = None
 DEBUG = False
+HAS_TTKBOOTSTRAP = importlib.util.find_spec("ttkbootstrap") is not None
+
+
+def create_root_window():
+    """Create the root window, preferring ttkbootstrap when installed."""
+    if HAS_TTKBOOTSTRAP:
+        ttkbootstrap_module = __import__("ttkbootstrap")
+        root_window = ttkbootstrap_module.Window(themename="flatly")
+        style = root_window.style
+    else:
+        root_window = tk.Tk()
+        style = ttk.Style(root_window)
+        style.theme_use("clam")
+
+    return root_window, style
+
+
+def apply_ui_styles(style):
+    """Central app styles for consistent spacing and typography."""
+    style.configure("App.TFrame", padding=6)
+    style.configure("Card.TLabelframe", padding=10)
+    style.configure("Card.TLabelframe.Label", font=("Segoe UI", 10, "bold"))
+    style.configure("Heading.TLabel", font=("Segoe UI", 16, "bold"))
+    style.configure("Small.TLabel", font=("Segoe UI", 8))
+    style.configure("Primary.TButton", padding=6)
+
+
+def center_toplevel(window, width, height):
+    """Center a Toplevel against the main root window."""
+    root.update_idletasks()
+    root_x = root.winfo_x()
+    root_y = root.winfo_y()
+    root_width = root.winfo_width()
+    root_height = root.winfo_height()
+    pos_x = root_x + (root_width // 2) - (width // 2)
+    pos_y = root_y + (root_height // 2) - (height // 2)
+    window.geometry(f"{width}x{height}+{pos_x}+{pos_y}")
+
+def build_stats_labels(parent):
+    labels = {
+        "total_points": ttk.Label(parent, text="Total Points: 0"),
+        "total_count": ttk.Label(parent, text="Total Count: 0"),
+        "avg_points": ttk.Label(parent, text="Avg Points: 0"),
+        "race_hs": ttk.Label(parent, text="Race HS: 0"),
+        "br_hs": ttk.Label(parent, text="BR HS: 0"),
+    }
+    for label in labels.values():
+        label.pack(anchor='w')
+    return labels
+
 
 def is_already_running():
     global GLOBAL_SOCKET
@@ -588,10 +639,10 @@ def open_settings_window():
     pos_x = main_x + (main_width // 2) - (window_width // 2)
     pos_y = main_y + (main_height // 2) - (window_height // 2)
 
-    settings_window.geometry(f"{window_width}x{window_height}+{pos_x}+{pos_y}")
+    center_toplevel(settings_window, window_width, window_height)
 
     # Create a frame to contain the canvas and scrollbar
-    frame_with_scrollbar = tk.Frame(settings_window)
+    frame_with_scrollbar = ttk.Frame(settings_window, style="App.TFrame")
     frame_with_scrollbar.pack(fill="both", expand=True)
 
     # Create a Canvas and Scrollbar
@@ -614,17 +665,17 @@ def open_settings_window():
     scrollbar.pack(side="right", fill="y")
 
     # Create a top frame to hold individual frames for Channel, Marble Day, and Season
-    top_frame = tk.Frame(scrollable_frame)
+    top_frame = ttk.Frame(scrollable_frame, style="App.TFrame")
     top_frame.grid(row=0, column=0, columnspan=2, padx=10, pady=5, sticky='ew')
 
     # Create individual frames for each item
-    channel_frame = tk.Frame(top_frame)
+    channel_frame = ttk.Frame(top_frame, style="App.TFrame")
     channel_frame.grid(row=0, column=0, padx=10, pady=(0, 5))
 
-    marble_day_frame = tk.Frame(top_frame)
+    marble_day_frame = ttk.Frame(top_frame, style="App.TFrame")
     marble_day_frame.grid(row=0, column=1, padx=10, pady=(0, 5))
 
-    season_frame = tk.Frame(top_frame)
+    season_frame = ttk.Frame(top_frame, style="App.TFrame")
     season_frame.grid(row=0, column=2, padx=10, pady=(0, 5))
 
     # Configure the grid to center the frames without expansion
@@ -633,42 +684,42 @@ def open_settings_window():
     top_frame.grid_columnconfigure(2, weight=1)
 
     # Add Channel label and entry to channel_frame
-    channel_label = tk.Label(channel_frame, text="Channel")
+    channel_label = ttk.Label(channel_frame, text="Channel")
     channel_label.pack(anchor="center")
 
-    channel_entry = tk.Entry(channel_frame, width=16, justify="center")
+    channel_entry = ttk.Entry(channel_frame, width=16, justify="center")
     channel_entry.pack(anchor="center")
     channel_entry.insert(0, config.get_setting("CHANNEL"))
 
     # Add a label for "Marble Day"
-    marble_day_text_label = tk.Label(marble_day_frame, text="Marble Day", font=("Arial", 10))
+    marble_day_text_label = ttk.Label(marble_day_frame, text="Marble Day")
     marble_day_text_label.pack(anchor="center")
 
     # Add a label to display the marble day value
     marble_day_value = config.get_setting("marble_day")  # Get the current marble day value
-    marble_day_value_label = tk.Label(marble_day_frame, text=marble_day_value, anchor="center", font=("Arial", 10))
+    marble_day_value_label = ttk.Label(marble_day_frame, text=marble_day_value, anchor="center")
     marble_day_value_label.pack(anchor="center")
 
 
     # Add a label for "Season"
-    season_text_label = tk.Label(season_frame, text="Season", font=("Arial", 10))
+    season_text_label = ttk.Label(season_frame, text="Season")
     season_text_label.pack(anchor="center")
 
     # Add a label to display the season value
     season_value = config.get_setting("season")  # Get the current season value
-    season_label = tk.Label(season_frame, text=season_value, anchor="center", font=("Arial", 10))
+    season_label = ttk.Label(season_frame, text=season_value, anchor="center")
     season_label.pack(anchor="center")
 
 
     # Create a middle frame to hold the chunk alert settings and other frames
-    middle_frame = tk.Frame(scrollable_frame)
+    middle_frame = ttk.Frame(scrollable_frame, style="App.TFrame")
     middle_frame.grid(row=1, column=0, columnspan=2, pady=(0, 10), sticky="nsew")
 
     # Configure the grid to distribute space equally among the three rows
     middle_frame.grid_rowconfigure(0, weight=1)
 
     # Create a frame for Chunk Alert settings inside the middle_frame
-    chunk_alert_frame = tk.LabelFrame(middle_frame, text="Chunk Alert", padx=15, pady=15, labelanchor="n", font=("Arial", 10, "bold"))
+    chunk_alert_frame = ttk.LabelFrame(middle_frame, text="Chunk Alert", style="Card.TLabelframe")
     chunk_alert_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
 
     # Convert the config value to a boolean
@@ -686,41 +737,37 @@ def open_settings_window():
     chunk_alert_button.pack(anchor="center", pady=(5, 5))
 
     # Add the Chunk Alert Trigger label (second item)
-    chunk_alert_trigger_label = tk.Label(chunk_alert_frame, text="Trigger Amt", font=("Arial", 8))
+    chunk_alert_trigger_label = ttk.Label(chunk_alert_frame, text="Trigger Amt", style="Small.TLabel")
     chunk_alert_trigger_label.pack(anchor="center", pady=(5, 0))
 
     # Entry for the Chunk Alert Trigger value (third item)
-    chunk_alert_trigger_entry = tk.Entry(chunk_alert_frame, width=10, justify='center', font=("Arial", 10))
+    chunk_alert_trigger_entry = ttk.Entry(chunk_alert_frame, width=10, justify='center')
     chunk_alert_trigger_entry.pack(anchor="center", pady=(5, 5))
     chunk_alert_trigger_entry.insert(0, config.get_setting("chunk_alert_value"))
 
     # Chunk Alert Settings label (fourth item)
-    chunk_alert_label = tk.Label(chunk_alert_frame, text="No file selected", anchor="center", font=("Arial", 8))
+    chunk_alert_label = ttk.Label(chunk_alert_frame, text="No file selected", anchor="center", style="Small.TLabel")
     chunk_alert_label.pack(anchor="center", pady=(5, 5))
 
     # Create a frame for the file and test buttons (fifth item, side by side)
-    file_button_frame = tk.Frame(chunk_alert_frame)
+    file_button_frame = ttk.Frame(chunk_alert_frame, style="App.TFrame")
     file_button_frame.pack(anchor="center", pady=(5, 0))
 
     # File selection button with file folder emoji, centered
-    file_button = tk.Button(
+    file_button = ttk.Button(
         file_button_frame,
         text="📁",
         command=lambda: select_chunk_alert_sound(chunk_alert_label, settings_window),
-        font=("Arial", 12),
-        width=3,
-        anchor='center'
+        width=3
     )
     file_button.pack(side="left", padx=5)
 
     # New test audio playback button with speaker emoji, centered
-    test_audio_button = tk.Button(
+    test_audio_button = ttk.Button(
         file_button_frame,
         text="🔊",
         command=test_chunkaudio_playback,
-        font=("Arial", 12),
-        width=3,
-        anchor='center'
+        width=3
     )
     test_audio_button.pack(side="left", padx=5)
 
@@ -730,7 +777,7 @@ def open_settings_window():
         update_chunk_alert_audio_label(chunk_alert_label, saved_chunk_alert_file_path)
 
     # Create a frame for Message Delay settings inside the middle_frame
-    message_delay_frame = tk.LabelFrame(middle_frame, text="Message Delay", padx=15, pady=15, labelanchor="n", font=("Arial", 10, "bold"))
+    message_delay_frame = ttk.LabelFrame(middle_frame, text="Message Delay", style="Card.TLabelframe")
     message_delay_frame.grid(row=0, column=1, padx=10, pady=10, sticky="nsew")
 
     # Announce Delay toggle button (first item)
@@ -746,16 +793,16 @@ def open_settings_window():
     announce_delay_button.pack(anchor="center", pady=(5, 5))
 
     # Delay Seconds label (second item)
-    delay_seconds_label = tk.Label(message_delay_frame, text="Delay Seconds", font=("Arial", 8))
+    delay_seconds_label = ttk.Label(message_delay_frame, text="Delay Seconds", style="Small.TLabel")
     delay_seconds_label.pack(anchor="center", pady=(5, 0))
 
     # Delay Seconds entry box (third item)
-    delay_seconds_entry = tk.Entry(message_delay_frame, width=10, justify='center', font=("Arial", 10))
+    delay_seconds_entry = ttk.Entry(message_delay_frame, width=10, justify='center')
     delay_seconds_entry.pack(anchor="center", pady=(5, 5))
     delay_seconds_entry.insert(0, config.get_setting("announcedelayseconds"))
 
     # Create a new frame for Marbles Reset Settings inside the middle_frame
-    marbles_reset_frame = tk.LabelFrame(middle_frame, text="Marbles Reset", padx=15, pady=15, labelanchor="n", font=("Arial", 10, "bold"))
+    marbles_reset_frame = ttk.LabelFrame(middle_frame, text="Marbles Reset", style="Card.TLabelframe")
     marbles_reset_frame.grid(row=0, column=2, padx=10, pady=10, sticky="nsew")
 
     # Reset Audio Toggle Button (first item)
@@ -771,32 +818,28 @@ def open_settings_window():
     reset_audio_button.pack(anchor="center", pady=(5, 5))
 
     # Reset Audio Label (second item)
-    reset_audio_label = tk.Label(marbles_reset_frame, text="No file selected", anchor="center", font=("Arial", 8))
+    reset_audio_label = ttk.Label(marbles_reset_frame, text="No file selected", anchor="center", style="Small.TLabel")
     reset_audio_label.pack(anchor="center", pady=(5, 5))
 
     # Create a frame for side-by-side buttons (third item)
-    reset_button_frame = tk.Frame(marbles_reset_frame)
+    reset_button_frame = ttk.Frame(marbles_reset_frame, style="App.TFrame")
     reset_button_frame.pack(anchor="center", pady=(5, 0))
 
     # Placeholder button for potential testing or other functionality
-    test_reset_button = tk.Button(
+    test_reset_button = ttk.Button(
         reset_button_frame,
         text="📁",  # Placeholder button, can be replaced with actual functionality
         command=lambda: select_reset_audio_sound(reset_audio_label, settings_window),
-        font=("Arial", 12),
-        width=3,
-        anchor='center'
+        width=3
     )
     test_reset_button.pack(side="left", padx=5)
 
     # Button for selecting reset audio sound, side by side
-    reset_speaker_button = tk.Button(
+    reset_speaker_button = ttk.Button(
         reset_button_frame,
         text="🔊",
         command=lambda: test_audio_playback(),
-        font=("Arial", 12),
-        width=3,
-        anchor='center'
+        width=3
     )
     reset_speaker_button.pack(side="left", padx=5)
 
@@ -810,16 +853,16 @@ def open_settings_window():
 
 
     # Create a frame for the Directory setting inside the scrollable_frame
-    directory_frame = tk.Frame(scrollable_frame)
+    directory_frame = ttk.Frame(scrollable_frame, style="App.TFrame")
     directory_frame.grid(row=2, column=0, columnspan=2, pady=(0, 10), sticky="nsew")
 
     # Add the Directory label
-    directory_label = tk.Label(directory_frame, text="Mystats Directory", wraplength=300, anchor="nw", justify="left")
+    directory_label = ttk.Label(directory_frame, text="Mystats Directory", wraplength=300, anchor="nw", justify="left")
     directory_label.grid(row=0, column=0, sticky="w", padx=(10, 10), pady=(5, 5))
 
     # Add the Directory entry
     directory_value = os.path.expandvars(r"%localappdata%/mystats/")
-    directory_entry = tk.Entry(directory_frame, width=60)
+    directory_entry = ttk.Entry(directory_frame, width=60)
     directory_entry.grid(row=1, column=0, sticky="w", padx=(5,0), pady=(5, 5))
     directory_entry.insert(0, directory_value)
     directory_entry.config(state="readonly")
@@ -833,11 +876,11 @@ def open_settings_window():
             messagebox.showerror("Error", "Directory path does not exist.")
 
     # Add the Open Location button with folder icon
-    open_location_button = tk.Button(directory_frame, text="📁", command=open_directory)
+    open_location_button = ttk.Button(directory_frame, text="📁", command=open_directory, width=3)
     open_location_button.grid(row=1, column=1, padx=(10, 0), pady=(5, 5))
 
     # Create a new row in top_frame and merge all three columns for the audio device selection
-    label = tk.Label(top_frame, text="Select Audio Output Device:")
+    label = ttk.Label(top_frame, text="Select Audio Output Device:")
     label.grid(row=1, column=0, columnspan=3, sticky="w", padx=10, pady=(10, 5))
 
     audio_devices = get_audio_devices()
@@ -892,10 +935,10 @@ def open_settings_window():
 
     # 3) Create a Save button that calls 'save_settings_and_close'
     #    Or you can modify your existing "Close" button to do this instead of just destroying the window.
-    close_button_frame = tk.Frame(settings_window)
+    close_button_frame = ttk.Frame(settings_window, style="App.TFrame")
     close_button_frame.pack(side="bottom", fill="x", padx=20, pady=10)
 
-    close_button = tk.Button(close_button_frame, text="Save and Close", command=save_settings_and_close)
+    close_button = ttk.Button(close_button_frame, text="Save and Close", command=save_settings_and_close, style="Primary.TButton")
     close_button.pack(side="right")
 
 def test_chunkaudio_playback():
@@ -964,7 +1007,8 @@ def on_close():
 
 
 # Tkinter Initialization
-root = tk.Tk()
+root, app_style = create_root_window()
+apply_ui_styles(app_style)
 root.protocol("WM_DELETE_WINDOW", on_close)
 root.title("MyStats - Marbles On Stream Companion Application")
 root.geometry("800x500")
@@ -973,59 +1017,41 @@ root.resizable(False, False)
 root.grid_rowconfigure(1, weight=1)
 root.grid_columnconfigure(1, weight=1)
 
-stats_container_frame = tk.Frame(root)
+stats_container_frame = ttk.Frame(root, style="App.TFrame")
 stats_container_frame.grid(row=0, column=0, rowspan=2, sticky='nw', padx=10, pady=10)
 
 # Stats Frame on the left
-season_stats_frame = tk.LabelFrame(stats_container_frame, text="Season Statistics", padx=10, pady=10, bd=2,
-                                   relief=tk.GROOVE, labelanchor='n')
+season_stats_frame = ttk.LabelFrame(stats_container_frame, text="Season Statistics", style="Card.TLabelframe")
 season_stats_frame.pack(fill='x', pady=(0, 10))  # Pack them vertically within the container
 
 # Add statistics labels to stats_frame
-total_points_label = tk.Label(season_stats_frame, text="Total Points: 0")
-total_points_label.pack(anchor='w')
-
-total_count_label = tk.Label(season_stats_frame, text="Total Count: 0")
-total_count_label.pack(anchor='w')
-
-avg_points_label = tk.Label(season_stats_frame, text="Avg Points: 0")
-avg_points_label.pack(anchor='w')
-
-race_hs_label = tk.Label(season_stats_frame, text="Race HS: 0")
-race_hs_label.pack(anchor='w')
-
-br_hs_label = tk.Label(season_stats_frame, text="BR HS: 0")
-br_hs_label.pack(anchor='w')
+season_stat_labels = build_stats_labels(season_stats_frame)
+total_points_label = season_stat_labels["total_points"]
+total_count_label = season_stat_labels["total_count"]
+avg_points_label = season_stat_labels["avg_points"]
+race_hs_label = season_stat_labels["race_hs"]
+br_hs_label = season_stat_labels["br_hs"]
 
 # Today's Statistics Frame under Season Statistics
-todays_stats_frame = tk.LabelFrame(stats_container_frame, text="Today's Statistics", padx=10, pady=10, bd=2,
-                                   relief=tk.GROOVE, labelanchor='n')
+todays_stats_frame = ttk.LabelFrame(stats_container_frame, text="Today's Statistics", style="Card.TLabelframe")
 todays_stats_frame.pack(fill='x')
 
 # Add today's statistics labels to todays_stats_frame
-total_points_t_label = tk.Label(todays_stats_frame, text="Total Points: 0")
-total_points_t_label.pack(anchor='w')
-
-total_count_t_label = tk.Label(todays_stats_frame, text="Total Count: 0")
-total_count_t_label.pack(anchor='w')
-
-avg_points_t_label = tk.Label(todays_stats_frame, text="Avg Points: 0")
-avg_points_t_label.pack(anchor='w')
-
-race_hs_t_label = tk.Label(todays_stats_frame, text="Race HS: 0")
-race_hs_t_label.pack(anchor='w')
-
-br_hs_t_label = tk.Label(todays_stats_frame, text="BR HS: 0")
-br_hs_t_label.pack(anchor='w')
+today_stat_labels = build_stats_labels(todays_stats_frame)
+total_points_t_label = today_stat_labels["total_points"]
+total_count_t_label = today_stat_labels["total_count"]
+avg_points_t_label = today_stat_labels["avg_points"]
+race_hs_t_label = today_stat_labels["race_hs"]
+br_hs_t_label = today_stat_labels["br_hs"]
 
 # Button Frame under the stats_frame for settings events mpl buttons
-button_frame = tk.Frame(stats_container_frame)
+button_frame = ttk.Frame(stats_container_frame, style="App.TFrame")
 button_frame.pack(pady=(20, 0))
 
 button_width = 8
 
 # Add buttons to button_frame
-settings_button = tk.Button(button_frame, text="Settings", command=open_settings_window, width=button_width)
+settings_button = ttk.Button(button_frame, text="Settings", command=open_settings_window, width=button_width, style="Primary.TButton")
 settings_button.grid(row=0, column=0, padx=5, pady=(0, 5))
 button_frame.grid_rowconfigure(3, weight=1)
 
@@ -1040,22 +1066,22 @@ def open_url(event):
 url_label.bind("<Button-1>", open_url)
 
 # Top Frame (for MyStats title and Login)
-top_frame1 = tk.Frame(root)
+top_frame1 = ttk.Frame(root, style="App.TFrame")
 top_frame1.grid(row=0, column=1, sticky='ew', padx=(5, 0))
 
 # MyStats title label in top_frame1
-title_label = tk.Label(top_frame1, text="MyStats", font=("Arial", 16, "bold"))
+title_label = ttk.Label(top_frame1, text="MyStats", style="Heading.TLabel")
 title_label.grid(row=0, column=0, sticky='w', padx=(5, 0))
 top_frame1.grid_columnconfigure(0, weight=1)
 
 # Login Frame within top_frame1
-login_button_frame = tk.Frame(top_frame1)
+login_button_frame = ttk.Frame(top_frame1, style="App.TFrame")
 login_button_frame.grid(row=0, column=1, sticky='e')
 
-chatbot_label = tk.Label(login_button_frame, text="Current ChatBot", font=("Arial", 8))
+chatbot_label = ttk.Label(login_button_frame, text="Current ChatBot", style="Small.TLabel")
 chatbot_label.grid(row=0, column=1, sticky='e', padx=(0, 5))
 
-login_button = tk.Button(login_button_frame, text="Custom Bot Login", command=open_login_url)
+login_button = ttk.Button(login_button_frame, text="Custom Bot Login", command=open_login_url, style="Primary.TButton")
 login_button.grid(row=1, column=1, sticky='e', padx=(0, 5))
 
 # Text area below the top frame, filling the remaining space
@@ -1398,7 +1424,7 @@ def open_events_window():
 
 # Call the open_events_window function to open the events window
 # Add the events button next to the settings button in the main window
-events_button = tk.Button(button_frame, text="Events", command=open_events_window, width=button_width)
+events_button = ttk.Button(button_frame, text="Events", command=open_events_window, width=button_width, style="Primary.TButton")
 events_button.grid(row=0, column=1, padx=5, pady=(0, 5))
 
 # Start Flask server in a separate thread
