@@ -1041,14 +1041,26 @@ def build_stats_sidebar(parent):
     button_frame = ttk.Frame(stats_container_frame, style="App.TFrame")
     button_frame.pack(pady=(20, 0))
 
+    button_width = 8
+
     settings_button = ttk.Button(
         button_frame,
         text="Settings",
         command=open_settings_window,
-        width=8,
+        width=button_width,
         style="Primary.TButton"
     )
     settings_button.grid(row=0, column=0, padx=5, pady=(0, 5))
+
+    events_button = ttk.Button(
+        button_frame,
+        text="Events",
+        command=open_events_window,
+        width=button_width,
+        style="Primary.TButton"
+    )
+    events_button.grid(row=0, column=1, padx=5, pady=(0, 5))
+
     button_frame.grid_rowconfigure(3, weight=1)
 
     url_label = tk.Label(button_frame, text="https://mystats.camwow.tv", fg="blue", cursor="hand2", font=("Arial", 10, "underline"))
@@ -1433,11 +1445,6 @@ def open_events_window():
 
     update_event_list()
 
-
-# Call the open_events_window function to open the events window
-# Add the events button next to the settings button in the main window
-events_button = ttk.Button(button_frame, text="Events", command=open_events_window, width=button_width, style="Primary.TButton")
-events_button.grid(row=0, column=1, padx=5, pady=(0, 5))
 
 # Start Flask server in a separate thread
 flask_thread = threading.Thread(target=run_flask)
