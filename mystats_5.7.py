@@ -1112,10 +1112,6 @@ def initialize_main_window():
     return root_window
 
 
-# Tkinter Initialization
-root = initialize_main_window()
-
-
 def open_events_window():
     root.update_idletasks()
     root_width = root.winfo_width()
@@ -1445,6 +1441,9 @@ def open_events_window():
 
     update_event_list()
 
+
+# Tkinter Initialization
+root = initialize_main_window()
 
 # Start Flask server in a separate thread
 flask_thread = threading.Thread(target=run_flask)
