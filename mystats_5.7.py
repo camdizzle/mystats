@@ -764,18 +764,8 @@ def open_settings_window():
     if saved_chunk_alert_file_path:
         update_chunk_alert_audio_label(chunk_alert_label, saved_chunk_alert_file_path)
 
-    message_delay_frame = ttk.LabelFrame(audio_tab, text="Message Delay", style="Card.TLabelframe")
-    message_delay_frame.grid(row=1, column=1, padx=(0, 10), pady=6, sticky="nsew")
-
-    announce_delay_var = tk.BooleanVar(value=config.get_setting("announcedelay") == "True")
-    ttk.Checkbutton(message_delay_frame, text="Enable Delay", variable=announce_delay_var).pack(anchor="w", padx=10, pady=(8, 6))
-    ttk.Label(message_delay_frame, text="Delay Seconds", style="Small.TLabel").pack(anchor="w", padx=10)
-    delay_seconds_entry = ttk.Entry(message_delay_frame, width=12, justify='center')
-    delay_seconds_entry.pack(anchor="w", padx=10, pady=(2, 8))
-    delay_seconds_entry.insert(0, config.get_setting("announcedelayseconds") or "")
-
     marbles_reset_frame = ttk.LabelFrame(audio_tab, text="Marbles Reset", style="Card.TLabelframe")
-    marbles_reset_frame.grid(row=1, column=2, pady=6, sticky="nsew")
+    marbles_reset_frame.grid(row=1, column=1, pady=6, sticky="nsew")
 
     reset_audio_var = tk.BooleanVar(value=config.get_setting("reset_audio") == "True")
     ttk.Checkbutton(marbles_reset_frame, text="Enable Reset Audio", variable=reset_audio_var).pack(anchor="w", padx=10, pady=(8, 6))
@@ -810,7 +800,7 @@ def open_settings_window():
 
     device_combobox.bind('<<ComboboxSelected>>', on_device_change)
 
-    for idx in range(3):
+    for idx in range(2):
         audio_tab.grid_columnconfigure(idx, weight=1)
 
     # --- Chat tab ---
@@ -831,6 +821,16 @@ def open_settings_window():
     selected_max_names = tk.StringVar(value=str(get_chat_max_names()))
     max_names_combobox = ttk.Combobox(chat_tab, textvariable=selected_max_names, values=max_name_values, width=5, state="readonly")
     max_names_combobox.grid(row=5, column=1, sticky="w", pady=(4, 4), padx=(8, 0))
+
+    message_delay_frame = ttk.LabelFrame(chat_tab, text="Message Delay", style="Card.TLabelframe")
+    message_delay_frame.grid(row=6, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+
+    announce_delay_var = tk.BooleanVar(value=config.get_setting("announcedelay") == "True")
+    ttk.Checkbutton(message_delay_frame, text="Enable Delay", variable=announce_delay_var).grid(row=0, column=0, sticky="w", padx=10, pady=(8, 6))
+    ttk.Label(message_delay_frame, text="Delay Seconds", style="Small.TLabel").grid(row=1, column=0, sticky="w", padx=10)
+    delay_seconds_entry = ttk.Entry(message_delay_frame, width=12, justify='center')
+    delay_seconds_entry.grid(row=1, column=1, sticky="w", padx=(8, 10), pady=(0, 8))
+    delay_seconds_entry.insert(0, config.get_setting("announcedelayseconds") or "")
 
     # --- Appearance tab ---
     ttk.Label(appearance_tab, text="Theme and visual preferences", style="Small.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 8))
