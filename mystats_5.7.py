@@ -51,13 +51,18 @@ import subprocess
 import importlib.util
 import logging
 
+try:
+    import ttkbootstrap as ttkbootstrap_module
+except ImportError:
+    ttkbootstrap_module = None
+
 # Global Variables
-version = '5.7.0'
+version = '6.0.0'
 text_widget = None
 bot = None
 GLOBAL_SOCKET = None
 DEBUG = False
-HAS_TTKBOOTSTRAP = importlib.util.find_spec("ttkbootstrap") is not None
+HAS_TTKBOOTSTRAP = ttkbootstrap_module is not None
 DEFAULT_UI_THEME = "darkly"
 app_style = None
 
@@ -87,7 +92,6 @@ def create_root_window():
     initial_theme = get_initial_ui_theme()
 
     if HAS_TTKBOOTSTRAP:
-        ttkbootstrap_module = __import__("ttkbootstrap")
         root_window = ttkbootstrap_module.Window(themename=DEFAULT_UI_THEME)
         style = root_window.style
 
@@ -3452,6 +3456,23 @@ def ver_season_only():
     retry_request()  # Initial API call
 
 
+def reset_season_stats():
+    config.set_setting('totalpointsseason', 0, persistent=False)
+    config.set_setting('totalcountseason', 0, persistent=False)
+    config.set_setting('race_hs_season', 0, persistent=False)
+    config.set_setting('br_hs_season', 0, persistent=False)
+
+    for completion_key in (
+        'season_quest_complete_races',
+        'season_quest_complete_points',
+        'season_quest_complete_race_hs',
+        'season_quest_complete_br_hs',
+    ):
+        config.set_setting(completion_key, 'False', persistent=True)
+
+    config.set_setting('new_season', 'False', persistent=False)
+
+
 def reset():
     reset_timestamp, reset_timestampmdy, reset_timestamphms, reset_adjusted_time = time_manager.get_adjusted_time()
     if config.get_setting('startup') == 'yes':
@@ -3467,10 +3488,7 @@ def reset():
             pass
 
     if config.get_setting('new_season') == 'True':
-        config.set_setting('totalpointsseason', 0, persistent=False)
-        config.set_setting('totalcountseason', 0, persistent=False)
-    else:
-        pass
+        reset_season_stats()
 
     config.set_setting('marble_day', reset_timestampmdy, persistent=True)
     config.set_setting('totalpointstoday', 0, persistent=False)
