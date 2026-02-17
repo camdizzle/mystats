@@ -57,7 +57,7 @@ except ImportError:
     ttkbootstrap_module = None
 
 # Global Variables
-version = '5.7.0'
+version = '6.0.0'
 text_widget = None
 bot = None
 GLOBAL_SOCKET = None
