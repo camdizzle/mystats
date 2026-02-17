@@ -428,7 +428,7 @@ def get_rival_settings():
 
 
 def resolve_user_in_stats(user_stats, username):
-    lookup = (username or '').strip().lower()
+    lookup = (username or '').strip().lstrip('@').lower()
     if not lookup:
         return None
     if lookup in user_stats:
@@ -530,38 +530,47 @@ def open_rivalries_window(parent_window):
         messagebox.showinfo("Rivals", "No rivalries found with current settings.")
         return
 
+    settings = get_rival_settings()
+
     popup = tk.Toplevel(parent_window)
     popup.title("Rivalries")
     popup.transient(parent_window)
     popup.attributes('-topmost', True)
-    center_toplevel(popup, 800, 520)
+    center_toplevel(popup, 940, 560)
 
-    ttk.Label(popup, text="Rivalries Leaderboard (sorted by closest point gap)", style="Small.TLabel").pack(anchor="w", padx=12, pady=(10, 4))
+    ttk.Label(
+        popup,
+        text=(
+            f"Rivalries Leaderboard • Closest point gaps first • "
+            f"Min races: {settings['min_races']:,} • Max gap: {settings['max_point_gap']:,}"
+        ),
+        style="Small.TLabel"
+    ).pack(anchor="w", padx=12, pady=(10, 4))
 
-    columns = ("rank", "player_a", "points_a", "player_b", "points_b", "gap")
+    columns = ("rank", "player_a", "stats_a", "player_b", "stats_b", "gap")
     tree = ttk.Treeview(popup, columns=columns, show="headings", height=18)
     tree.heading("rank", text="#")
     tree.heading("player_a", text="Player A")
-    tree.heading("points_a", text="Points A")
+    tree.heading("stats_a", text="A Stats")
     tree.heading("player_b", text="Player B")
-    tree.heading("points_b", text="Points B")
-    tree.heading("gap", text="Point Gap")
+    tree.heading("stats_b", text="B Stats")
+    tree.heading("gap", text="Gap")
 
-    tree.column("rank", width=50, anchor="center")
-    tree.column("player_a", width=200, anchor="w")
-    tree.column("points_a", width=110, anchor="e")
-    tree.column("player_b", width=200, anchor="w")
-    tree.column("points_b", width=110, anchor="e")
-    tree.column("gap", width=110, anchor="e")
+    tree.column("rank", width=45, anchor="center")
+    tree.column("player_a", width=180, anchor="w")
+    tree.column("stats_a", width=190, anchor="w")
+    tree.column("player_b", width=180, anchor="w")
+    tree.column("stats_b", width=190, anchor="w")
+    tree.column("gap", width=90, anchor="e")
 
     for idx, row in enumerate(rivalries, start=1):
         tree.insert("", "end", values=(
             idx,
             row['display_a'],
-            f"{row['points_a']:,}",
+            f"{row['points_a']:,} pts • {row['races_a']:,} races",
             row['display_b'],
-            f"{row['points_b']:,}",
-            f"{row['point_gap']:,}",
+            f"{row['points_b']:,} pts • {row['races_b']:,} races",
+            f"±{row['point_gap']:,}",
         ))
 
     scrollbar = ttk.Scrollbar(popup, orient="vertical", command=tree.yview)
@@ -3793,9 +3802,38 @@ class Bot(commands.Bot):
         return [f'!{cmd.name}' for cmd in self.commands.values() if cmd.name not in excluded_commands]
 
     @commands.command(name='rivals')
-    async def rivals_command(self, ctx, username: str = None):
+    async def rivals_command(self, ctx, username: str = None, compare_username: str = None):
         if not is_chat_response_enabled("rivals_enabled"):
             await ctx.channel.send("Rivals are currently disabled.")
+            return
+
+        if username and compare_username:
+            user_stats = get_user_season_stats()
+            user_a_key = resolve_user_in_stats(user_stats, username)
+            user_b_key = resolve_user_in_stats(user_stats, compare_username)
+
+            if user_a_key is None or user_b_key is None:
+                await ctx.channel.send("Could not find one or both users in season stats.")
+                return
+
+            stats_a = user_stats[user_a_key]
+            stats_b = user_stats[user_b_key]
+            settings = get_rival_settings()
+            point_gap = abs(stats_a.get('points', 0) - stats_b.get('points', 0))
+
+            qualifies_a = stats_a.get('races', 0) >= settings['min_races'] and stats_a.get('points', 0) > 0
+            qualifies_b = stats_b.get('races', 0) >= settings['min_races'] and stats_b.get('points', 0) > 0
+            are_rivals = qualifies_a and qualifies_b and point_gap <= settings['max_point_gap']
+
+            rivalry_status = "✅ Rivalry active" if are_rivals else "❌ Not a qualifying rivalry"
+
+            await ctx.channel.send(
+                f"Rivals Check • {stats_a['display_name']} vs {stats_b['display_name']} | "
+                f"Gap: ±{point_gap:,} pts | "
+                f"{stats_a['display_name']}: {stats_a.get('points', 0):,} pts ({stats_a.get('races', 0):,} races) | "
+                f"{stats_b['display_name']}: {stats_b.get('points', 0):,} pts ({stats_b.get('races', 0):,} races) | "
+                f"{rivalry_status}"
+            )
             return
 
         if username:
@@ -3818,11 +3856,11 @@ class Bot(commands.Bot):
                 return
 
             entries = [
-                f"{row['display_name']} (gap {row['point_gap']:,})"
-                for row in rival_data['rivals']
+                f"#{idx} {row['display_name']} (±{row['point_gap']:,}, {row['points']:,} pts)"
+                for idx, row in enumerate(rival_data['rivals'], start=1)
             ]
             await ctx.channel.send(
-                f"Top rivals for {rival_data['display_name']}: " + " | ".join(entries)
+                f"Rivals for {rival_data['display_name']} ({rival_data['points']:,} pts): " + " | ".join(entries)
             )
             return
 
@@ -3832,10 +3870,10 @@ class Bot(commands.Bot):
             return
 
         entries = [
-            f"{row['display_a']} vs {row['display_b']} (gap {row['point_gap']:,})"
-            for row in rivalries
+            f"#{idx} {row['display_a']} vs {row['display_b']} (±{row['point_gap']:,})"
+            for idx, row in enumerate(rivalries, start=1)
         ]
-        await ctx.channel.send("Top Rivalries: " + " | ".join(entries))
+        await ctx.channel.send("Rivalries Leaderboard: " + " | ".join(entries))
 
     @commands.command(name='h2h')
     async def head_to_head_command(self, ctx, user_a: str = None, user_b: str = None):
