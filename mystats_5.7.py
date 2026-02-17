@@ -19,7 +19,7 @@ import requests
 import tkinter.simpledialog as simpledialog
 from PIL import Image, ImageTk
 from twitchio.ext import commands
-from flask import Flask, request, redirect
+from flask import Flask, request
 import threading
 import glob
 import math
@@ -30,16 +30,13 @@ from collections import defaultdict
 import csv
 import pytz
 from collections import defaultdict
-from colorama import init, Fore, Style
+from colorama import Fore, Style
 import atexit
 import webbrowser
 from datetime import datetime, timedelta
 from twitchio.ext.commands.errors import CommandNotFound
 import sounddevice as sd
 import soundfile as sf
-import pandas as pd
-import babel
-from babel import numbers
 from twitchio import errors
 import io
 from io import BytesIO
@@ -47,7 +44,6 @@ from dateutil import parser
 from datetime import datetime, timedelta
 import atexit
 import socket
-import subprocess
 import importlib.util
 import logging
 
@@ -4967,22 +4963,47 @@ async def checkpoints(bot):
                 result = chardet.detect(data)
                 encoding = result['encoding']
 
-                # Read CSV in a separate thread
-                df = await asyncio.to_thread(
-                    pd.read_csv,
+                def parse_checkpoint_players(checkpoint_file_path, detected_encoding):
+                    with open(checkpoint_file_path, 'r', encoding=detected_encoding, errors='ignore', newline='') as checkpoint_file:
+                        reader = csv.reader(checkpoint_file)
+                        rows = list(reader)
+
+                    if len(rows) <= 1:
+                        return []
+
+                    seen_rows = set()
+                    cleaned_rows = []
+
+                    for row in rows[1:]:
+                        if not row:
+                            continue
+
+                        # Normalize empty trailing columns for stable de-duplication.
+                        normalized = tuple(cell.strip() for cell in row)
+                        if normalized in seen_rows:
+                            continue
+                        seen_rows.add(normalized)
+
+                        cleaned_rows.append(row)
+
+                    def checkpoint_sort_key(row):
+                        checkpoint_value = row[0].strip() if row and len(row) > 0 else ''
+                        try:
+                            return (0, int(checkpoint_value))
+                        except ValueError:
+                            return (1, checkpoint_value)
+
+                    cleaned_rows.sort(key=checkpoint_sort_key)
+                    return cleaned_rows
+
+                checkpointplayers = await asyncio.to_thread(
+                    parse_checkpoint_players,
                     config.get_setting('checkpoint_file'),
-                    encoding=encoding,
-                    header=None
+                    encoding,
                 )
 
-                # Check if the file contains only the header row
-                if len(df) <= 1:
-                    continue  # Skip processing if only header exists
-
-                df_cleaned = df.drop(index=0).drop_duplicates().reset_index(drop=True)
-                df_sorted = df_cleaned.sort_values(by=0, ascending=True)
-
-                checkpointplayers = df_sorted.values.tolist()
+                if not checkpointplayers:
+                    continue
                 max_names = get_chat_max_names()
                 checkpointplayers = checkpointplayers[:max_names]
 
