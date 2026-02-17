@@ -649,7 +649,9 @@ def ensure_default_mycycle_session(data):
             'stats': {},
         }
 
-    if not config.get_setting('mycycle_primary_session_id'):
+    primary_session_id = config.get_setting('mycycle_primary_session_id')
+    if (not primary_session_id or
+            (str(primary_session_id).startswith(MYCYCLE_SESSION_PREFIX) and primary_session_id != session_id)):
         config.set_setting('mycycle_primary_session_id', session_id, persistent=True)
     return session_id
 
@@ -751,60 +753,65 @@ def update_mycycle_with_race_rows(racedata):
     with MYCYCLE_LOCK:
         data = load_mycycle_data()
         ensure_default_mycycle_session(data)
-        sessions = [s for s in data.get('sessions', {}).values() if s.get('active', True)]
+        session_id = _resolve_session_id(data)
+        session = data.get('sessions', {}).get(session_id)
 
-        for session in sessions:
-            for row in racedata:
-                if len(row) < 5:
-                    continue
-                race_type = row[4]
-                if race_type != 'Race' and not (settings['include_br'] and race_type == 'BR'):
-                    continue
+        if session is None or not session.get('active', True):
+            save_mycycle_data(data)
+            return completion_events
 
-                try:
-                    placement = int(row[0])
-                except (TypeError, ValueError):
-                    continue
+        for row in racedata:
+            if len(row) < 5:
+                continue
+            race_type = row[4]
+            if race_type != 'Race' and not (settings['include_br'] and race_type == 'BR'):
+                continue
 
-                if placement < settings['min_place'] or placement > settings['max_place']:
-                    continue
+            username = (row[1] or '').strip().lower()
+            if not username:
+                continue
 
-                username = (row[1] or '').strip().lower()
-                if not username:
-                    continue
+            try:
+                placement = int(row[0])
+            except (TypeError, ValueError):
+                continue
 
-                display_name = (row[2] or '').strip() if len(row) > 2 else username
-                user_record = _ensure_user_cycle_record(session, username, display_name, settings['min_place'], settings['max_place'])
+            display_name = (row[2] or '').strip() if len(row) > 2 else username
+            user_record = _ensure_user_cycle_record(session, username, display_name, settings['min_place'], settings['max_place'])
 
-                user_record['total_races'] += 1
-                user_record['current_cycle_races'] += 1
-                user_record['placements'][str(placement)] += 1
+            user_record['total_races'] += 1
+            user_record['current_cycle_races'] += 1
 
-                hits = set(user_record.get('current_hits', []))
-                hits.add(placement)
-                user_record['current_hits'] = sorted(hits)
+            if placement < settings['min_place'] or placement > settings['max_place']:
+                continue
 
-                unique_needed = settings['max_place'] - settings['min_place'] + 1
-                if len(hits) >= unique_needed:
-                    completed_in_races = user_record['current_cycle_races']
-                    user_record['cycles_completed'] += 1
-                    user_record['last_cycle_races'] = completed_in_races
-                    fastest = int(user_record.get('fastest_cycle_races', 0) or 0)
-                    slowest = int(user_record.get('slowest_cycle_races', 0) or 0)
-                    if fastest <= 0 or completed_in_races < fastest:
-                        user_record['fastest_cycle_races'] = completed_in_races
-                    if slowest <= 0 or completed_in_races > slowest:
-                        user_record['slowest_cycle_races'] = completed_in_races
-                    user_record['last_cycle_completed_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                    completion_events.append({
-                        'session_name': session.get('name', 'Unknown Session'),
-                        'username': username,
-                        'display_name': user_record.get('display_name') or username,
-                        'cycles_completed': user_record['cycles_completed'],
-                        'races_used': user_record['last_cycle_races'],
-                    })
-                    user_record['current_hits'] = []
-                    user_record['current_cycle_races'] = 0
+            user_record['placements'][str(placement)] += 1
+
+            hits = set(user_record.get('current_hits', []))
+            hits.add(placement)
+            user_record['current_hits'] = sorted(hits)
+
+            unique_needed = settings['max_place'] - settings['min_place'] + 1
+            if len(hits) >= unique_needed:
+                completed_in_races = user_record['current_cycle_races']
+                user_record['cycles_completed'] += 1
+                user_record['last_cycle_races'] = completed_in_races
+                fastest = int(user_record.get('fastest_cycle_races', 0) or 0)
+                slowest = int(user_record.get('slowest_cycle_races', 0) or 0)
+                if fastest <= 0 or completed_in_races < fastest:
+                    user_record['fastest_cycle_races'] = completed_in_races
+                if slowest <= 0 or completed_in_races > slowest:
+                    user_record['slowest_cycle_races'] = completed_in_races
+                user_record['last_cycle_completed_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                completion_events.append({
+                    'session_name': session.get('name', 'Unknown Session'),
+                    'username': username,
+                    'display_name': user_record.get('display_name') or username,
+                    'cycles_completed': user_record['cycles_completed'],
+                    'races_used': user_record['last_cycle_races'],
+                })
+                user_record['current_hits'] = []
+                user_record['current_cycle_races'] = 0
 
         save_mycycle_data(data)
     return completion_events
@@ -826,14 +833,17 @@ def get_mycycle_leaderboard(limit=200):
     session, stats, _ = get_mycycle_progress()
     leaderboard = []
     settings = get_mycycle_settings()
+    placement_range = list(range(settings['min_place'], settings['max_place'] + 1))
     for username, row in stats.items():
         hits = set(row.get('current_hits', []))
+        hit_marks = [f"{place}{'✅' if place in hits else '❌'}" for place in placement_range]
         leaderboard.append({
             'username': username,
             'display_name': row.get('display_name') or username,
             'cycles_completed': int(row.get('cycles_completed', 0)),
             'progress_hits': len(hits),
             'progress_total': settings['max_place'] - settings['min_place'] + 1,
+            'progress_marks': " ".join(hit_marks),
             'current_cycle_races': int(row.get('current_cycle_races', 0)),
             'last_cycle_races': int(row.get('last_cycle_races', 0)),
         })
@@ -1030,20 +1040,21 @@ def open_mycycle_leaderboard_window(parent_window):
     popup.title("MyCycle Leaderboard")
     popup.transient(parent_window)
     popup.attributes('-topmost', True)
-    center_toplevel(popup, 840, 540)
+    center_toplevel(popup, 1120, 540)
 
     ttk.Label(popup, text=f"Session: {session.get('name', 'Unknown')}", style="Small.TLabel").pack(anchor="w", padx=12, pady=(10, 4))
-    columns = ("rank", "user", "cycles", "progress", "cycle_races", "last_cycle")
+    columns = ("rank", "user", "cycles", "progress", "placements", "cycle_races", "last_cycle")
     tree = ttk.Treeview(popup, columns=columns, show="headings", height=20)
-    for col, text in (("rank", "#"), ("user", "User"), ("cycles", "Cycles"), ("progress", "Current Progress"), ("cycle_races", "Races in Current Cycle"), ("last_cycle", "Races in Last Completed Cycle")):
+    for col, text in (("rank", "#"), ("user", "User"), ("cycles", "Cycles"), ("progress", "Current Progress"), ("placements", "Placements (Hit/Miss)"), ("cycle_races", "Races in Current Cycle"), ("last_cycle", "Races in Last Completed Cycle")):
         tree.heading(col, text=text)
 
     tree.column("rank", width=50, anchor="center")
-    tree.column("user", width=200, anchor="w")
-    tree.column("cycles", width=80, anchor="center")
-    tree.column("progress", width=140, anchor="center")
-    tree.column("cycle_races", width=180, anchor="center")
-    tree.column("last_cycle", width=210, anchor="center")
+    tree.column("user", width=170, anchor="w")
+    tree.column("cycles", width=70, anchor="center")
+    tree.column("progress", width=120, anchor="center")
+    tree.column("placements", width=260, anchor="w")
+    tree.column("cycle_races", width=140, anchor="center")
+    tree.column("last_cycle", width=180, anchor="center")
 
     for idx, row in enumerate(leaderboard, start=1):
         tree.insert("", "end", values=(
@@ -1051,6 +1062,7 @@ def open_mycycle_leaderboard_window(parent_window):
             row['display_name'],
             row['cycles_completed'],
             f"{row['progress_hits']}/{row['progress_total']}",
+            row['progress_marks'],
             row['current_cycle_races'],
             row['last_cycle_races'],
         ))
