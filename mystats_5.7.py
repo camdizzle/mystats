@@ -51,13 +51,18 @@ import subprocess
 import importlib.util
 import logging
 
+try:
+    import ttkbootstrap as ttkbootstrap_module
+except ImportError:
+    ttkbootstrap_module = None
+
 # Global Variables
 version = '5.7.0'
 text_widget = None
 bot = None
 GLOBAL_SOCKET = None
 DEBUG = False
-HAS_TTKBOOTSTRAP = importlib.util.find_spec("ttkbootstrap") is not None
+HAS_TTKBOOTSTRAP = ttkbootstrap_module is not None
 DEFAULT_UI_THEME = "darkly"
 app_style = None
 
@@ -87,7 +92,6 @@ def create_root_window():
     initial_theme = get_initial_ui_theme()
 
     if HAS_TTKBOOTSTRAP:
-        ttkbootstrap_module = __import__("ttkbootstrap")
         root_window = ttkbootstrap_module.Window(themename=DEFAULT_UI_THEME)
         style = root_window.style
 
