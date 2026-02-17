@@ -19,7 +19,7 @@ import requests
 import tkinter.simpledialog as simpledialog
 from PIL import Image, ImageTk
 from twitchio.ext import commands
-from flask import Flask, request, redirect
+from flask import Flask, request
 import threading
 import glob
 import math
@@ -30,16 +30,13 @@ from collections import defaultdict
 import csv
 import pytz
 from collections import defaultdict
-from colorama import init, Fore, Style
+from colorama import Fore, Style
 import atexit
 import webbrowser
 from datetime import datetime, timedelta
 from twitchio.ext.commands.errors import CommandNotFound
 import sounddevice as sd
 import soundfile as sf
-import pandas as pd
-import babel
-from babel import numbers
 from twitchio import errors
 import io
 from io import BytesIO
@@ -47,17 +44,21 @@ from dateutil import parser
 from datetime import datetime, timedelta
 import atexit
 import socket
-import subprocess
 import importlib.util
 import logging
 
+try:
+    import ttkbootstrap as ttkbootstrap_module
+except ImportError:
+    ttkbootstrap_module = None
+
 # Global Variables
-version = '5.7.0'
+version = '6.0.0'
 text_widget = None
 bot = None
 GLOBAL_SOCKET = None
 DEBUG = False
-HAS_TTKBOOTSTRAP = importlib.util.find_spec("ttkbootstrap") is not None
+HAS_TTKBOOTSTRAP = ttkbootstrap_module is not None
 DEFAULT_UI_THEME = "darkly"
 app_style = None
 
@@ -87,7 +88,6 @@ def create_root_window():
     initial_theme = get_initial_ui_theme()
 
     if HAS_TTKBOOTSTRAP:
-        ttkbootstrap_module = __import__("ttkbootstrap")
         root_window = ttkbootstrap_module.Window(themename=DEFAULT_UI_THEME)
         style = root_window.style
 
@@ -3452,6 +3452,23 @@ def ver_season_only():
     retry_request()  # Initial API call
 
 
+def reset_season_stats():
+    config.set_setting('totalpointsseason', 0, persistent=False)
+    config.set_setting('totalcountseason', 0, persistent=False)
+    config.set_setting('race_hs_season', 0, persistent=False)
+    config.set_setting('br_hs_season', 0, persistent=False)
+
+    for completion_key in (
+        'season_quest_complete_races',
+        'season_quest_complete_points',
+        'season_quest_complete_race_hs',
+        'season_quest_complete_br_hs',
+    ):
+        config.set_setting(completion_key, 'False', persistent=True)
+
+    config.set_setting('new_season', 'False', persistent=False)
+
+
 def reset():
     reset_timestamp, reset_timestampmdy, reset_timestamphms, reset_adjusted_time = time_manager.get_adjusted_time()
     if config.get_setting('startup') == 'yes':
@@ -3467,10 +3484,7 @@ def reset():
             pass
 
     if config.get_setting('new_season') == 'True':
-        config.set_setting('totalpointsseason', 0, persistent=False)
-        config.set_setting('totalcountseason', 0, persistent=False)
-    else:
-        pass
+        reset_season_stats()
 
     config.set_setting('marble_day', reset_timestampmdy, persistent=True)
     config.set_setting('totalpointstoday', 0, persistent=False)
@@ -4949,22 +4963,47 @@ async def checkpoints(bot):
                 result = chardet.detect(data)
                 encoding = result['encoding']
 
-                # Read CSV in a separate thread
-                df = await asyncio.to_thread(
-                    pd.read_csv,
+                def parse_checkpoint_players(checkpoint_file_path, detected_encoding):
+                    with open(checkpoint_file_path, 'r', encoding=detected_encoding, errors='ignore', newline='') as checkpoint_file:
+                        reader = csv.reader(checkpoint_file)
+                        rows = list(reader)
+
+                    if len(rows) <= 1:
+                        return []
+
+                    seen_rows = set()
+                    cleaned_rows = []
+
+                    for row in rows[1:]:
+                        if not row:
+                            continue
+
+                        # Normalize empty trailing columns for stable de-duplication.
+                        normalized = tuple(cell.strip() for cell in row)
+                        if normalized in seen_rows:
+                            continue
+                        seen_rows.add(normalized)
+
+                        cleaned_rows.append(row)
+
+                    def checkpoint_sort_key(row):
+                        checkpoint_value = row[0].strip() if row and len(row) > 0 else ''
+                        try:
+                            return (0, int(checkpoint_value))
+                        except ValueError:
+                            return (1, checkpoint_value)
+
+                    cleaned_rows.sort(key=checkpoint_sort_key)
+                    return cleaned_rows
+
+                checkpointplayers = await asyncio.to_thread(
+                    parse_checkpoint_players,
                     config.get_setting('checkpoint_file'),
-                    encoding=encoding,
-                    header=None
+                    encoding,
                 )
 
-                # Check if the file contains only the header row
-                if len(df) <= 1:
-                    continue  # Skip processing if only header exists
-
-                df_cleaned = df.drop(index=0).drop_duplicates().reset_index(drop=True)
-                df_sorted = df_cleaned.sort_values(by=0, ascending=True)
-
-                checkpointplayers = df_sorted.values.tolist()
+                if not checkpointplayers:
+                    continue
                 max_names = get_chat_max_names()
                 checkpointplayers = checkpointplayers[:max_names]
 
