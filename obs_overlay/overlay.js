@@ -182,6 +182,7 @@ function showTop3ForTenSeconds(top3View) {
 }
 
 function startLeaderboardAutoScroll() {
+  if (top3IsShowing) return;
   stopLeaderboardAutoScroll();
   clearCycleRestartTimer();
   showLeaderboardView();
@@ -278,7 +279,7 @@ function renderCombinedRows(views) {
   }));
 
   updateBoardTitleFromScroll();
-  setTimeout(startLeaderboardAutoScroll, 0);
+  setTimeout(ensureLeaderboardAutoScroll, 0);
 }
 
 function ensureLeaderboardAutoScroll() {
