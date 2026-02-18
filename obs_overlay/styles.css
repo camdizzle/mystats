@@ -137,6 +137,74 @@ h1 {
   color: var(--accent);
 }
 
+body.top3-active .board-shell {
+  background: radial-gradient(circle at top, rgba(255, 199, 95, 0.14), rgba(255, 255, 255, 0.04) 50%);
+  border-color: rgba(255, 211, 120, 0.35);
+}
+
+body.top3-active .board-title {
+  color: #ffe6a8;
+  border-color: rgba(255, 207, 107, 0.4);
+  background: linear-gradient(120deg, rgba(70, 35, 5, 0.92), rgba(30, 13, 2, 0.92));
+}
+
+body.top3-active #leaderboard {
+  overflow: hidden;
+  gap: 10px;
+}
+
+body.top3-active #leaderboard li.top3-card {
+  grid-template-columns: 1fr;
+  gap: 4px;
+  text-align: center;
+  padding: 12px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: linear-gradient(160deg, rgba(255,255,255,0.14), rgba(255,255,255,0.06));
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.06), 0 10px 20px rgba(0, 0, 0, 0.3);
+  animation: popIn 360ms ease;
+}
+
+body.top3-active #leaderboard li.top3-card--1 {
+  border-color: rgba(246, 211, 95, 0.7);
+  background: linear-gradient(160deg, rgba(246, 211, 95, 0.25), rgba(255,255,255,0.08));
+}
+
+body.top3-active #leaderboard li.top3-card--2 {
+  border-color: rgba(207, 218, 245, 0.6);
+}
+
+body.top3-active #leaderboard li.top3-card--3 {
+  border-color: rgba(242, 173, 115, 0.6);
+}
+
+body.top3-active .top3-rank {
+  font-size: calc(1.1rem * var(--text-scale));
+  letter-spacing: 0.04em;
+  color: #ffe8a8;
+}
+
+body.top3-active .top3-name {
+  font-size: calc(1.28rem * var(--text-scale));
+  font-weight: 800;
+  text-shadow: 0 0 18px rgba(127, 216, 255, 0.45);
+}
+
+body.top3-active .top3-points {
+  font-size: calc(1.05rem * var(--text-scale));
+  color: var(--accent);
+}
+
+@keyframes popIn {
+  from {
+    transform: translateY(12px) scale(0.98);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+
 body.compact-rows #leaderboard {
   gap: 4px;
 }
@@ -172,6 +240,10 @@ body.compact-rows #leaderboard li {
   }
 
   #leaderboard li > span:first-child { padding: 5px 0; border-radius: 8px; }
+
+  body.top3-active .top3-name {
+    font-size: calc(1.05rem * var(--text-scale));
+  }
 }
 
 @media (max-height: 420px) {
