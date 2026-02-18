@@ -112,3 +112,36 @@ Version 1.0
 - Monitor battleroyale CSV for changes
 - Take values from CSV and announce in twitch chat
 
+
+## OBS Overlay (Built-in Flask)
+Use Browser Source: `http://127.0.0.1:5000/overlay` (also supports `/overlay/`, `/overlay.html`, and `/obs-overlay`)
+Root status endpoint: `http://127.0.0.1:5000/`
+Health check endpoint: `http://127.0.0.1:5000/api/overlay/health`
+Route list endpoint: `http://127.0.0.1:5000/api/overlay/routes`
+
+Overlay assets now use `/overlay/...` absolute paths so loading `/overlay` works consistently without requiring a trailing slash.
+
+If `/overlay` returns Not Found, open desktop app Settings once and confirm your install includes the `obs_overlay` folder (the app now checks multiple locations automatically, including packaged and working-directory paths).
+
+If `/overlay` still shows Not Found, fully restart the desktop app so Flask reloads the latest routes, then try both `http://127.0.0.1:5000/overlay` and `http://127.0.0.1:5000/overlay/`.
+
+Header stats now show 6 pills:
+- Avg Pts Today
+- Avg Pts Season
+- Unique Racers Today
+- Unique Racers Season
+- Total Races Today
+- Total Races Season
+
+Responsive tweaks are included for smaller OBS source sizes.
+
+Header pills rotate every 10 seconds between Today stats and Season stats.
+
+Overlay settings are controlled from the desktop app (Settings → Overlay) and pushed to the browser source:
+- Top stat rotation speed (default 10s)
+- Data refresh interval
+- Background theme presets
+- Card opacity
+- Text scale
+- Top-3 medal emote visibility
+- Compact row spacing
