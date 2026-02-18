@@ -115,10 +115,13 @@ Version 1.0
 
 ## OBS Overlay (Built-in Flask)
 Use Browser Source: `http://127.0.0.1:5000/overlay`
+Health check endpoint: `http://127.0.0.1:5000/api/overlay/health`
 
 Overlay assets now use `/overlay/...` absolute paths so loading `/overlay` works consistently without requiring a trailing slash.
 
 If `/overlay` returns Not Found, open desktop app Settings once and confirm your install includes the `obs_overlay` folder (the app now checks multiple locations automatically, including packaged and working-directory paths).
+
+If `/overlay` still shows Not Found, fully restart the desktop app so Flask reloads the latest routes, then try both `http://127.0.0.1:5000/overlay` and `http://127.0.0.1:5000/overlay/`.
 
 Header stats now show 6 pills:
 - Avg Pts Today

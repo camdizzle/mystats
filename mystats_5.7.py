@@ -1331,7 +1331,8 @@ def _build_overlay_top3_payload():
     }
 
 
-@app.route('/overlay')
+@app.route('/overlay', strict_slashes=False)
+@app.route('/overlay/', strict_slashes=False)
 def overlay_page():
     for candidate in _overlay_dir_candidates():
         index_file = os.path.join(candidate, 'index.html')
@@ -1341,7 +1342,7 @@ def overlay_page():
     return (f"Overlay files not found. Checked: {', '.join(_overlay_dir_candidates())}", 404)
 
 
-@app.route('/overlay/<path:filename>')
+@app.route('/overlay/<path:filename>', strict_slashes=False)
 def overlay_assets(filename):
     for candidate in _overlay_dir_candidates():
         asset_file = os.path.join(candidate, filename)
@@ -1354,6 +1355,26 @@ def overlay_assets(filename):
 @app.route('/api/overlay/settings')
 def overlay_settings():
     return jsonify(_build_overlay_settings_payload())
+
+
+@app.route('/api/overlay/health')
+def overlay_health():
+    candidates = _overlay_dir_candidates()
+    resolved = _resolve_overlay_dir()
+    return jsonify({
+        'status': 'ok',
+        'app_version': version,
+        'overlay_dir': resolved,
+        'overlay_dir_exists': os.path.isdir(resolved),
+        'overlay_index_exists': os.path.isfile(os.path.join(resolved, 'index.html')),
+        'overlay_candidates': candidates,
+        'routes': {
+            'overlay_page': '/overlay',
+            'overlay_settings': '/api/overlay/settings',
+            'overlay_top3': '/api/overlay/top3',
+            'overlay_health': '/api/overlay/health'
+        }
+    })
 
 @app.route('/api/overlay/top3')
 def overlay_top3():
