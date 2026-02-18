@@ -114,16 +114,12 @@ Version 1.0
 
 
 ## OBS Overlay (Built-in Flask)
-Use Browser Source: `http://127.0.0.1:5000/overlay` (also supports `/overlay/`, `/overlay.html`, and `/obs-overlay`)
-Root status endpoint: `http://127.0.0.1:5000/`
-Health check endpoint: `http://127.0.0.1:5000/api/overlay/health`
-Route list endpoint: `http://127.0.0.1:5000/api/overlay/routes`
+Use Browser Source: `http://127.0.0.1:5000/overlay`
 
-Overlay assets now use `/overlay/...` absolute paths so loading `/overlay` works consistently without requiring a trailing slash.
+If port `5000` is already in use, open Settings → Overlay and change **Server Port** (default `5000`).
+After changing the port, restart MyStats and update the OBS Browser Source URL to match.
 
 If `/overlay` returns Not Found, open desktop app Settings once and confirm your install includes the `obs_overlay` folder (the app now checks multiple locations automatically, including packaged and working-directory paths).
-
-If `/overlay` still shows Not Found, fully restart the desktop app so Flask reloads the latest routes, then try both `http://127.0.0.1:5000/overlay` and `http://127.0.0.1:5000/overlay/`.
 
 Header stats now show 6 pills:
 - Avg Pts Today

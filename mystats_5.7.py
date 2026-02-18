@@ -46,7 +46,6 @@ import atexit
 import socket
 import importlib.util
 import logging
-import queue
 
 try:
     import ttkbootstrap as ttkbootstrap_module
@@ -1166,40 +1165,17 @@ is_mystats_running()
 class PrintRedirector:
     def __init__(self, widget):
         self.widget = widget
-        self._message_queue = queue.Queue()
-        self._start_queue_pump()
-
-    def _start_queue_pump(self):
-        def pump():
-            if not (self.widget and self.widget.winfo_exists()):
-                return
-
-            while True:
-                try:
-                    message = self._message_queue.get_nowait()
-                except queue.Empty:
-                    break
-
-                self.widget.insert(tk.END, message)
-                self.widget.see(tk.END)
-
-            self.widget.after(30, pump)
-
-        if self.widget and self.widget.winfo_exists():
-            self.widget.after(30, pump)
 
     def write(self, message):
         # Filter out Flask startup messages
         if "Serving Flask app" in message or "Debug mode" in message:
             return  # Ignore these messages
 
-        if not message:
-            return
-
-        # Keep application output inside the Tk text console.
-        # If the widget is not available yet/anymore, drop gracefully.
         if self.widget and self.widget.winfo_exists():
-            self._message_queue.put(message)
+            self.widget.insert(tk.END, message)
+            self.widget.see(tk.END)
+        else:
+            sys.__stdout__.write(message)
 
     def flush(self):
         pass
@@ -1207,7 +1183,6 @@ class PrintRedirector:
 
 # Flask server setup
 app = Flask(__name__)
-app.url_map.strict_slashes = False
 oauth_token = None
 def _overlay_dir_candidates():
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -1235,12 +1210,34 @@ OVERLAY_DIR = _resolve_overlay_dir()
 # Twitch App Credentials
 CLIENT_ID = 'icdintxz5c3h9twd6v3rntautv2o9g'
 CLIENT_SECRET = 'qxyur2g933mst8uwaqzzto98t9zuwl'
-REDIRECT_URI = 'http://localhost:5000/callback'
+def _get_redirect_uri():
+    return f"http://localhost:{_load_overlay_server_port()}/callback"
 
 
 # Function to start Flask server
+def _load_overlay_server_port(default_port=5000):
+    settings_path = 'settings.txt'
+    try:
+        with open(settings_path, 'r', encoding='utf-8', errors='ignore') as settings_file:
+            for raw_line in settings_file:
+                line = raw_line.strip()
+                if not line or '=' not in line:
+                    continue
+                key, value = line.split('=', 1)
+                if key.strip() == 'overlay_server_port':
+                    value = value.strip()
+                    if value.isdigit():
+                        parsed = int(value)
+                        if 1 <= parsed <= 65535:
+                            return parsed
+                    break
+    except FileNotFoundError:
+        pass
+    return default_port
+
+
 def run_flask():
-    app.run(port=5000, debug=False, use_reloader=False)
+    app.run(port=_load_overlay_server_port(), debug=False, use_reloader=False)
 
 
 def _find_latest_overlay_results_file(data_dir):
@@ -1356,10 +1353,7 @@ def _build_overlay_top3_payload():
     }
 
 
-@app.route('/overlay', strict_slashes=False)
-@app.route('/overlay/', strict_slashes=False)
-@app.route('/overlay.html', strict_slashes=False)
-@app.route('/obs-overlay', strict_slashes=False)
+@app.route('/overlay')
 def overlay_page():
     for candidate in _overlay_dir_candidates():
         index_file = os.path.join(candidate, 'index.html')
@@ -1369,7 +1363,7 @@ def overlay_page():
     return (f"Overlay files not found. Checked: {', '.join(_overlay_dir_candidates())}", 404)
 
 
-@app.route('/overlay/<path:filename>', strict_slashes=False)
+@app.route('/overlay/<path:filename>')
 def overlay_assets(filename):
     for candidate in _overlay_dir_candidates():
         asset_file = os.path.join(candidate, filename)
@@ -1383,74 +1377,10 @@ def overlay_assets(filename):
 def overlay_settings():
     return jsonify(_build_overlay_settings_payload())
 
-
-@app.route('/api/overlay/health')
-def overlay_health():
-    candidates = _overlay_dir_candidates()
-    resolved = _resolve_overlay_dir()
-    return jsonify({
-        'status': 'ok',
-        'app_version': version,
-        'overlay_dir': resolved,
-        'overlay_dir_exists': os.path.isdir(resolved),
-        'overlay_index_exists': os.path.isfile(os.path.join(resolved, 'index.html')),
-        'overlay_candidates': candidates,
-        'routes': {
-            'overlay_page': '/overlay',
-            'overlay_settings': '/api/overlay/settings',
-            'overlay_top3': '/api/overlay/top3',
-            'overlay_health': '/api/overlay/health',
-            'overlay_routes': '/api/overlay/routes'
-        }
-    })
-
-
-@app.route('/api/overlay/routes')
-def overlay_routes():
-    route_list = sorted(str(rule) for rule in app.url_map.iter_rules())
-    return jsonify({
-        'status': 'ok',
-        'app_version': version,
-        'route_count': len(route_list),
-        'routes': route_list,
-    })
-
-@app.errorhandler(404)
-def handle_not_found(error):
-    path = request.path or ''
-    if path.startswith('/overlay') or path.startswith('/api/overlay') or path.startswith('/obs-overlay'):
-        routes = sorted(str(rule) for rule in app.url_map.iter_rules() if 'overlay' in str(rule))
-        return jsonify({
-            'status': 'not_found',
-            'requested_path': path,
-            'message': 'Overlay route not found on this running Flask instance.',
-            'hint': 'Verify you are running the latest app build and check /api/overlay/health.',
-            'overlay_routes': routes,
-        }), 404
-    return error
-
 @app.route('/api/overlay/top3')
 def overlay_top3():
     return jsonify(_build_overlay_top3_payload())
 
-
-
-@app.route('/')
-def root_status():
-    return jsonify({
-        'status': 'ok',
-        'app': 'MyStats',
-        'app_version': version,
-        'message': 'Flask server is running. Use /overlay for OBS overlay.',
-        'endpoints': {
-            'overlay_page': '/overlay',
-            'overlay_health': '/api/overlay/health',
-            'overlay_routes': '/api/overlay/routes',
-            'overlay_top3': '/api/overlay/top3',
-            'overlay_settings': '/api/overlay/settings',
-            'oauth_callback': '/callback'
-        }
-    })
 
 # Path to the token file
 TOKEN_FILE_PATH = 'token_data.json'
@@ -1539,9 +1469,10 @@ def get_oauth_token():
 
 # OAuth flow to get the authorization URL
 def get_authorization_url():
+    redirect_uri = _get_redirect_uri()
     url = (
         f"https://id.twitch.tv/oauth2/authorize?response_type=code&client_id={CLIENT_ID}"
-        f"&redirect_uri={REDIRECT_URI}&scope=chat:read chat:edit&force_verify=true"
+        f"&redirect_uri={redirect_uri}&scope=chat:read chat:edit&force_verify=true"
     )
     return url
 
@@ -1598,13 +1529,14 @@ def callback():
     if not code:
         return "Authorization code not found", 400
 
+    redirect_uri = _get_redirect_uri()
     token_url = "https://id.twitch.tv/oauth2/token"
     token_data = {
         'client_id': CLIENT_ID,
         'client_secret': CLIENT_SECRET,
         'code': code,
         'grant_type': 'authorization_code',
-        'redirect_uri': REDIRECT_URI
+        'redirect_uri': redirect_uri
     }
 
     response = requests.post(token_url, data=token_data)
@@ -2246,26 +2178,31 @@ def open_settings_window():
     overlay_refresh_entry.grid(row=2, column=1, sticky="w", pady=(0, 4), padx=(8, 0))
     overlay_refresh_entry.insert(0, config.get_setting("overlay_refresh_seconds") or "3")
 
-    ttk.Label(overlay_tab, text="Theme").grid(row=3, column=0, sticky="w", pady=(0, 4))
+    ttk.Label(overlay_tab, text="Server Port").grid(row=3, column=0, sticky="w", pady=(0, 4))
+    overlay_port_entry = ttk.Entry(overlay_tab, width=12, justify='center')
+    overlay_port_entry.grid(row=3, column=1, sticky="w", pady=(0, 4), padx=(8, 0))
+    overlay_port_entry.insert(0, config.get_setting("overlay_server_port") or "5000")
+
+    ttk.Label(overlay_tab, text="Theme").grid(row=4, column=0, sticky="w", pady=(0, 4))
     overlay_theme_var = tk.StringVar(value=(config.get_setting("overlay_theme") or "midnight"))
     overlay_theme_combo = ttk.Combobox(overlay_tab, textvariable=overlay_theme_var, values=["midnight", "ocean", "sunset", "forest", "mono"], width=18, state="readonly")
-    overlay_theme_combo.grid(row=3, column=1, sticky="w", pady=(0, 4), padx=(8, 0))
+    overlay_theme_combo.grid(row=4, column=1, sticky="w", pady=(0, 4), padx=(8, 0))
 
-    ttk.Label(overlay_tab, text="Card Opacity (65-100)").grid(row=4, column=0, sticky="w", pady=(0, 4))
+    ttk.Label(overlay_tab, text="Card Opacity (65-100)").grid(row=5, column=0, sticky="w", pady=(0, 4))
     overlay_opacity_entry = ttk.Entry(overlay_tab, width=12, justify='center')
-    overlay_opacity_entry.grid(row=4, column=1, sticky="w", pady=(0, 4), padx=(8, 0))
+    overlay_opacity_entry.grid(row=5, column=1, sticky="w", pady=(0, 4), padx=(8, 0))
     overlay_opacity_entry.insert(0, config.get_setting("overlay_card_opacity") or "84")
 
-    ttk.Label(overlay_tab, text="Text Scale (90-125)").grid(row=5, column=0, sticky="w", pady=(0, 4))
+    ttk.Label(overlay_tab, text="Text Scale (90-125)").grid(row=6, column=0, sticky="w", pady=(0, 4))
     overlay_text_scale_entry = ttk.Entry(overlay_tab, width=12, justify='center')
-    overlay_text_scale_entry.grid(row=5, column=1, sticky="w", pady=(0, 4), padx=(8, 0))
+    overlay_text_scale_entry.grid(row=6, column=1, sticky="w", pady=(0, 4), padx=(8, 0))
     overlay_text_scale_entry.insert(0, config.get_setting("overlay_text_scale") or "100")
 
     overlay_show_medals_var = tk.BooleanVar(value=str(config.get_setting("overlay_show_medals") or "True") == "True")
     overlay_compact_rows_var = tk.BooleanVar(value=str(config.get_setting("overlay_compact_rows") or "False") == "True")
-    ttk.Checkbutton(overlay_tab, text="Show top-3 medal emotes", variable=overlay_show_medals_var).grid(row=6, column=0, sticky="w", pady=(6, 2), columnspan=2)
-    ttk.Checkbutton(overlay_tab, text="Compact row spacing", variable=overlay_compact_rows_var).grid(row=7, column=0, sticky="w", pady=(0, 2), columnspan=2)
-    ttk.Label(overlay_tab, text="Apply changes and OBS browser source updates automatically on next refresh.", style="Small.TLabel").grid(row=8, column=0, columnspan=2, sticky="w", pady=(8, 0))
+    ttk.Checkbutton(overlay_tab, text="Show top-3 medal emotes", variable=overlay_show_medals_var).grid(row=7, column=0, sticky="w", pady=(6, 2), columnspan=2)
+    ttk.Checkbutton(overlay_tab, text="Compact row spacing", variable=overlay_compact_rows_var).grid(row=8, column=0, sticky="w", pady=(0, 2), columnspan=2)
+    ttk.Label(overlay_tab, text="Restart MyStats after changing port. Visual changes apply on next refresh.", style="Small.TLabel").grid(row=9, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
     def reset_settings_defaults():
         chunk_alert_var.set(True)
@@ -2317,6 +2254,8 @@ def open_settings_window():
         overlay_rotation_entry.insert(0, "10")
         overlay_refresh_entry.delete(0, tk.END)
         overlay_refresh_entry.insert(0, "3")
+        overlay_port_entry.delete(0, tk.END)
+        overlay_port_entry.insert(0, "5000")
         overlay_theme_var.set("midnight")
         overlay_opacity_entry.delete(0, tk.END)
         overlay_opacity_entry.insert(0, "84")
@@ -2370,6 +2309,7 @@ def open_settings_window():
         config.set_setting("chat_max_names", selected_max_names.get(), persistent=True)
         config.set_setting("overlay_rotation_seconds", overlay_rotation_entry.get(), persistent=True)
         config.set_setting("overlay_refresh_seconds", overlay_refresh_entry.get(), persistent=True)
+        config.set_setting("overlay_server_port", overlay_port_entry.get(), persistent=True)
         config.set_setting("overlay_theme", overlay_theme_var.get(), persistent=True)
         config.set_setting("overlay_card_opacity", overlay_opacity_entry.get(), persistent=True)
         config.set_setting("overlay_text_scale", overlay_text_scale_entry.get(), persistent=True)
@@ -2437,7 +2377,6 @@ def on_close():
     # Destroy the Tkinter windows after a delay
     def close_windows():
         sys.stdout = sys.__stdout__  # Reset stdout
-        sys.stderr = sys.__stderr__  # Reset stderr
         wait_window.destroy()
         root.destroy()
 
@@ -2965,19 +2904,8 @@ def update_config_labels():
     br_hs_label.config(text=f"BR HS: {int(config.get_setting('br_hs_season')):,}")
 
 
-# Redirect stdout/stderr to the text area after the widget is created
-ui_console = PrintRedirector(text_area)
-sys.stdout = ui_console
-sys.stderr = ui_console
-
-# Route existing logging handlers (including werkzeug) to the Tk console.
-for _logger_name in (None, "werkzeug", "flask.app"):
-    _logger = logging.getLogger(_logger_name)
-    for _handler in _logger.handlers:
-        try:
-            _handler.setStream(ui_console)
-        except Exception:
-            pass
+# Redirect stdout to the text area after the widget is created
+sys.stdout = PrintRedirector(text_area)
 
 # Create a menu bar
 menu_bar = Menu(root)
@@ -3029,7 +2957,7 @@ class ConfigManager:
                                 'mycycle_cyclestats_rotation_index',
                                 'overlay_rotation_seconds', 'overlay_refresh_seconds', 'overlay_theme',
                                 'overlay_card_opacity', 'overlay_text_scale', 'overlay_show_medals',
-                                'overlay_compact_rows'}
+                                'overlay_compact_rows', 'overlay_server_port'}
         self.transient_keys = set([])
         self.defaults = {
             'chat_br_results': 'True',
@@ -3070,6 +2998,7 @@ class ConfigManager:
             'chunk_alert_value': '1000',
             'overlay_rotation_seconds': '10',
             'overlay_refresh_seconds': '3',
+            'overlay_server_port': '5000',
             'overlay_theme': 'midnight',
             'overlay_card_opacity': '84',
             'overlay_text_scale': '100',
@@ -3129,8 +3058,13 @@ class ConfigManager:
                    "narrative_alert_cooldown_races", "narrative_alert_min_lead_change_points", "narrative_alert_max_items",
                    "mycycle_min_place", "mycycle_max_place",
                    "overlay_rotation_seconds", "overlay_refresh_seconds", "overlay_card_opacity",
-                   "overlay_text_scale"}:
+                   "overlay_text_scale", "overlay_server_port"}:
             if isinstance(value, int) or (isinstance(value, str) and value.isdigit()):
+                if key == "overlay_server_port":
+                    port = int(value)
+                    if not (1 <= port <= 65535):
+                        print(f"Invalid value for {key}: {value}. Value must be between 1 and 65535.")
+                        return False
                 return True
             print(f"Invalid value for {key}: {value}. Value must be a whole number.")
             return False
