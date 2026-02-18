@@ -1184,7 +1184,28 @@ class PrintRedirector:
 # Flask server setup
 app = Flask(__name__)
 oauth_token = None
-OVERLAY_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "obs_overlay")
+def _overlay_dir_candidates():
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        os.path.join(script_dir, "obs_overlay"),
+        os.path.join(os.getcwd(), "obs_overlay"),
+    ]
+
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.insert(0, os.path.join(meipass, "obs_overlay"))
+
+    return candidates
+
+
+def _resolve_overlay_dir():
+    for candidate in _overlay_dir_candidates():
+        if os.path.isdir(candidate):
+            return candidate
+    return _overlay_dir_candidates()[0]
+
+
+OVERLAY_DIR = _resolve_overlay_dir()
 
 # Twitch App Credentials
 CLIENT_ID = 'icdintxz5c3h9twd6v3rntautv2o9g'
@@ -1312,12 +1333,22 @@ def _build_overlay_top3_payload():
 
 @app.route('/overlay')
 def overlay_page():
-    return send_from_directory(OVERLAY_DIR, 'index.html')
+    for candidate in _overlay_dir_candidates():
+        index_file = os.path.join(candidate, 'index.html')
+        if os.path.isfile(index_file):
+            return send_from_directory(candidate, 'index.html')
+
+    return (f"Overlay files not found. Checked: {', '.join(_overlay_dir_candidates())}", 404)
 
 
 @app.route('/overlay/<path:filename>')
 def overlay_assets(filename):
-    return send_from_directory(OVERLAY_DIR, filename)
+    for candidate in _overlay_dir_candidates():
+        asset_file = os.path.join(candidate, filename)
+        if os.path.isfile(asset_file):
+            return send_from_directory(candidate, filename)
+
+    return (f"Overlay asset not found: {filename}", 404)
 
 
 @app.route('/api/overlay/settings')
