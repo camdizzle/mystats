@@ -139,6 +139,15 @@ h1 {
 
 #leaderboard li.leaderboard-row > span:last-child {
   color: var(--accent);
+  background: rgba(3, 10, 28, 0.92);
+  border: 1px solid rgba(127, 216, 255, 0.2);
+}
+
+#leaderboard .leaderboard-gap {
+  height: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
 }
 
 
