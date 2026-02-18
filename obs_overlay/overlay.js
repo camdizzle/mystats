@@ -21,38 +21,18 @@ const themes = {
 };
 
 let settings = { ...defaultSettings };
-let statsMode = 'today';
-let rotationTimer = null;
 let refreshTimer = null;
+let rotationTimer = null;
+let activeViewIndex = 0;
+let currentViews = [];
+let lastRaceKey = null;
+let top3ShowTimeout = null;
+let top3IsShowing = false;
 
 function clampNumber(value, min, max, fallback) {
   const num = Number(value);
   if (!Number.isFinite(num)) return fallback;
   return Math.min(max, Math.max(min, num));
-}
-
-function setStatsMode(mode) {
-  statsMode = mode;
-  document.querySelectorAll('.pill--today').forEach(el => {
-    el.style.display = mode === 'today' ? 'block' : 'none';
-  });
-  document.querySelectorAll('.pill--season').forEach(el => {
-    el.style.display = mode === 'season' ? 'block' : 'none';
-  });
-}
-
-function toggleStatsMode() {
-  setStatsMode(statsMode === 'today' ? 'season' : 'today');
-}
-
-function startRotationTimer() {
-  if (rotationTimer) clearInterval(rotationTimer);
-  rotationTimer = setInterval(toggleStatsMode, settings.rotationSeconds * 1000);
-}
-
-function startRefreshTimer() {
-  if (refreshTimer) clearInterval(refreshTimer);
-  refreshTimer = setInterval(refresh, settings.refreshSeconds * 1000);
 }
 
 function getPlacementEmote(placement) {
@@ -76,11 +56,57 @@ function renderRows(rows) {
     leaderboard.innerHTML = '<li>No race data yet.</li>';
     return;
   }
+
   leaderboard.innerHTML = rows.map(r => {
     const emote = settings.showMedals ? getPlacementEmote(r.placement) : '';
     const decoratedName = emote ? `${emote} ${r.name}` : r.name;
     return `<li><span>#${r.placement}</span><span>${decoratedName}</span><span>${fmt(r.points)} pts</span></li>`;
   }).join('');
+}
+
+function renderCurrentView() {
+  if (!currentViews.length) {
+    $('.board-title').textContent = 'Top Results';
+    renderRows([]);
+    return;
+  }
+
+  const safeIndex = Math.min(activeViewIndex, currentViews.length - 1);
+  activeViewIndex = safeIndex;
+  const view = currentViews[safeIndex];
+  $('.board-title').textContent = view.title || 'Top Results';
+  renderRows(view.rows || []);
+}
+
+function rotateView() {
+  if (top3IsShowing || currentViews.length <= 1) return;
+  activeViewIndex = (activeViewIndex + 1) % currentViews.length;
+  renderCurrentView();
+}
+
+function startRotationTimer() {
+  if (rotationTimer) clearInterval(rotationTimer);
+  rotationTimer = setInterval(rotateView, settings.rotationSeconds * 1000);
+}
+
+function startRefreshTimer() {
+  if (refreshTimer) clearInterval(refreshTimer);
+  refreshTimer = setInterval(refresh, settings.refreshSeconds * 1000);
+}
+
+function showTop3ForTenSeconds(top3View) {
+  if (!top3View?.rows?.length) return;
+
+  top3IsShowing = true;
+  if (top3ShowTimeout) clearTimeout(top3ShowTimeout);
+
+  $('.board-title').textContent = top3View.title || 'Top 3 Latest Race';
+  renderRows(top3View.rows);
+
+  top3ShowTimeout = setTimeout(() => {
+    top3IsShowing = false;
+    renderCurrentView();
+  }, 10000);
 }
 
 function applyTheme() {
@@ -115,19 +141,45 @@ function applyServerSettings(raw = {}) {
   if (refreshChanged) startRefreshTimer();
 }
 
+function syncViews(views = []) {
+  const previousViewId = currentViews[activeViewIndex]?.id;
+  currentViews = views;
+
+  if (!currentViews.length) {
+    activeViewIndex = 0;
+    renderCurrentView();
+    return;
+  }
+
+  if (previousViewId) {
+    const previousIndex = currentViews.findIndex(v => v.id === previousViewId);
+    activeViewIndex = previousIndex >= 0 ? previousIndex : 0;
+  } else {
+    activeViewIndex = Math.min(activeViewIndex, currentViews.length - 1);
+  }
+
+  if (!top3IsShowing) renderCurrentView();
+}
+
 async function refresh() {
   try {
     const r = await fetch('/api/overlay/top3', { cache: 'no-store' });
     const p = await r.json();
-    $('overlay-title').textContent = 'MyStats Live Results';
+
+    $('overlay-title').textContent = p.title || 'MyStats Live Results';
     applyServerSettings(p.settings || {});
     updateHeaderStats(p.header_stats || {});
-    renderRows(p.rows || []);
+    syncViews(p.views || []);
+
+    const raceKey = p.recent_race_top3?.race_key || null;
+    if (raceKey && raceKey !== lastRaceKey) {
+      lastRaceKey = raceKey;
+      showTop3ForTenSeconds(p.recent_race_top3);
+    }
   } catch (_error) {
   }
 }
 
-setStatsMode('today');
 refresh();
 startRefreshTimer();
 startRotationTimer();
