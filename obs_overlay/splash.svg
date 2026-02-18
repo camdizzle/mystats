@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 1400" role="img" aria-label="MyStats splash">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#7a2f2f"/>
+      <stop offset="55%" stop-color="#115f8f"/>
+      <stop offset="100%" stop-color="#2aa3b0"/>
+    </linearGradient>
+    <radialGradient id="inner" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#0f2f4a"/>
+      <stop offset="100%" stop-color="#07162b"/>
+    </radialGradient>
+  </defs>
+  <rect width="1400" height="1400" fill="url(#bg)"/>
+  <g opacity="0.5" stroke="#bfeeff" stroke-width="4">
+    <path d="M0 220 H1400"/><path d="M0 360 H1400"/><path d="M0 500 H1400"/><path d="M0 640 H1400"/><path d="M0 780 H1400"/><path d="M0 920 H1400"/><path d="M0 1060 H1400"/>
+    <path d="M220 0 V1400"/><path d="M360 0 V1400"/><path d="M500 0 V1400"/><path d="M640 0 V1400"/><path d="M780 0 V1400"/><path d="M920 0 V1400"/><path d="M1060 0 V1400"/>
+  </g>
+  <circle cx="700" cy="700" r="490" fill="none" stroke="#f5f8ff" stroke-width="24"/>
+  <circle cx="700" cy="700" r="445" fill="url(#inner)" stroke="#2fd2ff" stroke-width="10"/>
+  <g stroke-width="54" fill="none" stroke-linecap="round">
+    <path d="M300 780 A410 410 0 0 1 410 440" stroke="#98dd2b"/>
+    <path d="M410 440 A410 410 0 0 1 720 300" stroke="#4ce26f"/>
+    <path d="M720 300 A410 410 0 0 1 1080 470" stroke="#32ccff"/>
+    <path d="M1080 470 A410 410 0 0 1 1110 820" stroke="#3e8fff"/>
+    <path d="M1110 820 A410 410 0 0 1 860 1060" stroke="#ff4ba1"/>
+    <path d="M860 1060 A410 410 0 0 1 560 1080" stroke="#ff7a40"/>
+    <path d="M560 1080 A410 410 0 0 1 300 780" stroke="#ffca41"/>
+  </g>
+  <text x="700" y="770" text-anchor="middle" font-size="220" font-family="Segoe UI, Arial, sans-serif" fill="#f9fdff" font-weight="700">MYSTATS</text>
+</svg>

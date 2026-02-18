@@ -1,6 +1,8 @@
 const $ = id => document.getElementById(id);
 const leaderboard = $('leaderboard');
 const boardTitle = document.querySelector('.board-title');
+const boardShell = document.querySelector('.board-shell');
+const splashScreen = $('splash-screen');
 const headerPills = [
   $('stat-avg-today'),
   $('stat-uniq-today'),
@@ -39,6 +41,8 @@ let leaderboardScrollPauseUntil = 0;
 let leaderboardScrollRetryTimer = null;
 let sectionAnchors = [];
 let lastRenderedViewsKey = '';
+let cycleRestartTimer = null;
+const splashDurationMs = 5500;
 
 function clampNumber(value, min, max, fallback) {
   const num = Number(value);
@@ -85,6 +89,40 @@ function startPillRotationTimer() {
   pillRotationTimer = setInterval(rotatePills, settings.rotationSeconds * 1000);
 }
 
+function clearCycleRestartTimer() {
+  if (cycleRestartTimer) {
+    clearTimeout(cycleRestartTimer);
+    cycleRestartTimer = null;
+  }
+}
+
+function showLeaderboardView() {
+  if (boardShell) boardShell.classList.remove('is-hidden');
+  if (splashScreen) {
+    splashScreen.classList.remove('is-visible');
+    splashScreen.setAttribute('aria-hidden', 'true');
+  }
+}
+
+function showSplashView() {
+  stopLeaderboardAutoScroll();
+  if (boardShell) boardShell.classList.add('is-hidden');
+  if (splashScreen) {
+    splashScreen.classList.add('is-visible');
+    splashScreen.setAttribute('aria-hidden', 'false');
+  }
+
+  clearCycleRestartTimer();
+  cycleRestartTimer = setTimeout(() => {
+    showLeaderboardView();
+    if (leaderboard) {
+      leaderboard.scrollTop = 0;
+      updateBoardTitleFromScroll();
+    }
+    startLeaderboardAutoScroll();
+  }, splashDurationMs);
+}
+
 function stopLeaderboardAutoScroll() {
   if (leaderboardScrollTimer) {
     clearInterval(leaderboardScrollTimer);
@@ -115,6 +153,8 @@ function updateBoardTitleFromScroll() {
 
 function startLeaderboardAutoScroll() {
   stopLeaderboardAutoScroll();
+  clearCycleRestartTimer();
+  showLeaderboardView();
 
   if (!leaderboard) return;
   const maxScrollTop = leaderboard.scrollHeight - leaderboard.clientHeight;
@@ -145,12 +185,7 @@ function startLeaderboardAutoScroll() {
 
     if (leaderboard.scrollTop >= currentMax - 1) {
       leaderboard.scrollTop = currentMax;
-      leaderboardScrollPauseUntil = now + 1200;
-      setTimeout(() => {
-        if (!leaderboardScrollTimer || !leaderboard) return;
-        leaderboard.scrollTop = 0;
-        leaderboardScrollPauseUntil = Date.now() + 900;
-      }, 1200);
+      showSplashView();
     }
   }, 32);
 }
@@ -179,6 +214,7 @@ function getViewsRenderKey(views) {
 
 function renderCombinedRows(views) {
   if (!leaderboard) return;
+  showLeaderboardView();
   sectionAnchors = [];
 
   if (!Array.isArray(views) || !views.length) {
@@ -300,6 +336,7 @@ async function refresh() {
     if (leaderboard) leaderboard.innerHTML = '<li>Unable to load race data.</li>';
     lastRenderedViewsKey = '';
     stopLeaderboardAutoScroll();
+    clearCycleRestartTimer();
   }
 }
 
@@ -313,6 +350,7 @@ window.addEventListener('resize', () => {
 });
 
 leaderboard?.addEventListener('scroll', updateBoardTitleFromScroll);
+showLeaderboardView();
 
 renderPillPage();
 refresh();
