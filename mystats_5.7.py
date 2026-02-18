@@ -1193,16 +1193,13 @@ class PrintRedirector:
         if "Serving Flask app" in message or "Debug mode" in message:
             return  # Ignore these messages
 
-        # Tk widgets are not thread-safe. Flask request logs run from the
-        # Flask thread, so only touch the text widget from the Tk main thread.
-        if threading.current_thread() is not threading.main_thread():
-            sys.__stdout__.write(message)
+        if not message:
             return
 
+        # Keep application output inside the Tk text console.
+        # If the widget is not available yet/anymore, drop gracefully.
         if self.widget and self.widget.winfo_exists():
             self._message_queue.put(message)
-        else:
-            sys.__stdout__.write(message)
 
     def flush(self):
         pass
@@ -2440,6 +2437,7 @@ def on_close():
     # Destroy the Tkinter windows after a delay
     def close_windows():
         sys.stdout = sys.__stdout__  # Reset stdout
+        sys.stderr = sys.__stderr__  # Reset stderr
         wait_window.destroy()
         root.destroy()
 
@@ -2967,8 +2965,19 @@ def update_config_labels():
     br_hs_label.config(text=f"BR HS: {int(config.get_setting('br_hs_season')):,}")
 
 
-# Redirect stdout to the text area after the widget is created
-sys.stdout = PrintRedirector(text_area)
+# Redirect stdout/stderr to the text area after the widget is created
+ui_console = PrintRedirector(text_area)
+sys.stdout = ui_console
+sys.stderr = ui_console
+
+# Route existing logging handlers (including werkzeug) to the Tk console.
+for _logger_name in (None, "werkzeug", "flask.app"):
+    _logger = logging.getLogger(_logger_name)
+    for _handler in _logger.handlers:
+        try:
+            _handler.setStream(ui_console)
+        except Exception:
+            pass
 
 # Create a menu bar
 menu_bar = Menu(root)
