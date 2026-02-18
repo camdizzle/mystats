@@ -42,6 +42,9 @@ let activePillPage = 0;
 let leaderboardScrollTimer = null;
 let leaderboardScrollDirection = 1;
 let leaderboardScrollPauseUntil = 0;
+let leaderboardScrollRetryTimer = null;
+let lastRenderedViewKey = null;
+let hasHydratedOnce = false;
 
 function clampNumber(value, min, max, fallback) {
   const num = Number(value);
@@ -109,12 +112,16 @@ function stopLeaderboardAutoScroll() {
     clearInterval(leaderboardScrollTimer);
     leaderboardScrollTimer = null;
   }
+  if (leaderboardScrollRetryTimer) {
+    clearTimeout(leaderboardScrollRetryTimer);
+    leaderboardScrollRetryTimer = null;
+  }
 }
 
 function advanceView() {
   if (top3IsShowing || currentViews.length <= 1) return;
   activeViewIndex = (activeViewIndex + 1) % currentViews.length;
-  renderCurrentView();
+  renderCurrentView(true);
 }
 
 function startLeaderboardAutoScroll() {
@@ -126,6 +133,10 @@ function startLeaderboardAutoScroll() {
   if (maxScrollTop <= 2) {
     leaderboard.scrollTop = 0;
     scheduleViewFallbackAdvance();
+
+    leaderboardScrollRetryTimer = setTimeout(() => {
+      if (!top3IsShowing) startLeaderboardAutoScroll();
+    }, 600);
     return;
   }
 
@@ -147,14 +158,14 @@ function startLeaderboardAutoScroll() {
 
     leaderboard.scrollTop += leaderboardScrollDirection * 1.4;
 
-    if (leaderboard.scrollTop >= currentMax - 1) {
+    if (leaderboardScrollDirection > 0 && leaderboard.scrollTop >= currentMax - 1) {
       leaderboard.scrollTop = currentMax;
       leaderboardScrollDirection = -1;
       leaderboardScrollPauseUntil = now + 1200;
       return;
     }
 
-    if (leaderboard.scrollTop <= 1) {
+    if (leaderboardScrollDirection < 0 && leaderboard.scrollTop <= 1) {
       leaderboard.scrollTop = 0;
       leaderboardScrollPauseUntil = now + 900;
       advanceView();
@@ -163,6 +174,8 @@ function startLeaderboardAutoScroll() {
 }
 
 function renderRows(rows) {
+  document.body.classList.remove('top3-active');
+
   if (!rows?.length) {
     leaderboard.innerHTML = '<li>No race data yet.</li>';
     stopLeaderboardAutoScroll();
@@ -175,12 +188,53 @@ function renderRows(rows) {
     const decoratedName = emote ? `${emote} ${r.name}` : r.name;
     return `<li><span>#${r.placement}</span><span>${decoratedName}</span><span>${fmt(r.points)} pts</span></li>`;
   }).join('');
-  requestAnimationFrame(startLeaderboardAutoScroll);
+  setTimeout(startLeaderboardAutoScroll, 0);
 }
 
-function renderCurrentView() {
+function renderTop3Rows(rows) {
+  document.body.classList.add('top3-active');
+  stopLeaderboardAutoScroll();
+  stopViewFallbackTimer();
+
+  const safeRows = (rows || []).slice(0, 3);
+  leaderboard.innerHTML = safeRows.map((r, idx) => {
+    const medal = ['🥇', '🥈', '🥉'][idx] || getPlacementEmote(r.placement);
+    return `
+      <li class="top3-card top3-card--${idx + 1}">
+        <span class="top3-rank">${medal} #${r.placement}</span>
+        <span class="top3-name">${r.name}</span>
+        <span class="top3-points">${fmt(r.points)} pts</span>
+      </li>
+    `;
+  }).join('');
+}
+
+function ensureLeaderboardAutoScroll() {
+  if (!leaderboard || top3IsShowing) return;
+  if (!leaderboard.children.length) return;
+  if (leaderboardScrollTimer || leaderboardScrollRetryTimer) return;
+  startLeaderboardAutoScroll();
+}
+
+function getViewRenderKey(view) {
+  if (!view) return 'empty';
+  const rows = Array.isArray(view.rows) ? view.rows : [];
+  const rowSignature = rows
+    .map(row => `${row.placement}|${row.name}|${row.points}`)
+    .join('||');
+
+  return [
+    view.id || '',
+    view.title || '',
+    settings.showMedals,
+    rowSignature,
+  ].join('::');
+}
+
+function renderCurrentView(force = false) {
   if (!currentViews.length) {
     if (boardTitle) boardTitle.textContent = 'Top Results';
+    lastRenderedViewKey = 'empty';
     renderRows([]);
     return;
   }
@@ -188,6 +242,13 @@ function renderCurrentView() {
   const safeIndex = Math.min(activeViewIndex, currentViews.length - 1);
   activeViewIndex = safeIndex;
   const view = currentViews[safeIndex];
+  const nextRenderKey = getViewRenderKey(view);
+
+  if (!force && nextRenderKey === lastRenderedViewKey) {
+    return;
+  }
+
+  lastRenderedViewKey = nextRenderKey;
   if (boardTitle) boardTitle.textContent = view.title || 'Top Results';
   renderRows(view.rows || []);
 }
@@ -201,15 +262,15 @@ function showTop3ForTenSeconds(top3View) {
   if (!top3View?.rows?.length) return;
 
   top3IsShowing = true;
-  stopViewFallbackTimer();
   if (top3ShowTimeout) clearTimeout(top3ShowTimeout);
 
-  if (boardTitle) boardTitle.textContent = top3View.title || 'Top 3 Latest Race';
-  renderRows(top3View.rows);
+  if (boardTitle) boardTitle.textContent = top3View.title || '🔥 Latest Race Podium 🔥';
+  renderTop3Rows(top3View.rows);
 
   top3ShowTimeout = setTimeout(() => {
     top3IsShowing = false;
-    renderCurrentView();
+    lastRenderedViewKey = null;
+    renderCurrentView(true);
   }, 10000);
 }
 
@@ -254,7 +315,7 @@ function syncViews(views = []) {
 
   if (!currentViews.length) {
     activeViewIndex = 0;
-    renderCurrentView();
+    renderCurrentView(true);
     return;
   }
 
@@ -265,7 +326,10 @@ function syncViews(views = []) {
     activeViewIndex = Math.min(activeViewIndex, currentViews.length - 1);
   }
 
-  if (!top3IsShowing) renderCurrentView();
+  if (!top3IsShowing) {
+    renderCurrentView();
+    ensureLeaderboardAutoScroll();
+  }
 }
 
 async function refresh() {
@@ -279,6 +343,12 @@ async function refresh() {
     syncViews(p.views || []);
 
     const raceKey = p.recent_race_top3?.race_key || null;
+    if (!hasHydratedOnce) {
+      hasHydratedOnce = true;
+      lastRaceKey = raceKey;
+      return;
+    }
+
     if (raceKey && raceKey !== lastRaceKey) {
       lastRaceKey = raceKey;
       showTop3ForTenSeconds(p.recent_race_top3);
@@ -287,7 +357,7 @@ async function refresh() {
   }
 }
 
-window.addEventListener('resize', startLeaderboardAutoScroll);
+window.addEventListener('resize', ensureLeaderboardAutoScroll);
 
 renderPillPage();
 refresh();
