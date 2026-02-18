@@ -115,6 +115,7 @@ Version 1.0
 
 ## OBS Overlay (Built-in Flask)
 Use Browser Source: `http://127.0.0.1:5000/overlay` (also supports `/overlay/`, `/overlay.html`, and `/obs-overlay`)
+Root status endpoint: `http://127.0.0.1:5000/`
 Health check endpoint: `http://127.0.0.1:5000/api/overlay/health`
 Route list endpoint: `http://127.0.0.1:5000/api/overlay/routes`
 

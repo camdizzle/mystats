@@ -1410,6 +1410,24 @@ def overlay_top3():
     return jsonify(_build_overlay_top3_payload())
 
 
+
+@app.route('/')
+def root_status():
+    return jsonify({
+        'status': 'ok',
+        'app': 'MyStats',
+        'app_version': version,
+        'message': 'Flask server is running. Use /overlay for OBS overlay.',
+        'endpoints': {
+            'overlay_page': '/overlay',
+            'overlay_health': '/api/overlay/health',
+            'overlay_routes': '/api/overlay/routes',
+            'overlay_top3': '/api/overlay/top3',
+            'overlay_settings': '/api/overlay/settings',
+            'oauth_callback': '/callback'
+        }
+    })
+
 # Path to the token file
 TOKEN_FILE_PATH = 'token_data.json'
 
