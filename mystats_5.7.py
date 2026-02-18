@@ -19,7 +19,7 @@ import requests
 import tkinter.simpledialog as simpledialog
 from PIL import Image, ImageTk
 from twitchio.ext import commands
-from flask import Flask, request
+from flask import Flask, jsonify, request, send_from_directory
 import threading
 import glob
 import math
@@ -1184,6 +1184,28 @@ class PrintRedirector:
 # Flask server setup
 app = Flask(__name__)
 oauth_token = None
+def _overlay_dir_candidates():
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        os.path.join(script_dir, "obs_overlay"),
+        os.path.join(os.getcwd(), "obs_overlay"),
+    ]
+
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.insert(0, os.path.join(meipass, "obs_overlay"))
+
+    return candidates
+
+
+def _resolve_overlay_dir():
+    for candidate in _overlay_dir_candidates():
+        if os.path.isdir(candidate):
+            return candidate
+    return _overlay_dir_candidates()[0]
+
+
+OVERLAY_DIR = _resolve_overlay_dir()
 
 # Twitch App Credentials
 CLIENT_ID = 'icdintxz5c3h9twd6v3rntautv2o9g'
@@ -1194,6 +1216,148 @@ REDIRECT_URI = 'http://localhost:5000/callback'
 # Function to start Flask server
 def run_flask():
     app.run(port=5000, debug=False, use_reloader=False)
+
+
+def _find_latest_overlay_results_file(data_dir):
+    files = sorted(glob.glob(os.path.join(data_dir, "allraces_*.csv")))
+    return files[-1] if files else None
+
+
+def _safe_int(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _build_overlay_header_stats(data_dir):
+    season_points = 0
+    season_races = 0
+    season_unique = set()
+
+    for allraces in glob.glob(os.path.join(data_dir, "allraces_*.csv")):
+        try:
+            with open(allraces, 'r', encoding='utf-8', errors='ignore') as f:
+                for row in csv.reader(f):
+                    if len(row) < 5:
+                        continue
+                    points = _safe_int(row[3])
+                    if points == 0:
+                        continue
+                    racer = (row[2] or '').strip() or (row[1] or '').strip()
+                    if not racer:
+                        continue
+                    season_points += points
+                    season_races += 1
+                    season_unique.add(racer.lower())
+        except Exception:
+            continue
+
+    today_points = 0
+    today_races = 0
+    today_unique = set()
+    today_file = config.get_setting('allraces_file')
+    if today_file:
+        try:
+            with open(today_file, 'r', encoding='utf-8', errors='ignore') as f:
+                for row in csv.reader(f):
+                    if len(row) < 5:
+                        continue
+                    points = _safe_int(row[3])
+                    if points == 0:
+                        continue
+                    racer = (row[2] or '').strip() or (row[1] or '').strip()
+                    if not racer:
+                        continue
+                    today_points += points
+                    today_races += 1
+                    today_unique.add(racer.lower())
+        except Exception:
+            pass
+
+    return {
+        'avg_points_today': round((today_points / today_races), 2) if today_races else 0,
+        'avg_points_season': round((season_points / season_races), 2) if season_races else 0,
+        'unique_racers_today': len(today_unique),
+        'unique_racers_season': len(season_unique),
+        'total_races_today': today_races,
+        'total_races_season': season_races,
+    }
+
+
+def _build_overlay_settings_payload():
+    return {
+        'rotation_seconds': _safe_int(config.get_setting('overlay_rotation_seconds') or 10) or 10,
+        'refresh_seconds': _safe_int(config.get_setting('overlay_refresh_seconds') or 3) or 3,
+        'theme': (config.get_setting('overlay_theme') or 'midnight').strip().lower(),
+        'card_opacity': _safe_int(config.get_setting('overlay_card_opacity') or 84) or 84,
+        'text_scale': _safe_int(config.get_setting('overlay_text_scale') or 100) or 100,
+        'show_medals': str(config.get_setting('overlay_show_medals') or 'True'),
+        'compact_rows': str(config.get_setting('overlay_compact_rows') or 'False'),
+    }
+
+
+def _build_overlay_top3_payload():
+    data_dir = config.get_setting('directory') or os.getcwd()
+    latest_file = _find_latest_overlay_results_file(data_dir)
+    rows = []
+    race_type = None
+    race_timestamp = None
+
+    if latest_file:
+        try:
+            with open(latest_file, 'r', encoding='utf-8', errors='ignore') as f:
+                all_rows = [r for r in csv.reader(f) if len(r) >= 6 and (r[0] or '').strip() in {'1','2','3'}]
+            if all_rows:
+                last = all_rows[-1]
+                key = ((last[10] if len(last) >= 11 else ''), last[5], last[4])
+                selected = [r for r in all_rows if ((r[10] if len(r)>=11 else ''), r[5], r[4]) == key]
+                selected = sorted(selected, key=lambda r: _safe_int(r[0]))[:3]
+                rows = [{'placement': r[0], 'name': (r[2] or r[1]).strip(), 'points': _safe_int(r[3])} for r in selected]
+                race_type = selected[0][4] if selected else None
+                race_timestamp = selected[0][5] if selected else None
+        except Exception:
+            pass
+
+    return {
+        'updated_at': datetime.now().isoformat(timespec='seconds'),
+        'title': 'Top 3 Race Results',
+        'mode': 'season_top10',
+        'rows': rows,
+        'race_type': race_type,
+        'race_timestamp': race_timestamp,
+        'header_stats': _build_overlay_header_stats(data_dir),
+        'settings': _build_overlay_settings_payload(),
+    }
+
+
+@app.route('/overlay')
+def overlay_page():
+    for candidate in _overlay_dir_candidates():
+        index_file = os.path.join(candidate, 'index.html')
+        if os.path.isfile(index_file):
+            return send_from_directory(candidate, 'index.html')
+
+    return (f"Overlay files not found. Checked: {', '.join(_overlay_dir_candidates())}", 404)
+
+
+@app.route('/overlay/<path:filename>')
+def overlay_assets(filename):
+    for candidate in _overlay_dir_candidates():
+        asset_file = os.path.join(candidate, filename)
+        if os.path.isfile(asset_file):
+            return send_from_directory(candidate, filename)
+
+    return (f"Overlay asset not found: {filename}", 404)
+
+
+@app.route('/api/overlay/settings')
+def overlay_settings():
+    return jsonify(_build_overlay_settings_payload())
+
+@app.route('/api/overlay/top3')
+def overlay_top3():
+    return jsonify(_build_overlay_top3_payload())
 
 
 # Path to the token file
@@ -1656,6 +1820,7 @@ def open_settings_window():
     rivals_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
     mycycle_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
     appearance_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
+    overlay_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
 
     notebook.add(general_tab, text="General")
     notebook.add(audio_tab, text="Audio")
@@ -1664,6 +1829,7 @@ def open_settings_window():
     notebook.add(rivals_tab, text="Rivals")
     notebook.add(mycycle_tab, text="MyCycle")
     notebook.add(appearance_tab, text="Appearance")
+    notebook.add(overlay_tab, text="Overlay")
 
     # --- General tab ---
     ttk.Label(general_tab, text="Core app settings", style="Small.TLabel").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
@@ -1974,6 +2140,41 @@ def open_settings_window():
 
     theme_combobox.bind('<<ComboboxSelected>>', apply_selected_theme)
 
+
+    # --- Overlay tab ---
+    ttk.Label(overlay_tab, text="Control OBS overlay visuals from the desktop app", style="Small.TLabel").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
+
+    ttk.Label(overlay_tab, text="Stats Rotation (seconds)").grid(row=1, column=0, sticky="w", pady=(0, 4))
+    overlay_rotation_entry = ttk.Entry(overlay_tab, width=12, justify='center')
+    overlay_rotation_entry.grid(row=1, column=1, sticky="w", pady=(0, 4), padx=(8, 0))
+    overlay_rotation_entry.insert(0, config.get_setting("overlay_rotation_seconds") or "10")
+
+    ttk.Label(overlay_tab, text="Data Refresh (seconds)").grid(row=2, column=0, sticky="w", pady=(0, 4))
+    overlay_refresh_entry = ttk.Entry(overlay_tab, width=12, justify='center')
+    overlay_refresh_entry.grid(row=2, column=1, sticky="w", pady=(0, 4), padx=(8, 0))
+    overlay_refresh_entry.insert(0, config.get_setting("overlay_refresh_seconds") or "3")
+
+    ttk.Label(overlay_tab, text="Theme").grid(row=3, column=0, sticky="w", pady=(0, 4))
+    overlay_theme_var = tk.StringVar(value=(config.get_setting("overlay_theme") or "midnight"))
+    overlay_theme_combo = ttk.Combobox(overlay_tab, textvariable=overlay_theme_var, values=["midnight", "ocean", "sunset", "forest", "mono"], width=18, state="readonly")
+    overlay_theme_combo.grid(row=3, column=1, sticky="w", pady=(0, 4), padx=(8, 0))
+
+    ttk.Label(overlay_tab, text="Card Opacity (65-100)").grid(row=4, column=0, sticky="w", pady=(0, 4))
+    overlay_opacity_entry = ttk.Entry(overlay_tab, width=12, justify='center')
+    overlay_opacity_entry.grid(row=4, column=1, sticky="w", pady=(0, 4), padx=(8, 0))
+    overlay_opacity_entry.insert(0, config.get_setting("overlay_card_opacity") or "84")
+
+    ttk.Label(overlay_tab, text="Text Scale (90-125)").grid(row=5, column=0, sticky="w", pady=(0, 4))
+    overlay_text_scale_entry = ttk.Entry(overlay_tab, width=12, justify='center')
+    overlay_text_scale_entry.grid(row=5, column=1, sticky="w", pady=(0, 4), padx=(8, 0))
+    overlay_text_scale_entry.insert(0, config.get_setting("overlay_text_scale") or "100")
+
+    overlay_show_medals_var = tk.BooleanVar(value=str(config.get_setting("overlay_show_medals") or "True") == "True")
+    overlay_compact_rows_var = tk.BooleanVar(value=str(config.get_setting("overlay_compact_rows") or "False") == "True")
+    ttk.Checkbutton(overlay_tab, text="Show top-3 medal emotes", variable=overlay_show_medals_var).grid(row=6, column=0, sticky="w", pady=(6, 2), columnspan=2)
+    ttk.Checkbutton(overlay_tab, text="Compact row spacing", variable=overlay_compact_rows_var).grid(row=7, column=0, sticky="w", pady=(0, 2), columnspan=2)
+    ttk.Label(overlay_tab, text="Apply changes and OBS browser source updates automatically on next refresh.", style="Small.TLabel").grid(row=8, column=0, columnspan=2, sticky="w", pady=(8, 0))
+
     def reset_settings_defaults():
         chunk_alert_var.set(True)
         announce_delay_var.set(False)
@@ -2020,6 +2221,17 @@ def open_settings_window():
         chunk_alert_trigger_entry.insert(0, "1000")
         delay_seconds_entry.delete(0, tk.END)
         delay_seconds_entry.insert(0, "0")
+        overlay_rotation_entry.delete(0, tk.END)
+        overlay_rotation_entry.insert(0, "10")
+        overlay_refresh_entry.delete(0, tk.END)
+        overlay_refresh_entry.insert(0, "3")
+        overlay_theme_var.set("midnight")
+        overlay_opacity_entry.delete(0, tk.END)
+        overlay_opacity_entry.insert(0, "84")
+        overlay_text_scale_entry.delete(0, tk.END)
+        overlay_text_scale_entry.insert(0, "100")
+        overlay_show_medals_var.set(True)
+        overlay_compact_rows_var.set(False)
 
     footer = ttk.Frame(settings_window, style="App.TFrame")
     footer.pack(side="bottom", fill="x", padx=20, pady=10)
@@ -2064,6 +2276,13 @@ def open_settings_window():
         if selected_session_id:
             config.set_setting("mycycle_primary_session_id", selected_session_id, persistent=True)
         config.set_setting("chat_max_names", selected_max_names.get(), persistent=True)
+        config.set_setting("overlay_rotation_seconds", overlay_rotation_entry.get(), persistent=True)
+        config.set_setting("overlay_refresh_seconds", overlay_refresh_entry.get(), persistent=True)
+        config.set_setting("overlay_theme", overlay_theme_var.get(), persistent=True)
+        config.set_setting("overlay_card_opacity", overlay_opacity_entry.get(), persistent=True)
+        config.set_setting("overlay_text_scale", overlay_text_scale_entry.get(), persistent=True)
+        config.set_setting("overlay_show_medals", str(overlay_show_medals_var.get()), persistent=True)
+        config.set_setting("overlay_compact_rows", str(overlay_compact_rows_var.get()), persistent=True)
         settings_window.destroy()
 
     ttk.Button(footer, text="Save and Close", command=save_settings_and_close, style="Primary.TButton").pack(side="right")
@@ -2703,7 +2922,10 @@ class ConfigManager:
                                 'rivals_enabled', 'rivals_min_races', 'rivals_max_point_gap', 'rivals_pair_count',
                                 'mycycle_enabled', 'mycycle_announcements_enabled', 'mycycle_include_br',
                                 'mycycle_min_place', 'mycycle_max_place', 'mycycle_primary_session_id',
-                                'mycycle_cyclestats_rotation_index'}
+                                'mycycle_cyclestats_rotation_index',
+                                'overlay_rotation_seconds', 'overlay_refresh_seconds', 'overlay_theme',
+                                'overlay_card_opacity', 'overlay_text_scale', 'overlay_show_medals',
+                                'overlay_compact_rows'}
         self.transient_keys = set([])
         self.defaults = {
             'chat_br_results': 'True',
@@ -2741,7 +2963,14 @@ class ConfigManager:
             'UI_THEME': DEFAULT_UI_THEME,
             'announcedelay': 'False',
             'announcedelayseconds': '0',
-            'chunk_alert_value': '1000'
+            'chunk_alert_value': '1000',
+            'overlay_rotation_seconds': '10',
+            'overlay_refresh_seconds': '3',
+            'overlay_theme': 'midnight',
+            'overlay_card_opacity': '84',
+            'overlay_text_scale': '100',
+            'overlay_show_medals': 'True',
+            'overlay_compact_rows': 'False'
         }
         self.load_settings()
 
@@ -2794,7 +3023,9 @@ class ConfigManager:
         if key in {"season_quest_target_races", "season_quest_target_points", "season_quest_target_race_hs", "season_quest_target_br_hs",
                    "rivals_min_races", "rivals_max_point_gap", "rivals_pair_count",
                    "narrative_alert_cooldown_races", "narrative_alert_min_lead_change_points", "narrative_alert_max_items",
-                   "mycycle_min_place", "mycycle_max_place"}:
+                   "mycycle_min_place", "mycycle_max_place",
+                   "overlay_rotation_seconds", "overlay_refresh_seconds", "overlay_card_opacity",
+                   "overlay_text_scale"}:
             if isinstance(value, int) or (isinstance(value, str) and value.isdigit()):
                 return True
             print(f"Invalid value for {key}: {value}. Value must be a whole number.")
