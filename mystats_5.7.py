@@ -1183,6 +1183,7 @@ class PrintRedirector:
 
 # Flask server setup
 app = Flask(__name__)
+app.url_map.strict_slashes = False
 oauth_token = None
 def _overlay_dir_candidates():
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -1333,6 +1334,8 @@ def _build_overlay_top3_payload():
 
 @app.route('/overlay', strict_slashes=False)
 @app.route('/overlay/', strict_slashes=False)
+@app.route('/overlay.html', strict_slashes=False)
+@app.route('/obs-overlay', strict_slashes=False)
 def overlay_page():
     for candidate in _overlay_dir_candidates():
         index_file = os.path.join(candidate, 'index.html')
@@ -1372,9 +1375,35 @@ def overlay_health():
             'overlay_page': '/overlay',
             'overlay_settings': '/api/overlay/settings',
             'overlay_top3': '/api/overlay/top3',
-            'overlay_health': '/api/overlay/health'
+            'overlay_health': '/api/overlay/health',
+            'overlay_routes': '/api/overlay/routes'
         }
     })
+
+
+@app.route('/api/overlay/routes')
+def overlay_routes():
+    route_list = sorted(str(rule) for rule in app.url_map.iter_rules())
+    return jsonify({
+        'status': 'ok',
+        'app_version': version,
+        'route_count': len(route_list),
+        'routes': route_list,
+    })
+
+@app.errorhandler(404)
+def handle_not_found(error):
+    path = request.path or ''
+    if path.startswith('/overlay') or path.startswith('/api/overlay') or path.startswith('/obs-overlay'):
+        routes = sorted(str(rule) for rule in app.url_map.iter_rules() if 'overlay' in str(rule))
+        return jsonify({
+            'status': 'not_found',
+            'requested_path': path,
+            'message': 'Overlay route not found on this running Flask instance.',
+            'hint': 'Verify you are running the latest app build and check /api/overlay/health.',
+            'overlay_routes': routes,
+        }), 404
+    return error
 
 @app.route('/api/overlay/top3')
 def overlay_top3():
