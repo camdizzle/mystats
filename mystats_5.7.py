@@ -1319,35 +1319,175 @@ def _build_overlay_settings_payload():
     }
 
 
+def _parse_overlay_timestamp(value):
+    if not value:
+        return None
+
+    value = str(value).strip()
+    if not value:
+        return None
+
+    for fmt in ('%Y-%m-%d %H:%M:%S', '%m/%d/%Y %H:%M:%S', '%Y-%m-%dT%H:%M:%S'):
+        try:
+            return datetime.strptime(value, fmt)
+        except ValueError:
+            continue
+
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _overlay_points_top10(file_paths):
+    totals = {}
+
+    for file_path in file_paths:
+        if not file_path:
+            continue
+        try:
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                for row in csv.reader(f):
+                    if len(row) < 5:
+                        continue
+                    name = (row[2] or '').strip() or (row[1] or '').strip()
+                    if not name:
+                        continue
+                    points = _safe_int(row[3])
+                    if points <= 0:
+                        continue
+                    totals[name] = totals.get(name, 0) + points
+        except Exception:
+            continue
+
+    ranked = sorted(totals.items(), key=lambda item: (-item[1], item[0].lower()))[:10]
+    return [
+        {'placement': index + 1, 'name': name, 'points': points}
+        for index, (name, points) in enumerate(ranked)
+    ]
+
+
+def _overlay_data_sources(data_dir):
+    season_files = sorted(glob.glob(os.path.join(data_dir, 'allraces_*.csv')))
+    today_file = config.get_setting('allraces_file')
+
+    if today_file and os.path.isfile(today_file):
+        if today_file not in season_files:
+            season_files.append(today_file)
+        return season_files, today_file
+
+    latest_file = _find_latest_overlay_results_file(data_dir)
+    if latest_file and os.path.isfile(latest_file):
+        if latest_file not in season_files:
+            season_files.append(latest_file)
+        return season_files, latest_file
+
+    return season_files, None
+
+
+def _overlay_recent_race_payload(race_file):
+    if not race_file:
+        return {'rows': [], 'top3_rows': [], 'race_key': None, 'race_type': None, 'race_timestamp': None, 'is_recent': False}
+
+    race_groups = []
+    groups_by_key = {}
+
+    try:
+        with open(race_file, 'r', encoding='utf-8', errors='ignore') as f:
+            for row in csv.reader(f):
+                if len(row) < 6:
+                    continue
+
+                placement_text = (row[0] or '').strip()
+                placement_digits = ''.join(ch for ch in placement_text if ch.isdigit())
+                placement = _safe_int(placement_digits)
+                if placement <= 0:
+                    continue
+
+                race_id = (row[10] if len(row) >= 11 else '').strip()
+                race_timestamp = (row[5] or '').strip()
+                race_type = (row[4] or '').strip()
+                race_key = f"{race_id}|{race_timestamp}|{race_type}".strip('|')
+                if not race_key:
+                    race_key = race_timestamp or race_type or f"race-{len(race_groups) + 1}"
+
+                if race_key not in groups_by_key:
+                    groups_by_key[race_key] = {
+                        'race_key': race_key,
+                        'race_timestamp': race_timestamp,
+                        'race_type': race_type,
+                        'parsed_ts': _parse_overlay_timestamp(race_timestamp),
+                        'rows': [],
+                    }
+                    race_groups.append(groups_by_key[race_key])
+
+                groups_by_key[race_key]['rows'].append({
+                    'placement': placement,
+                    'name': (row[2] or '').strip() or (row[1] or '').strip(),
+                    'points': _safe_int(row[3]),
+                })
+    except Exception:
+        return {'rows': [], 'top3_rows': [], 'race_key': None, 'race_type': None, 'race_timestamp': None, 'is_recent': False}
+
+    if not race_groups:
+        return {'rows': [], 'top3_rows': [], 'race_key': None, 'race_type': None, 'race_timestamp': None, 'is_recent': False}
+
+    latest_group = race_groups[-1]
+    latest_rows = sorted(latest_group['rows'], key=lambda r: r['placement'])
+    top10_rows = latest_rows[:10]
+    top3_rows = latest_rows[:3]
+
+    race_time = latest_group['parsed_ts']
+    is_recent = False
+    if race_time:
+        is_recent = (datetime.now() - race_time).total_seconds() <= 600
+
+    return {
+        'rows': top10_rows,
+        'top3_rows': top3_rows,
+        'race_key': latest_group['race_key'],
+        'race_type': latest_group['race_type'] or None,
+        'race_timestamp': latest_group['race_timestamp'] or None,
+        'is_recent': is_recent,
+    }
+
+
 def _build_overlay_top3_payload():
     data_dir = config.get_setting('directory') or os.getcwd()
-    latest_file = _find_latest_overlay_results_file(data_dir)
-    rows = []
-    race_type = None
-    race_timestamp = None
+    season_files, today_file = _overlay_data_sources(data_dir)
+    recent_race = _overlay_recent_race_payload(today_file)
 
-    if latest_file:
-        try:
-            with open(latest_file, 'r', encoding='utf-8', errors='ignore') as f:
-                all_rows = [r for r in csv.reader(f) if len(r) >= 6 and (r[0] or '').strip() in {'1','2','3'}]
-            if all_rows:
-                last = all_rows[-1]
-                key = ((last[10] if len(last) >= 11 else ''), last[5], last[4])
-                selected = [r for r in all_rows if ((r[10] if len(r)>=11 else ''), r[5], r[4]) == key]
-                selected = sorted(selected, key=lambda r: _safe_int(r[0]))[:3]
-                rows = [{'placement': r[0], 'name': (r[2] or r[1]).strip(), 'points': _safe_int(r[3])} for r in selected]
-                race_type = selected[0][4] if selected else None
-                race_timestamp = selected[0][5] if selected else None
-        except Exception:
-            pass
+    views = [
+        {
+            'id': 'season',
+            'title': 'Top 10 Season',
+            'rows': _overlay_points_top10(season_files),
+        },
+        {
+            'id': 'today',
+            'title': 'Top 10 Today',
+            'rows': _overlay_points_top10([today_file]),
+        },
+    ]
+
+    if recent_race['is_recent'] and recent_race['rows']:
+        views.append({
+            'id': 'previous',
+            'title': 'Top 10 Previous Race',
+            'rows': recent_race['rows'],
+        })
 
     return {
         'updated_at': datetime.now().isoformat(timespec='seconds'),
-        'title': 'Top 3 Race Results',
-        'mode': 'season_top10',
-        'rows': rows,
-        'race_type': race_type,
-        'race_timestamp': race_timestamp,
+        'title': 'MyStats Live Results',
+        'views': views,
+        'recent_race_top3': {
+            'title': 'Top 3 Latest Race',
+            'rows': recent_race['top3_rows'],
+            'race_key': recent_race['race_key'],
+            'race_type': recent_race['race_type'],
+            'race_timestamp': recent_race['race_timestamp'],
+        },
         'header_stats': _build_overlay_header_stats(data_dir),
         'settings': _build_overlay_settings_payload(),
     }
