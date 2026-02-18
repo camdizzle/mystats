@@ -46,6 +46,7 @@ import atexit
 import socket
 import importlib.util
 import logging
+import queue
 
 try:
     import ttkbootstrap as ttkbootstrap_module
@@ -1165,6 +1166,27 @@ is_mystats_running()
 class PrintRedirector:
     def __init__(self, widget):
         self.widget = widget
+        self._message_queue = queue.Queue()
+        self._start_queue_pump()
+
+    def _start_queue_pump(self):
+        def pump():
+            if not (self.widget and self.widget.winfo_exists()):
+                return
+
+            while True:
+                try:
+                    message = self._message_queue.get_nowait()
+                except queue.Empty:
+                    break
+
+                self.widget.insert(tk.END, message)
+                self.widget.see(tk.END)
+
+            self.widget.after(30, pump)
+
+        if self.widget and self.widget.winfo_exists():
+            self.widget.after(30, pump)
 
     def write(self, message):
         # Filter out Flask startup messages
@@ -1178,8 +1200,7 @@ class PrintRedirector:
             return
 
         if self.widget and self.widget.winfo_exists():
-            self.widget.insert(tk.END, message)
-            self.widget.see(tk.END)
+            self._message_queue.put(message)
         else:
             sys.__stdout__.write(message)
 
