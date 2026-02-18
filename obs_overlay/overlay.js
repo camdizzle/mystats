@@ -282,6 +282,7 @@ function renderCombinedRows(views) {
 }
 
 function ensureLeaderboardAutoScroll() {
+  if (top3IsShowing) return;
   if (!leaderboard) return;
   if (!leaderboard.children.length) return;
   if (leaderboardScrollTimer || leaderboardScrollRetryTimer) return;
