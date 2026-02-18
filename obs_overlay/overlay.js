@@ -32,19 +32,12 @@ const themes = {
 let settings = { ...defaultSettings };
 let refreshTimer = null;
 let pillRotationTimer = null;
-let viewFallbackTimer = null;
-let activeViewIndex = 0;
 let currentViews = [];
-let lastRaceKey = null;
-let top3ShowTimeout = null;
-let top3IsShowing = false;
 let activePillPage = 0;
 let leaderboardScrollTimer = null;
-let leaderboardScrollDirection = 1;
 let leaderboardScrollPauseUntil = 0;
 let leaderboardScrollRetryTimer = null;
-let lastRenderedViewKey = null;
-let hasHydratedOnce = false;
+let sectionAnchors = [];
 
 function clampNumber(value, min, max, fallback) {
   const num = Number(value);
@@ -91,22 +84,6 @@ function startPillRotationTimer() {
   pillRotationTimer = setInterval(rotatePills, settings.rotationSeconds * 1000);
 }
 
-function stopViewFallbackTimer() {
-  if (viewFallbackTimer) {
-    clearTimeout(viewFallbackTimer);
-    viewFallbackTimer = null;
-  }
-}
-
-function scheduleViewFallbackAdvance() {
-  stopViewFallbackTimer();
-  if (top3IsShowing || currentViews.length <= 1) return;
-
-  viewFallbackTimer = setTimeout(() => {
-    advanceView();
-  }, settings.rotationSeconds * 1000);
-}
-
 function stopLeaderboardAutoScroll() {
   if (leaderboardScrollTimer) {
     clearInterval(leaderboardScrollTimer);
@@ -118,30 +95,38 @@ function stopLeaderboardAutoScroll() {
   }
 }
 
-function advanceView() {
-  if (top3IsShowing || currentViews.length <= 1) return;
-  activeViewIndex = (activeViewIndex + 1) % currentViews.length;
-  renderCurrentView(true);
+function updateBoardTitleFromScroll() {
+  if (!boardTitle || !sectionAnchors.length || !leaderboard) return;
+
+  const currentTop = leaderboard.scrollTop + 2;
+  let activeTitle = sectionAnchors[0].title;
+
+  for (const anchor of sectionAnchors) {
+    if (anchor.offsetTop <= currentTop) {
+      activeTitle = anchor.title;
+    } else {
+      break;
+    }
+  }
+
+  boardTitle.textContent = activeTitle || 'Top Results';
 }
 
 function startLeaderboardAutoScroll() {
   stopLeaderboardAutoScroll();
-  stopViewFallbackTimer();
 
   if (!leaderboard) return;
   const maxScrollTop = leaderboard.scrollHeight - leaderboard.clientHeight;
   if (maxScrollTop <= 2) {
     leaderboard.scrollTop = 0;
-    scheduleViewFallbackAdvance();
 
     leaderboardScrollRetryTimer = setTimeout(() => {
-      if (!top3IsShowing) startLeaderboardAutoScroll();
+      startLeaderboardAutoScroll();
     }, 600);
     return;
   }
 
   leaderboard.scrollTop = 0;
-  leaderboardScrollDirection = 1;
   leaderboardScrollPauseUntil = Date.now() + 1200;
 
   leaderboardScrollTimer = setInterval(() => {
@@ -149,129 +134,82 @@ function startLeaderboardAutoScroll() {
     if (currentMax <= 2) {
       stopLeaderboardAutoScroll();
       leaderboard.scrollTop = 0;
-      scheduleViewFallbackAdvance();
       return;
     }
 
     const now = Date.now();
     if (now < leaderboardScrollPauseUntil) return;
 
-    leaderboard.scrollTop += leaderboardScrollDirection * 1.4;
+    leaderboard.scrollTop += 1.4;
 
-    if (leaderboardScrollDirection > 0 && leaderboard.scrollTop >= currentMax - 1) {
+    if (leaderboard.scrollTop >= currentMax - 1) {
       leaderboard.scrollTop = currentMax;
-      leaderboardScrollDirection = -1;
       leaderboardScrollPauseUntil = now + 1200;
-      return;
-    }
-
-    if (leaderboardScrollDirection < 0 && leaderboard.scrollTop <= 1) {
-      leaderboard.scrollTop = 0;
-      leaderboardScrollPauseUntil = now + 900;
-      advanceView();
+      setTimeout(() => {
+        if (!leaderboardScrollTimer || !leaderboard) return;
+        leaderboard.scrollTop = 0;
+        leaderboardScrollPauseUntil = Date.now() + 900;
+      }, 1200);
     }
   }, 32);
 }
 
-function renderRows(rows) {
-  document.body.classList.remove('top3-active');
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 
-  if (!rows?.length) {
+function renderCombinedRows(views) {
+  sectionAnchors = [];
+
+  if (!views?.length) {
+    if (boardTitle) boardTitle.textContent = 'Top Results';
     leaderboard.innerHTML = '<li>No race data yet.</li>';
     stopLeaderboardAutoScroll();
-    stopViewFallbackTimer();
     return;
   }
 
-  leaderboard.innerHTML = rows.map(r => {
-    const emote = settings.showMedals ? getPlacementEmote(r.placement) : '';
-    const decoratedName = emote ? `${emote} ${r.name}` : r.name;
-    return `<li><span>#${r.placement}</span><span>${decoratedName}</span><span>${fmt(r.points)} pts</span></li>`;
+  const markup = views.map((view, viewIndex) => {
+    const sectionTitle = view.title || 'Top Results';
+    const rows = view.rows || [];
+    const headerMarkup = `<li class="leaderboard-section" data-section-title="${escapeHtml(sectionTitle)}">${escapeHtml(sectionTitle)}</li>`;
+
+    const rowMarkup = rows.map((r, rowIndex) => {
+      const emote = settings.showMedals ? getPlacementEmote(r.placement) : '';
+      const decoratedName = emote ? `${emote} ${r.name}` : r.name;
+      const podiumClass = rowIndex < 3 ? ` leaderboard-row--podium-${rowIndex + 1}` : '';
+      return `<li class="leaderboard-row${podiumClass}"><span class="row-rank">#${escapeHtml(r.placement)}</span><span>${escapeHtml(decoratedName)}</span><span>${fmt(r.points)} pts</span></li>`;
+    }).join('');
+
+    const gap = viewIndex > 0 ? '<li class="leaderboard-gap" aria-hidden="true"></li>' : '';
+    return `${gap}${headerMarkup}${rowMarkup}`;
   }).join('');
+
+  leaderboard.innerHTML = markup;
+
+  sectionAnchors = Array.from(leaderboard.querySelectorAll('.leaderboard-section')).map((el) => ({
+    title: el.dataset.sectionTitle || 'Top Results',
+    offsetTop: el.offsetTop,
+  }));
+
+  updateBoardTitleFromScroll();
   setTimeout(startLeaderboardAutoScroll, 0);
 }
 
-function renderTop3Rows(rows) {
-  document.body.classList.add('top3-active');
-  stopLeaderboardAutoScroll();
-  stopViewFallbackTimer();
-
-  const safeRows = (rows || []).slice(0, 3);
-  leaderboard.innerHTML = safeRows.map((r, idx) => {
-    const medal = ['🥇', '🥈', '🥉'][idx] || getPlacementEmote(r.placement);
-    return `
-      <li class="top3-card top3-card--${idx + 1}">
-        <span class="top3-rank">${medal} #${r.placement}</span>
-        <span class="top3-name">${r.name}</span>
-        <span class="top3-points">${fmt(r.points)} pts</span>
-      </li>
-    `;
-  }).join('');
-}
-
 function ensureLeaderboardAutoScroll() {
-  if (!leaderboard || top3IsShowing) return;
+  if (!leaderboard) return;
   if (!leaderboard.children.length) return;
   if (leaderboardScrollTimer || leaderboardScrollRetryTimer) return;
   startLeaderboardAutoScroll();
 }
 
-function getViewRenderKey(view) {
-  if (!view) return 'empty';
-  const rows = Array.isArray(view.rows) ? view.rows : [];
-  const rowSignature = rows
-    .map(row => `${row.placement}|${row.name}|${row.points}`)
-    .join('||');
-
-  return [
-    view.id || '',
-    view.title || '',
-    settings.showMedals,
-    rowSignature,
-  ].join('::');
-}
-
-function renderCurrentView(force = false) {
-  if (!currentViews.length) {
-    if (boardTitle) boardTitle.textContent = 'Top Results';
-    lastRenderedViewKey = 'empty';
-    renderRows([]);
-    return;
-  }
-
-  const safeIndex = Math.min(activeViewIndex, currentViews.length - 1);
-  activeViewIndex = safeIndex;
-  const view = currentViews[safeIndex];
-  const nextRenderKey = getViewRenderKey(view);
-
-  if (!force && nextRenderKey === lastRenderedViewKey) {
-    return;
-  }
-
-  lastRenderedViewKey = nextRenderKey;
-  if (boardTitle) boardTitle.textContent = view.title || 'Top Results';
-  renderRows(view.rows || []);
-}
-
 function startRefreshTimer() {
   if (refreshTimer) clearInterval(refreshTimer);
   refreshTimer = setInterval(refresh, settings.refreshSeconds * 1000);
-}
-
-function showTop3ForTenSeconds(top3View) {
-  if (!top3View?.rows?.length) return;
-
-  top3IsShowing = true;
-  if (top3ShowTimeout) clearTimeout(top3ShowTimeout);
-
-  if (boardTitle) boardTitle.textContent = top3View.title || '🔥 Latest Race Podium 🔥';
-  renderTop3Rows(top3View.rows);
-
-  top3ShowTimeout = setTimeout(() => {
-    top3IsShowing = false;
-    lastRenderedViewKey = null;
-    renderCurrentView(true);
-  }, 10000);
 }
 
 function applyTheme() {
@@ -304,32 +242,14 @@ function applyServerSettings(raw = {}) {
   applyTheme();
   if (rotationChanged) {
     startPillRotationTimer();
-    scheduleViewFallbackAdvance();
   }
   if (refreshChanged) startRefreshTimer();
 }
 
 function syncViews(views = []) {
-  const previousViewId = currentViews[activeViewIndex]?.id;
   currentViews = views;
-
-  if (!currentViews.length) {
-    activeViewIndex = 0;
-    renderCurrentView(true);
-    return;
-  }
-
-  if (previousViewId) {
-    const previousIndex = currentViews.findIndex(v => v.id === previousViewId);
-    activeViewIndex = previousIndex >= 0 ? previousIndex : 0;
-  } else {
-    activeViewIndex = Math.min(activeViewIndex, currentViews.length - 1);
-  }
-
-  if (!top3IsShowing) {
-    renderCurrentView();
-    ensureLeaderboardAutoScroll();
-  }
+  renderCombinedRows(currentViews);
+  ensureLeaderboardAutoScroll();
 }
 
 async function refresh() {
@@ -341,23 +261,20 @@ async function refresh() {
     applyServerSettings(p.settings || {});
     updateHeaderStats(p.header_stats || {});
     syncViews(p.views || []);
-
-    const raceKey = p.recent_race_top3?.race_key || null;
-    if (!hasHydratedOnce) {
-      hasHydratedOnce = true;
-      lastRaceKey = raceKey;
-      return;
-    }
-
-    if (raceKey && raceKey !== lastRaceKey) {
-      lastRaceKey = raceKey;
-      showTop3ForTenSeconds(p.recent_race_top3);
-    }
   } catch (_error) {
   }
 }
 
-window.addEventListener('resize', ensureLeaderboardAutoScroll);
+window.addEventListener('resize', () => {
+  sectionAnchors = Array.from(leaderboard?.querySelectorAll('.leaderboard-section') || []).map((el) => ({
+    title: el.dataset.sectionTitle || 'Top Results',
+    offsetTop: el.offsetTop,
+  }));
+  ensureLeaderboardAutoScroll();
+  updateBoardTitleFromScroll();
+});
+
+leaderboard?.addEventListener('scroll', updateBoardTitleFromScroll);
 
 renderPillPage();
 refresh();
