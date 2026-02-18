@@ -1,0 +1,54 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset='utf-8'>
+  <meta name='viewport' content='width=device-width,initial-scale=1'>
+  <link rel='stylesheet' href='/overlay/tilt_styles.css'>
+  <title>Tilt Overlay</title>
+</head>
+<body>
+  <main class='card'>
+    <h1 id='overlay-title'>MyStats Tilt Run Tracker</h1>
+
+    <section class='status-bar'>
+      <span id='run-status' class='pill'>Status: Idle</span>
+      <span id='run-id' class='pill'>Run: -</span>
+      <span id='run-level' class='pill'>Level: 0</span>
+      <span id='run-elapsed' class='pill'>Elapsed: 0:00</span>
+    </section>
+
+    <section class='panels'>
+      <article class='panel'>
+        <h2>Current Run</h2>
+        <div class='stats-grid'>
+          <div><label>Leader</label><strong id='current-leader'>None</strong></div>
+          <div><label>Top Tiltee</label><strong id='current-top-tiltee'>None</strong></div>
+          <div><label>Run Points</label><strong id='current-run-points'>0</strong></div>
+          <div><label>Run XP</label><strong id='current-run-xp'>0</strong></div>
+          <div><label>Best Run XP Today</label><strong id='best-run-xp'>0</strong></div>
+          <div><label>Total XP Today</label><strong id='total-xp-today'>0</strong></div>
+          <div><label>Total Deaths Today</label><strong id='total-deaths-today'>0</strong></div>
+          <div><label>Lifetime Expertise</label><strong id='lifetime-xp'>0</strong></div>
+        </div>
+      </article>
+
+      <article class='panel'>
+        <h2>Current Standings</h2>
+        <ol id='current-standings' class='standings'>
+          <li>No active run standings yet.</li>
+        </ol>
+      </article>
+    </section>
+
+    <section class='panel last-run'>
+      <h2>Last Completed Run</h2>
+      <div id='last-run-summary' class='summary'>No completed tilt run yet.</div>
+      <ol id='last-run-standings' class='standings'>
+        <li>Waiting for first completed run.</li>
+      </ol>
+    </section>
+  </main>
+
+  <script src='/overlay/tilt_overlay.js'></script>
+</body>
+</html>
