@@ -175,7 +175,7 @@ function renderRows(rows) {
     const decoratedName = emote ? `${emote} ${r.name}` : r.name;
     return `<li><span>#${r.placement}</span><span>${decoratedName}</span><span>${fmt(r.points)} pts</span></li>`;
   }).join('');
-  startLeaderboardAutoScroll();
+  requestAnimationFrame(startLeaderboardAutoScroll);
 }
 
 function renderCurrentView() {
