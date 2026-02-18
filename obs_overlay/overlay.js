@@ -164,9 +164,10 @@ function escapeHtml(value) {
 }
 
 function renderCombinedRows(views) {
+  if (!leaderboard) return;
   sectionAnchors = [];
 
-  if (!views?.length) {
+  if (!Array.isArray(views) || !views.length) {
     if (boardTitle) boardTitle.textContent = 'Top Results';
     leaderboard.innerHTML = '<li>No race data yet.</li>';
     stopLeaderboardAutoScroll();
@@ -175,7 +176,7 @@ function renderCombinedRows(views) {
 
   const markup = views.map((view, viewIndex) => {
     const sectionTitle = view.title || 'Top Results';
-    const rows = view.rows || [];
+    const rows = Array.isArray(view.rows) ? view.rows : [];
     const headerMarkup = `<li class="leaderboard-section" data-section-title="${escapeHtml(sectionTitle)}">${escapeHtml(sectionTitle)}</li>`;
 
     const rowMarkup = rows.map((r, rowIndex) => {
@@ -260,8 +261,20 @@ async function refresh() {
     $('overlay-title').textContent = p.title || 'MyStats Live Results';
     applyServerSettings(p.settings || {});
     updateHeaderStats(p.header_stats || {});
-    syncViews(p.views || []);
-  } catch (_error) {
+    const normalizedViews = Array.isArray(p.views)
+      ? p.views
+      : [
+          { id: 'season', title: 'Top 10 Season', rows: p.top10_season || [] },
+          { id: 'today', title: 'Top 10 Today', rows: p.top10_today || [] },
+          ...(Array.isArray(p.top10_previous_race) && p.top10_previous_race.length
+            ? [{ id: 'previous', title: 'Top 10 Previous Race', rows: p.top10_previous_race }]
+            : []),
+        ];
+
+    syncViews(normalizedViews);
+  } catch (error) {
+    console.error('Overlay refresh failed:', error);
+    if (leaderboard) leaderboard.innerHTML = '<li>Unable to load race data.</li>';
   }
 }
 
