@@ -46,6 +46,7 @@ import atexit
 import socket
 import importlib.util
 import logging
+import queue
 
 try:
     import ttkbootstrap as ttkbootstrap_module
@@ -1165,17 +1166,40 @@ is_mystats_running()
 class PrintRedirector:
     def __init__(self, widget):
         self.widget = widget
+        self._message_queue = queue.Queue()
+        self._start_queue_pump()
+
+    def _start_queue_pump(self):
+        def pump():
+            if not (self.widget and self.widget.winfo_exists()):
+                return
+
+            while True:
+                try:
+                    message = self._message_queue.get_nowait()
+                except queue.Empty:
+                    break
+
+                self.widget.insert(tk.END, message)
+                self.widget.see(tk.END)
+
+            self.widget.after(30, pump)
+
+        if self.widget and self.widget.winfo_exists():
+            self.widget.after(30, pump)
 
     def write(self, message):
         # Filter out Flask startup messages
         if "Serving Flask app" in message or "Debug mode" in message:
             return  # Ignore these messages
 
+        if not message:
+            return
+
+        # Keep application output inside the Tk text console.
+        # If the widget is not available yet/anymore, drop gracefully.
         if self.widget and self.widget.winfo_exists():
-            self.widget.insert(tk.END, message)
-            self.widget.see(tk.END)
-        else:
-            sys.__stdout__.write(message)
+            self._message_queue.put(message)
 
     def flush(self):
         pass
@@ -2413,6 +2437,7 @@ def on_close():
     # Destroy the Tkinter windows after a delay
     def close_windows():
         sys.stdout = sys.__stdout__  # Reset stdout
+        sys.stderr = sys.__stderr__  # Reset stderr
         wait_window.destroy()
         root.destroy()
 
@@ -2940,8 +2965,19 @@ def update_config_labels():
     br_hs_label.config(text=f"BR HS: {int(config.get_setting('br_hs_season')):,}")
 
 
-# Redirect stdout to the text area after the widget is created
-sys.stdout = PrintRedirector(text_area)
+# Redirect stdout/stderr to the text area after the widget is created
+ui_console = PrintRedirector(text_area)
+sys.stdout = ui_console
+sys.stderr = ui_console
+
+# Route existing logging handlers (including werkzeug) to the Tk console.
+for _logger_name in (None, "werkzeug", "flask.app"):
+    _logger = logging.getLogger(_logger_name)
+    for _handler in _logger.handlers:
+        try:
+            _handler.setStream(ui_console)
+        except Exception:
+            pass
 
 # Create a menu bar
 menu_bar = Menu(root)
