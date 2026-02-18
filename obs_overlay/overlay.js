@@ -42,6 +42,7 @@ let activePillPage = 0;
 let leaderboardScrollTimer = null;
 let leaderboardScrollDirection = 1;
 let leaderboardScrollPauseUntil = 0;
+let leaderboardScrollRetryTimer = null;
 let lastRenderedViewKey = null;
 let hasHydratedOnce = false;
 
@@ -111,6 +112,10 @@ function stopLeaderboardAutoScroll() {
     clearInterval(leaderboardScrollTimer);
     leaderboardScrollTimer = null;
   }
+  if (leaderboardScrollRetryTimer) {
+    clearTimeout(leaderboardScrollRetryTimer);
+    leaderboardScrollRetryTimer = null;
+  }
 }
 
 function advanceView() {
@@ -128,6 +133,10 @@ function startLeaderboardAutoScroll() {
   if (maxScrollTop <= 2) {
     leaderboard.scrollTop = 0;
     scheduleViewFallbackAdvance();
+
+    leaderboardScrollRetryTimer = setTimeout(() => {
+      if (!top3IsShowing) startLeaderboardAutoScroll();
+    }, 600);
     return;
   }
 
@@ -149,14 +158,14 @@ function startLeaderboardAutoScroll() {
 
     leaderboard.scrollTop += leaderboardScrollDirection * 1.4;
 
-    if (leaderboard.scrollTop >= currentMax - 1) {
+    if (leaderboardScrollDirection > 0 && leaderboard.scrollTop >= currentMax - 1) {
       leaderboard.scrollTop = currentMax;
       leaderboardScrollDirection = -1;
       leaderboardScrollPauseUntil = now + 1200;
       return;
     }
 
-    if (leaderboard.scrollTop <= 1) {
+    if (leaderboardScrollDirection < 0 && leaderboard.scrollTop <= 1) {
       leaderboard.scrollTop = 0;
       leaderboardScrollPauseUntil = now + 900;
       advanceView();
@@ -179,7 +188,7 @@ function renderRows(rows) {
     const decoratedName = emote ? `${emote} ${r.name}` : r.name;
     return `<li><span>#${r.placement}</span><span>${decoratedName}</span><span>${fmt(r.points)} pts</span></li>`;
   }).join('');
-  requestAnimationFrame(startLeaderboardAutoScroll);
+  setTimeout(startLeaderboardAutoScroll, 0);
 }
 
 function renderTop3Rows(rows) {
@@ -198,6 +207,13 @@ function renderTop3Rows(rows) {
       </li>
     `;
   }).join('');
+}
+
+function ensureLeaderboardAutoScroll() {
+  if (!leaderboard || top3IsShowing) return;
+  if (!leaderboard.children.length) return;
+  if (leaderboardScrollTimer || leaderboardScrollRetryTimer) return;
+  startLeaderboardAutoScroll();
 }
 
 function getViewRenderKey(view) {
@@ -310,7 +326,10 @@ function syncViews(views = []) {
     activeViewIndex = Math.min(activeViewIndex, currentViews.length - 1);
   }
 
-  if (!top3IsShowing) renderCurrentView();
+  if (!top3IsShowing) {
+    renderCurrentView();
+    ensureLeaderboardAutoScroll();
+  }
 }
 
 async function refresh() {
@@ -338,7 +357,7 @@ async function refresh() {
   }
 }
 
-window.addEventListener('resize', startLeaderboardAutoScroll);
+window.addEventListener('resize', ensureLeaderboardAutoScroll);
 
 renderPillPage();
 refresh();
