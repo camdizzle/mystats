@@ -42,6 +42,7 @@ let activePillPage = 0;
 let leaderboardScrollTimer = null;
 let leaderboardScrollDirection = 1;
 let leaderboardScrollPauseUntil = 0;
+let lastRenderedViewKey = null;
 
 function clampNumber(value, min, max, fallback) {
   const num = Number(value);
@@ -178,9 +179,25 @@ function renderRows(rows) {
   requestAnimationFrame(startLeaderboardAutoScroll);
 }
 
+function getViewRenderKey(view) {
+  if (!view) return 'empty';
+  const rows = Array.isArray(view.rows) ? view.rows : [];
+  const rowSignature = rows
+    .map(row => `${row.placement}|${row.name}|${row.points}`)
+    .join('||');
+
+  return [
+    view.id || '',
+    view.title || '',
+    settings.showMedals,
+    rowSignature,
+  ].join('::');
+}
+
 function renderCurrentView() {
   if (!currentViews.length) {
     if (boardTitle) boardTitle.textContent = 'Top Results';
+    lastRenderedViewKey = 'empty';
     renderRows([]);
     return;
   }
@@ -188,6 +205,13 @@ function renderCurrentView() {
   const safeIndex = Math.min(activeViewIndex, currentViews.length - 1);
   activeViewIndex = safeIndex;
   const view = currentViews[safeIndex];
+  const nextRenderKey = getViewRenderKey(view);
+
+  if (nextRenderKey === lastRenderedViewKey) {
+    return;
+  }
+
+  lastRenderedViewKey = nextRenderKey;
   if (boardTitle) boardTitle.textContent = view.title || 'Top Results';
   renderRows(view.rows || []);
 }
