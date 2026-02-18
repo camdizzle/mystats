@@ -159,6 +159,142 @@ def get_chat_max_names():
     return min(25, max(3, value))
 
 
+def get_tilt_output_directory():
+    output_directory = os.path.join(os.path.expanduser("~\\AppData\\Local\\MyStats\\"), "TiltedOutputFiles")
+    os.makedirs(output_directory, exist_ok=True)
+    return output_directory
+
+
+def safe_read_csv_rows(path, retries=5, retry_delay=0.5):
+    """Read CSV rows safely from files that may be locked by game writes."""
+    for _ in range(retries):
+        try:
+            if not path or not os.path.exists(path):
+                return []
+
+            with open(path, 'rb') as f:
+                raw_data = f.read()
+
+            result = chardet.detect(raw_data)
+            encoding = result['encoding'] if result['encoding'] else 'utf-8'
+            decoded = raw_data.decode(encoding, errors='ignore')
+            return list(csv.reader(io.StringIO(decoded)))
+        except Exception:
+            time.sleep(retry_delay)
+
+    return []
+
+
+def chunked_join_messages(prefix, continuation_prefix, items, separator=', ', max_length=480):
+    """Build one or more chunked messages with a shared prefix strategy."""
+    if not items:
+        return []
+
+    chunks = []
+    current = prefix
+
+    for item in items:
+        rendered_item = f"{item}{separator}"
+        if len(current) + len(rendered_item) > max_length:
+            chunks.append(current.rstrip(', '))
+            current = f"{continuation_prefix}{rendered_item}"
+        else:
+            current += rendered_item
+
+    if current:
+        chunks.append(current.rstrip(', '))
+
+    return chunks
+
+
+def parse_tilt_level_state(level_rows):
+    """Parse LastTiltLevel.csv using header aliases when possible, with positional fallbacks."""
+    if len(level_rows) < 2:
+        return None
+
+    headers = [h.strip().lower() for h in level_rows[0]]
+    row = level_rows[1]
+    index_by_header = {h: idx for idx, h in enumerate(headers)}
+
+    def get_field(alias_list, fallback_index=None, default=''):
+        for alias in alias_list:
+            idx = index_by_header.get(alias)
+            if idx is not None and idx < len(row):
+                return row[idx].strip()
+        if fallback_index is not None and fallback_index < len(row):
+            return row[fallback_index].strip()
+        return default
+
+    current_level_raw = get_field(['level', 'currentlevel'], fallback_index=0, default='0')
+    digits_only = ''.join(ch for ch in current_level_raw if ch.isdigit())
+    current_level = int(digits_only or '0')
+
+    elapsed_time = get_field(['timeelapsed', 'elapsedtime', 'time'], fallback_index=1, default='0:00')
+    top_tiltee = get_field(['toptiltee', 'topplayer', 'topuser'], fallback_index=2, default='')
+
+    level_xp_raw = get_field(['points', 'levelexp', 'expertise'], fallback_index=3, default='0')
+    total_xp_raw = get_field(['totalexp', 'totalexpertise'], fallback_index=4, default='0')
+    live_raw = get_field(['live', 'islive'], fallback_index=5, default='')
+    level_passed_raw = get_field(['levelpassed', 'passed'], fallback_index=6, default='false').lower()
+
+    try:
+        level_xp = int(float(level_xp_raw))
+    except (TypeError, ValueError):
+        level_xp = 0
+
+    try:
+        total_xp = int(float(total_xp_raw))
+    except (TypeError, ValueError):
+        total_xp = 0
+
+    return {
+        'current_level': current_level,
+        'elapsed_time': elapsed_time,
+        'top_tiltee': top_tiltee,
+        'level_xp': level_xp,
+        'total_xp': total_xp,
+        'live': live_raw,
+        'level_passed': level_passed_raw == 'true'
+    }
+
+
+def get_tilt_multiplier(level_number):
+    if 1 <= level_number <= 14:
+        return 1.0 / 3.0
+    if 15 <= level_number <= 17:
+        return 6.0
+    if 18 <= level_number <= 20:
+        return 7.0
+    if 21 <= level_number <= 23:
+        return 12.0
+    if 24 <= level_number <= 26:
+        return 13.5
+    if 27 <= level_number <= 29:
+        return 50.0
+    if 30 <= level_number <= 32:
+        return 66.0
+    if 33 <= level_number <= 35:
+        return 84.0
+    if 36 <= level_number <= 38:
+        return 104.0
+    if 39 <= level_number <= 41:
+        return 126.0
+    if level_number >= 42:
+        sets_of_three = (level_number - 42) // 3
+        return 135.0 + (sets_of_three * 9)
+    return 0.0
+
+
+def write_tilt_output_files(values):
+    output_directory = get_tilt_output_directory()
+    for filename, value in values.items():
+        try:
+            with open(os.path.join(output_directory, filename), 'w', encoding='utf-8', errors='ignore') as fp:
+                fp.write(str(value))
+        except Exception as e:
+            logger.warning(f"Failed writing tilt output file '{filename}': {e}")
+
+
 def get_int_setting(setting_key, default=0):
     try:
         return int(config.get_setting(setting_key) or default)
@@ -1505,6 +1641,65 @@ def _build_overlay_top3_payload():
     }
 
 
+
+
+def _build_tilt_overlay_payload():
+    def parse_json_setting(setting_key, default):
+        raw = config.get_setting(setting_key)
+        if not raw:
+            return default
+        try:
+            parsed = json.loads(raw)
+            return parsed
+        except Exception:
+            return default
+
+    run_ledger = parse_json_setting('tilt_run_ledger', {})
+    if not isinstance(run_ledger, dict):
+        run_ledger = {}
+
+    sorted_run = sorted(
+        ((str(name), _safe_int(points)) for name, points in run_ledger.items()),
+        key=lambda item: item[1],
+        reverse=True
+    )
+
+    current_run_id = str(config.get_setting('tilt_current_run_id') or '').strip()
+    current_level = get_int_setting('tilt_current_level', 0)
+    current_elapsed = str(config.get_setting('tilt_current_elapsed') or '0:00')
+    current_top_tiltee = str(config.get_setting('tilt_current_top_tiltee') or 'None')
+
+    current_summary = {
+        'run_id': current_run_id,
+        'run_short_id': current_run_id[:6] if current_run_id else '',
+        'status': 'active' if current_run_id else 'idle',
+        'level': current_level,
+        'elapsed_time': current_elapsed,
+        'top_tiltee': current_top_tiltee,
+        'run_points': get_int_setting('tilt_run_points', 0),
+        'run_xp': get_int_setting('tilt_run_xp', 0),
+        'best_run_xp_today': get_int_setting('tilt_best_run_xp_today', 0),
+        'total_xp_today': get_int_setting('tilt_total_xp_today', 0),
+        'total_deaths_today': get_int_setting('tilt_total_deaths_today', 0),
+        'lifetime_expertise': get_int_setting('tilt_lifetime_expertise', 0),
+        'leader': {'name': sorted_run[0][0], 'points': sorted_run[0][1]} if sorted_run else None,
+        'standings': [{'name': name, 'points': points} for name, points in sorted_run[:10]],
+    }
+
+    last_run_summary = parse_json_setting('tilt_last_run_summary', {})
+    if not isinstance(last_run_summary, dict):
+        last_run_summary = {}
+
+    payload = {
+        'updated_at': datetime.now().isoformat(timespec='seconds'),
+        'title': 'MyStats Tilt Run Tracker',
+        'settings': _build_overlay_settings_payload(),
+        'current_run': current_summary,
+        'last_run': last_run_summary,
+    }
+    return payload
+
+
 @app.route('/overlay')
 def overlay_page():
     for candidate in _overlay_dir_candidates():
@@ -1513,6 +1708,16 @@ def overlay_page():
             return send_from_directory(candidate, 'index.html')
 
     return (f"Overlay files not found. Checked: {', '.join(_overlay_dir_candidates())}", 404)
+
+
+@app.route('/overlay/tilt')
+def overlay_tilt_page():
+    for candidate in _overlay_dir_candidates():
+        index_file = os.path.join(candidate, 'tilt.html')
+        if os.path.isfile(index_file):
+            return send_from_directory(candidate, 'tilt.html')
+
+    return (f"Tilt overlay files not found. Checked: {', '.join(_overlay_dir_candidates())}", 404)
 
 
 @app.route('/overlay/<path:filename>')
@@ -1532,6 +1737,11 @@ def overlay_settings():
 @app.route('/api/overlay/top3')
 def overlay_top3():
     return jsonify(_build_overlay_top3_payload())
+
+
+@app.route('/api/overlay/tilt')
+def overlay_tilt_payload():
+    return jsonify(_build_tilt_overlay_payload())
 
 
 # Path to the token file
@@ -5167,27 +5377,23 @@ def process_season(directory, season):
 async def tilted(bot):
     last_modified_tilt = None
     run_id = None
-    MAX_MESSAGE_LENGTH = 480
+    max_message_length = 480
+
     while not bot.stop_event.is_set():
-        # print('Debug: Tilted file check')
         try:
             tilt_level_file = config.get_setting('tilt_level_file')
             current_modified_tilt = os.path.getmtime(tilt_level_file)
-
         except FileNotFoundError:
             print("Tilt level file not found. Trying again.")
             await asyncio.sleep(1)
             continue
-
+        except asyncio.CancelledError:
+            print("Tilted task was cancelled.")
+            break
         except Exception as e:
             print(f"Error checking modification time: {e}")
             await asyncio.sleep(1)
             continue
-        
-        except asyncio.CancelledError:
-            # Task was cancelled; exit gracefully
-            print("Tilted task was cancelled.")
-            break
 
         if last_modified_tilt is None:
             last_modified_tilt = current_modified_tilt
@@ -5195,156 +5401,245 @@ async def tilted(bot):
             await asyncio.sleep(1)
             continue
 
-        if current_modified_tilt != last_modified_tilt:
-            await asyncio.sleep(3)
+        if current_modified_tilt == last_modified_tilt:
+            await asyncio.sleep(7)
+            continue
+
+        await asyncio.sleep(3)
+
+        try:
+            level_rows = safe_read_csv_rows(tilt_level_file)
+            level_state = parse_tilt_level_state(level_rows)
+            if level_state is None:
+                print("Tilt level data incomplete; waiting for next write.")
+                last_modified_tilt = current_modified_tilt
+                await asyncio.sleep(1)
+                continue
+
+            current_level = level_state['current_level']
+            elapsed_time = level_state['elapsed_time']
+            top_tiltee = level_state['top_tiltee'] or 'None'
+            level_points = level_state['level_xp']
+            total_xp = level_state['total_xp']
+            level_passed = level_state['level_passed']
+
+            config.set_setting('tilt_current_level', str(current_level), persistent=False)
+            config.set_setting('tilt_current_elapsed', str(elapsed_time), persistent=False)
+            config.set_setting('tilt_current_top_tiltee', str(top_tiltee), persistent=False)
+
+            if current_level == 1 and run_id is None:
+                run_id = base64.urlsafe_b64encode(uuid.uuid4().bytes).rstrip(b'=').decode('utf-8')
+                config.set_setting('tilt_run_started_at', datetime.now().strftime('%Y-%m-%d %H:%M:%S'), persistent=False)
+                config.set_setting('tilt_run_ledger', '{}', persistent=False)
+                config.set_setting('tilt_run_xp', '0', persistent=False)
+                config.set_setting('tilt_run_points', '0', persistent=False)
+                config.set_setting('tilt_previous_run_xp', config.get_setting('tilt_run_xp') or '0', persistent=False)
+
+            if run_id is None:
+                run_id = base64.urlsafe_b64encode(uuid.uuid4().bytes).rstrip(b'=').decode('utf-8')
+
+            config.set_setting('tilt_current_run_id', run_id, persistent=False)
 
             try:
-                with open(tilt_level_file, 'rb') as f:
-                    data = f.read()
-                result = chardet.detect(data)
-                encoding = result['encoding']
+                run_ledger = json.loads(config.get_setting('tilt_run_ledger') or '{}')
+                if not isinstance(run_ledger, dict):
+                    run_ledger = {}
+            except Exception:
+                run_ledger = {}
 
-                with open(tilt_level_file, 'r', encoding=encoding, errors='ignore') as f:
-                    reader = csv.reader(f)
-                    leveldata = list(reader)
+            tilt_player_file = config.get_setting('tilt_player_file')
+            tilt_rows = safe_read_csv_rows(tilt_player_file)
+            player_data_rows = tilt_rows[1:] if len(tilt_rows) > 1 else []
 
-                level_header = leveldata[0]
-                level_row = leveldata[1]
+            active_users = []
+            survivors = []
+            deaths_this_level = 0
 
-                current_level = int(level_row[0])
-                elapsed_time = level_row[1]
-                top_tiltee = level_row[2]
-                level_xp = level_row[3]
-                total_xp = level_row[4]
-                live = level_row[5]
-                level_passed = level_row[6].strip().lower() == 'true'
+            for row in player_data_rows:
+                if len(row) < 5:
+                    continue
 
-                if current_level == 1 and run_id is None:
-                    run_id = base64.urlsafe_b64encode(uuid.uuid4().bytes).rstrip(b'=').decode('utf-8')
+                username = row[0].strip() if len(row) > 0 else ''
+                points_raw = row[2].strip() if len(row) > 2 else '0'
+                player_level_raw = row[4].strip() if len(row) > 4 else '0'
 
-                if not level_passed:
-                    tilts_results_file = config.get_setting('tilts_results_file')
-                    if not tilts_results_file:
-                        create_results_files()
+                if not username:
+                    continue
 
-                    run_results = {}
-                    if os.path.exists(tilts_results_file):
-                        with open(tilts_results_file, 'rb') as f:
-                            raw_data = f.read()
+                try:
+                    player_level = int(''.join(ch for ch in player_level_raw if ch.isdigit()) or '0')
+                except ValueError:
+                    player_level = 0
 
-                        result = chardet.detect(raw_data)
-                        encoding = result['encoding'] if result['encoding'] else 'utf-8'
-                        with open(tilts_results_file, 'r', newline='', encoding=encoding) as tilt_file:
-                            reader = csv.reader(tilt_file)
-                            for row in reader:
-                                if row[0] == run_id:
-                                    username = row[2]
-                                    points = int(row[4])
-                                    run_results[username] = run_results.get(username, 0) + points
+                if player_level != current_level:
+                    continue
 
-                    sorted_run_results = sorted(run_results.items(), key=lambda x: x[1], reverse=True)
-                    max_names = get_chat_max_names()
-                    limited_run_results = sorted_run_results[:max_names]
+                active_users.append(username)
+                try:
+                    player_points = int(float(points_raw))
+                except (TypeError, ValueError):
+                    player_points = 0
 
-                    if sorted_run_results:
-                        full_summary_message = f"Run {run_id[:6]} is over! Final standings: "
-                        for username, points in limited_run_results:
-                            player_summary = f"{username} - {points} points, "
-                            if len(full_summary_message) + len(player_summary) > MAX_MESSAGE_LENGTH:
-                                if is_chat_response_enabled("chat_tilt_results"):
-                                    await send_chat_message(bot.channel, full_summary_message.strip(", "), category="tilt")
-                                full_summary_message = player_summary
-                            else:
-                                full_summary_message += player_summary
-
-                        if full_summary_message:
-                            if is_chat_response_enabled("chat_tilt_results"):
-                                await send_chat_message(bot.channel, full_summary_message.strip(", "), category="tilt")
-
-                        text_area.insert('end', f"\nRun {run_id[:6]} is over! Final standings: {', '.join([f'{username} - {points} points' for username, points in limited_run_results])}\n")
-                    else:
-                        # If no results found for the run_id
-                        if is_chat_response_enabled("chat_tilt_results"):
-                            await send_chat_message(bot.channel, f"Run {run_id[:6]} is over! No results to display.", category="tilt")
-                        text_area.insert('end', f"\nRun {run_id[:6]} is over! No results to display.\n")
-                        print("No results found for this run.")
-
-                    run_id = None
-
+                if player_points > 0:
+                    survivors.append((username, player_points, row))
+                    run_ledger[username] = int(run_ledger.get(username, 0)) + level_points
                 else:
-                    tilt_player_file = config.get_setting('tilt_player_file')
-                    with open(tilt_player_file, 'rb') as f:
-                        data = f.read()
-                    result = chardet.detect(data)
-                    encoding = result['encoding']
+                    deaths_this_level += 1
 
-                    with open(tilt_player_file, 'r', encoding=encoding, errors='ignore') as fp:
-                        reader = csv.reader(fp)
-                        tiltdata = list(reader)
+            earned_xp = int(math.floor(len(survivors) * get_tilt_multiplier(current_level)))
+            run_xp = get_int_setting('tilt_run_xp', 0) + earned_xp
+            run_points = get_int_setting('tilt_run_points', 0) + (level_points if survivors else 0)
+            total_xp_today = get_int_setting('tilt_total_xp_today', 0) + earned_xp
+            total_deaths_today = get_int_setting('tilt_total_deaths_today', 0) + deaths_this_level
 
-                    current_level_data = [row for row in tiltdata[1:] if int(row[4]) == current_level and int(row[2]) > 0]
-                    max_names = get_chat_max_names()
-                    limited_level_data = current_level_data[:max_names]
+            best_run_xp_today = max(get_int_setting('tilt_best_run_xp_today', 0), run_xp)
+            if best_run_xp_today != get_int_setting('tilt_best_run_xp_today', 0):
+                config.set_setting('tilt_best_run_xp_today', str(best_run_xp_today), persistent=False)
 
-                    top_tiltee_message = f"End of Tilt Level {current_level} | Level Completion Time: {elapsed_time} | " \
-                                         f"Top Tiltee: {top_tiltee} | Points Earned: {level_xp} | Finishers: " if top_tiltee \
-                        else f"End of Tilt Level {current_level} | Level Completion Time: {elapsed_time} | Top Tiltee: None | Points Earned: {level_xp} | Finishers: "
+            if survivors:
+                highest_level_points_today = max(get_int_setting('tilt_highest_level_points_today', 0), level_points)
+                highest_level_reached_num = max(get_int_setting('tilt_highest_level_reached_num', 0), current_level)
+                season_best_level_num = max(get_int_setting('tilt_season_best_level_num', 0), current_level)
+                personal_best_level_num = max(get_int_setting('tilt_personal_best_level_num', 0), current_level)
+            else:
+                highest_level_points_today = get_int_setting('tilt_highest_level_points_today', 0)
+                highest_level_reached_num = get_int_setting('tilt_highest_level_reached_num', 0)
+                season_best_level_num = get_int_setting('tilt_season_best_level_num', 0)
+                personal_best_level_num = get_int_setting('tilt_personal_best_level_num', 0)
 
-                    if current_level_data:
-                        full_message = top_tiltee_message
-                        for row in limited_level_data:
-                            player_result = f"{row[0]}, "
-                            if len(full_message) + len(player_result) > MAX_MESSAGE_LENGTH:
-                                if is_chat_response_enabled("chat_tilt_results"):
-                                    await send_chat_message(bot.channel, full_message.strip(", "), category="tilt")
-                                full_message = player_result
-                            else:
-                                full_message += player_result
+            config.set_setting('tilt_run_xp', str(run_xp), persistent=False)
+            config.set_setting('tilt_run_points', str(run_points), persistent=False)
+            config.set_setting('tilt_total_xp_today', str(total_xp_today), persistent=False)
+            config.set_setting('tilt_total_deaths_today', str(total_deaths_today), persistent=False)
+            config.set_setting('tilt_highest_level_points_today', str(highest_level_points_today), persistent=False)
+            config.set_setting('tilt_highest_level_reached_num', str(highest_level_reached_num), persistent=False)
+            config.set_setting('tilt_season_best_level_num', str(season_best_level_num), persistent=False)
+            config.set_setting('tilt_personal_best_level_num', str(personal_best_level_num), persistent=False)
+            config.set_setting('tilt_run_ledger', json.dumps(run_ledger), persistent=False)
 
-                        if full_message:
-                            if is_chat_response_enabled("chat_tilt_results"):
-                                await send_chat_message(bot.channel, full_message.strip(", "), category="tilt")
-                        # print("Sent current level results to chat.")
+            lifetime_expertise = get_int_setting('tilt_lifetime_expertise', 0)
+            if total_xp > lifetime_expertise:
+                lifetime_expertise = total_xp
+            lifetime_expertise += earned_xp
+            config.set_setting('tilt_lifetime_expertise', str(lifetime_expertise), persistent=False)
 
-                        text_area.insert('end', f"\n{top_tiltee_message} | Finishers: {', '.join([f'{row[0]}' for row in limited_level_data])}\n")
-                    else:
-                        print("No player data to send for current level.")
-
+            if level_passed:
+                tilts_results_file = config.get_setting('tilts_results_file')
+                if not tilts_results_file:
+                    create_results_files()
                     tilts_results_file = config.get_setting('tilts_results_file')
 
-                    try:
-                        with open(tilts_results_file, 'rb') as f:
-                            raw_data = f.read()
+                try:
+                    with open(tilts_results_file, 'a', newline='', encoding='utf-8') as tilts_file:
+                        writer = csv.writer(tilts_file)
+                        event_ids_tmp = config.get_setting('active_event_ids')
+                        if event_ids_tmp is not None:
+                            event_ids_tmp = event_ids_tmp.strip("[]").split(",")
+                            event_ids = [int(event_id.strip().replace('"', '')) for event_id in event_ids_tmp if event_id.strip().replace('"', '').isdigit()]
+                        else:
+                            event_ids = [0]
 
-                        result = chardet.detect(raw_data)
-                        encoding = result['encoding'] if result['encoding'] else 'utf-8'
-                        with open(tilts_results_file, 'a', newline='', encoding='utf-8') as tilts_file:
-                            writer = csv.writer(tilts_file)
-                            for row in tiltdata[1:]:
-                                try:
-                                    event_ids_tmp = config.get_setting('active_event_ids')
-                                    if event_ids_tmp is not None:
-                                        event_ids_tmp = event_ids_tmp.strip("[]").split(",")
-                                        event_ids = [int(id.strip().replace('"', '')) for id in event_ids_tmp if
-                                                     id.strip().replace('"', '').isdigit()]
+                        for _, _, row in survivors:
+                            data_to_write = [run_id, current_level] + row + [event_ids]
+                            writer.writerow(data_to_write)
+                except Exception as e:
+                    print(f"Error opening/writing to tilts_results_file: {e}")
 
-                                    else:
-                                        event_ids = [0]
-                                    data_to_write = [run_id, current_level] + row + [event_ids]
-                                    writer.writerow(data_to_write)
-                                except Exception as e:
-                                    pass
-                                    print(f"Error writing row {row} to {tilts_results_file}: {e}")
-                    except Exception as e:
-                        print(f"Error opening/writing to tilts_results_file: {e}")
+                finisher_names = [username for username, _, _ in survivors]
+                limited_finishers = finisher_names[:get_chat_max_names()]
+                base_msg = (
+                    f"End of Tilt Level {current_level} | Level Completion Time: {elapsed_time} | "
+                    f"Top Tiltee: {top_tiltee} | Points Earned: {level_points} | Survivors: "
+                )
 
-                last_modified_tilt = current_modified_tilt
+                if limited_finishers:
+                    chunks = chunked_join_messages(base_msg, f"Level {current_level} Survivors: ", limited_finishers, max_length=max_message_length)
+                    for chunk in chunks:
+                        if is_chat_response_enabled("chat_tilt_results"):
+                            await send_chat_message(bot.channel, chunk, category="tilt")
+                    text_area.insert('end', f"\n{base_msg}{', '.join(limited_finishers)}\n")
+                else:
+                    print("No player data to send for current level.")
 
-            except Exception as e:
-                print(f"An error occurred while processing the tilt file: {e}")
+                write_tilt_output_files({
+                    'LastLevelPoints.txt': f"{level_points:,}",
+                    'CurrentLevel.txt': str(current_level + 1),
+                    'HighestLevelPoints.txt': f"{highest_level_points_today:,}",
+                    'HighestLevelReached.txt': str(highest_level_reached_num + 1 if highest_level_reached_num > 0 else 1),
+                    'SeasonBestLevel.txt': str(season_best_level_num + 1 if season_best_level_num > 0 else 1),
+                    'PersonalBestLevel.txt': str(personal_best_level_num + 1 if personal_best_level_num > 0 else 1),
+                    'CurrentRunExpertise.txt': f"{run_xp:,}",
+                    'RunTotalPoints.txt': f"{run_points:,}",
+                    'TotalExpertiseToday.txt': f"{total_xp_today:,}",
+                    'TotalDeathsToday.txt': f"{total_deaths_today:,}",
+                    'LastLevelExpertise.txt': f"{earned_xp:,}",
+                    'TotalExpertise.txt': f"{lifetime_expertise:,}"
+                })
 
-        else:
-            pass
+            else:
+                sorted_run_results = sorted(((username, int(points)) for username, points in run_ledger.items()), key=lambda x: x[1], reverse=True)
+                limited_run_results = sorted_run_results[:get_chat_max_names()]
+
+                if limited_run_results:
+                    standings_items = [f"{username} - {points} points" for username, points in limited_run_results]
+                    chunks = chunked_join_messages(
+                        f"Run {run_id[:6]} is over! Final standings: ",
+                        "Run standings cont: ",
+                        standings_items,
+                        max_length=max_message_length
+                    )
+                    for chunk in chunks:
+                        if is_chat_response_enabled("chat_tilt_results"):
+                            await send_chat_message(bot.channel, chunk, category="tilt")
+                    text_area.insert('end', f"\nRun {run_id[:6]} is over! Final standings: {', '.join(standings_items)}\n")
+                else:
+                    if is_chat_response_enabled("chat_tilt_results"):
+                        await send_chat_message(bot.channel, f"Run {run_id[:6]} is over! No results to display.", category="tilt")
+                    text_area.insert('end', f"\nRun {run_id[:6]} is over! No results to display.\n")
+
+                top_users_today = sorted(run_ledger.items(), key=lambda x: x[1], reverse=True)[:10]
+                top_user_names = [name for name, _ in top_users_today]
+                write_tilt_output_files({
+                    'CurrentLevel.txt': 'FAIL',
+                    'PreviousRunExpertise.txt': f"{run_xp:,}",
+                    'BestRunXPToday.txt': f"{best_run_xp_today:,}",
+                    'Top10Horizontal.txt': ', '.join(top_user_names),
+                    'TotalExpertiseToday.txt': f"{total_xp_today:,}",
+                    'TotalDeathsToday.txt': f"{total_deaths_today:,}",
+                    'TotalExpertise.txt': f"{lifetime_expertise:,}"
+                })
+                output_dir = get_tilt_output_directory()
+                with open(os.path.join(output_dir, 'Top10Today.txt'), 'w', encoding='utf-8', errors='ignore') as fp:
+                    for name in top_user_names:
+                        fp.write(f"{name}\n")
+
+                last_run_summary = {
+                    'run_id': run_id,
+                    'run_short_id': run_id[:6] if run_id else '',
+                    'ended_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    'ended_level': current_level,
+                    'elapsed_time': elapsed_time,
+                    'top_tiltee': top_tiltee,
+                    'leader': {'name': top_user_names[0], 'points': int(top_users_today[0][1])} if top_users_today else None,
+                    'run_points': run_points,
+                    'run_xp': run_xp,
+                    'best_run_xp_today': best_run_xp_today,
+                    'total_xp_today': total_xp_today,
+                    'total_deaths_today': total_deaths_today,
+                    'standings': [{'name': name, 'points': int(points)} for name, points in top_users_today],
+                }
+                config.set_setting('tilt_last_run_summary', json.dumps(last_run_summary), persistent=False)
+
+                config.set_setting('tilt_previous_run_xp', str(run_xp), persistent=False)
+                config.set_setting('tilt_current_run_id', '', persistent=False)
+                config.set_setting('tilt_run_xp', '0', persistent=False)
+                config.set_setting('tilt_run_points', '0', persistent=False)
+                config.set_setting('tilt_run_ledger', '{}', persistent=False)
+                run_id = None
+
+            last_modified_tilt = current_modified_tilt
+        except Exception as e:
+            print(f"An error occurred while processing the tilt file: {e}")
 
         await asyncio.sleep(7)
 
