@@ -3813,6 +3813,9 @@ def startup(text_widget):
 
     timestamp, timestampMDY, timestampHMS, adjusted_time = time_manager.get_adjusted_time()
 
+    if config.get_setting('new_season') == 'True':
+        reset_season_stats()
+
     if config.get_setting('marble_day') != timestampMDY:
         reset()
 
