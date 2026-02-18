@@ -10,15 +10,21 @@
 
 * { box-sizing: border-box; }
 
+html, body {
+  height: 100%;
+}
+
 body {
   margin: 0;
   background: transparent;
   color: var(--text);
   font-family: Segoe UI, Arial, sans-serif;
+  overflow: hidden;
 }
 
 .card {
   width: min(640px, 95vw);
+  height: calc(100vh - 28px);
   margin: 14px;
   padding: 14px;
   border-radius: 18px;
@@ -26,6 +32,8 @@ body {
   border: 1px solid var(--line);
   box-shadow: 0 18px 44px rgba(0, 0, 0, 0.45);
   backdrop-filter: blur(4px);
+  display: flex;
+  flex-direction: column;
 }
 
 h1 {
@@ -63,6 +71,10 @@ h1 {
   border: 1px solid rgba(255, 255, 255, 0.14);
   background: rgba(255, 255, 255, 0.04);
   padding: 8px;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .board-title {
@@ -79,10 +91,22 @@ h1 {
 
 #leaderboard {
   list-style: none;
-  padding: 0;
+  padding: 0 3px 0 0;
   margin: 0;
   display: grid;
   gap: 8px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+#leaderboard::-webkit-scrollbar {
+  width: 6px;
+}
+
+#leaderboard::-webkit-scrollbar-thumb {
+  background: rgba(127, 216, 255, 0.45);
+  border-radius: 10px;
 }
 
 #leaderboard li {
@@ -124,6 +148,7 @@ body.compact-rows #leaderboard li {
 @media (max-width: 560px) {
   .card {
     width: calc(100vw - 12px);
+    height: calc(100vh - 12px);
     margin: 6px;
     padding: 10px;
     border-radius: 14px;
@@ -150,7 +175,7 @@ body.compact-rows #leaderboard li {
 }
 
 @media (max-height: 420px) {
-  .card { padding: 8px; }
+  .card { padding: 8px; height: calc(100vh - 12px); }
   h1 { font-size: calc(1.05rem * var(--text-scale)); }
   .pill { font-size: calc(0.62rem * var(--text-scale)); padding: 2px 5px; }
   #leaderboard { gap: 4px; }
