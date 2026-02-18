@@ -104,6 +104,7 @@ function clearCycleRestartTimer() {
 function showLeaderboardView() {
   if (boardShell) boardShell.classList.remove('is-hidden');
   document.body.classList.remove('top3-active');
+  leaderboard?.classList.remove('is-top3-mode');
   if (splashScreen) {
     splashScreen.classList.remove('is-visible');
     splashScreen.setAttribute('aria-hidden', 'true');
@@ -162,6 +163,7 @@ function renderTop3Rows(rows = []) {
 
   const safeRows = rows.slice(0, 3);
   document.body.classList.add('top3-active');
+  leaderboard.classList.add('is-top3-mode');
   leaderboard.scrollTop = 0;
 
   leaderboard.innerHTML = safeRows.map((r, idx) => {
@@ -183,6 +185,7 @@ function showTop3ForTenSeconds(top3View) {
   top3ShowTimeout = setTimeout(() => {
     top3IsShowing = false;
     document.body.classList.remove('top3-active');
+    leaderboard?.classList.remove('is-top3-mode');
     lastRenderedViewsKey = '';
     renderCombinedRows(currentViews);
     ensureLeaderboardAutoScroll();
@@ -253,6 +256,7 @@ function getViewsRenderKey(views) {
 function renderCombinedRows(views) {
   if (!leaderboard) return;
   showLeaderboardView();
+  leaderboard.classList.remove('is-top3-mode');
   sectionAnchors = [];
 
   if (!Array.isArray(views) || !views.length) {
