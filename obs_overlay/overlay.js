@@ -227,7 +227,7 @@ function renderCombinedRows(views) {
   const markup = views.map((view, viewIndex) => {
     const sectionTitle = view.title || 'Top Results';
     const rows = Array.isArray(view.rows) ? view.rows : [];
-    const anchorMarkup = `<li class="leaderboard-anchor" data-section-title="${escapeHtml(sectionTitle)}" aria-hidden="true"></li>`;
+    const sectionTitleMarkup = `<li class="leaderboard-section-title" data-section-title="${escapeHtml(sectionTitle)}">${escapeHtml(sectionTitle)}</li>`;
 
     const rowMarkup = rows.map((r, rowIndex) => {
       const emote = settings.showMedals ? getPlacementEmote(r.placement) : '';
@@ -237,12 +237,12 @@ function renderCombinedRows(views) {
     }).join('');
 
     const gap = viewIndex > 0 ? '<li class="leaderboard-gap" aria-hidden="true"></li>' : '';
-    return `${gap}${anchorMarkup}${rowMarkup}`;
+    return `${gap}${sectionTitleMarkup}${rowMarkup}`;
   }).join('');
 
   leaderboard.innerHTML = markup;
 
-  sectionAnchors = Array.from(leaderboard.querySelectorAll('.leaderboard-anchor')).map((el) => ({
+  sectionAnchors = Array.from(leaderboard.querySelectorAll('.leaderboard-section-title')).map((el) => ({
     title: el.dataset.sectionTitle || 'Top Results',
     offsetTop: el.offsetTop,
   }));
@@ -341,7 +341,7 @@ async function refresh() {
 }
 
 window.addEventListener('resize', () => {
-  sectionAnchors = Array.from(leaderboard?.querySelectorAll('.leaderboard-anchor') || []).map((el) => ({
+  sectionAnchors = Array.from(leaderboard?.querySelectorAll('.leaderboard-section-title') || []).map((el) => ({
     title: el.dataset.sectionTitle || 'Top Results',
     offsetTop: el.offsetTop,
   }));
