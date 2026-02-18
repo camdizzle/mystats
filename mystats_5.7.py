@@ -1339,6 +1339,15 @@ def _parse_overlay_timestamp(value):
         return None
 
 
+def _overlay_now_for_timestamp(race_time):
+    """Return a comparable now() for naive or timezone-aware timestamps."""
+    if race_time is None:
+        return datetime.now()
+    if race_time.tzinfo is None:
+        return datetime.now()
+    return datetime.now(race_time.tzinfo)
+
+
 def _overlay_points_top10(file_paths):
     totals = {}
 
@@ -1440,7 +1449,10 @@ def _overlay_recent_race_payload(race_file):
     race_time = latest_group['parsed_ts']
     is_recent = False
     if race_time:
-        is_recent = (datetime.now() - race_time).total_seconds() <= 600
+        try:
+            is_recent = (_overlay_now_for_timestamp(race_time) - race_time).total_seconds() <= 600
+        except Exception:
+            is_recent = False
 
     return {
         'rows': top10_rows,

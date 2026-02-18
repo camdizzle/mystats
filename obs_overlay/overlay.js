@@ -1,5 +1,14 @@
 const $ = id => document.getElementById(id);
 const leaderboard = $('leaderboard');
+const boardTitle = document.querySelector('.board-title');
+const headerPills = [
+  $('stat-avg-today'),
+  $('stat-uniq-today'),
+  $('stat-races-today'),
+  $('stat-avg-season'),
+  $('stat-uniq-season'),
+  $('stat-races-season'),
+];
 const fmt = n => new Intl.NumberFormat().format(n || 0);
 
 const defaultSettings = {
@@ -28,6 +37,7 @@ let currentViews = [];
 let lastRaceKey = null;
 let top3ShowTimeout = null;
 let top3IsShowing = false;
+let activePillPage = 0;
 
 function clampNumber(value, min, max, fallback) {
   const num = Number(value);
@@ -49,6 +59,25 @@ function updateHeaderStats(s = {}) {
   $('stat-avg-season').textContent = `Avg Pts Season: ${fmt(s.avg_points_season)}`;
   $('stat-uniq-season').textContent = `Unique Racers Season: ${fmt(s.unique_racers_season)}`;
   $('stat-races-season').textContent = `Total Races Season: ${fmt(s.total_races_season)}`;
+  renderPillPage();
+}
+
+
+function renderPillPage() {
+  const pillPageSize = 3;
+  headerPills.forEach((pill, idx) => {
+    if (!pill) return;
+    const start = activePillPage * pillPageSize;
+    const end = start + pillPageSize;
+    pill.style.display = idx >= start && idx < end ? 'block' : 'none';
+  });
+}
+
+function rotatePills() {
+  const totalPages = Math.max(1, Math.ceil(headerPills.length / 3));
+  if (totalPages <= 1) return;
+  activePillPage = (activePillPage + 1) % totalPages;
+  renderPillPage();
 }
 
 function renderRows(rows) {
@@ -66,7 +95,7 @@ function renderRows(rows) {
 
 function renderCurrentView() {
   if (!currentViews.length) {
-    $('.board-title').textContent = 'Top Results';
+    if (boardTitle) boardTitle.textContent = 'Top Results';
     renderRows([]);
     return;
   }
@@ -74,14 +103,16 @@ function renderCurrentView() {
   const safeIndex = Math.min(activeViewIndex, currentViews.length - 1);
   activeViewIndex = safeIndex;
   const view = currentViews[safeIndex];
-  $('.board-title').textContent = view.title || 'Top Results';
+  if (boardTitle) boardTitle.textContent = view.title || 'Top Results';
   renderRows(view.rows || []);
 }
 
 function rotateView() {
-  if (top3IsShowing || currentViews.length <= 1) return;
-  activeViewIndex = (activeViewIndex + 1) % currentViews.length;
-  renderCurrentView();
+  if (!top3IsShowing && currentViews.length > 1) {
+    activeViewIndex = (activeViewIndex + 1) % currentViews.length;
+    renderCurrentView();
+  }
+  rotatePills();
 }
 
 function startRotationTimer() {
@@ -100,7 +131,7 @@ function showTop3ForTenSeconds(top3View) {
   top3IsShowing = true;
   if (top3ShowTimeout) clearTimeout(top3ShowTimeout);
 
-  $('.board-title').textContent = top3View.title || 'Top 3 Latest Race';
+  if (boardTitle) boardTitle.textContent = top3View.title || 'Top 3 Latest Race';
   renderRows(top3View.rows);
 
   top3ShowTimeout = setTimeout(() => {
@@ -180,6 +211,7 @@ async function refresh() {
   }
 }
 
+renderPillPage();
 refresh();
 startRefreshTimer();
 startRotationTimer();
