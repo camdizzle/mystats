@@ -139,19 +139,6 @@ h1 {
 
 #leaderboard li.leaderboard-row > span:last-child {
   color: var(--accent);
-}
-
-#leaderboard .leaderboard-section {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  padding: 6px 10px;
-  border-radius: 8px;
-  font-size: calc(0.92rem * var(--text-scale));
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--accent);
   background: rgba(3, 10, 28, 0.92);
   border: 1px solid rgba(127, 216, 255, 0.2);
 }
@@ -161,6 +148,23 @@ h1 {
   padding: 0;
   border: 0;
   background: transparent;
+}
+
+
+#leaderboard .leaderboard-gap {
+  height: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+#leaderboard .leaderboard-anchor {
+  height: 0;
+  min-height: 0;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  overflow: hidden;
 }
 
 body.top3-active .board-shell {
