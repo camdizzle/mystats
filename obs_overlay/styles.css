@@ -40,6 +40,7 @@ h1 {
   margin: 0 0 4px;
   font-size: calc(2rem * var(--text-scale));
   line-height: 1.15;
+  text-align: center;
 }
 
 .header-stats {
@@ -120,6 +121,7 @@ h1 {
   color: var(--accent);
   background: rgba(3, 10, 28, 0.92);
   border: 1px solid rgba(127, 216, 255, 0.2);
+  text-align: center;
 }
 
 #leaderboard {
@@ -159,6 +161,7 @@ h1 {
   color: var(--accent);
   background: rgba(3, 10, 28, 0.92);
   border: 1px solid rgba(127, 216, 255, 0.2);
+  text-align: center;
 }
 
 #leaderboard li.leaderboard-row {
@@ -218,55 +221,81 @@ body.top3-active .board-title {
 }
 
 
-body.top3-active #leaderboard li.leaderboard-section-title {
+body.top3-active #leaderboard li.leaderboard-section-title,
+#leaderboard.is-top3-mode li.leaderboard-section-title {
   color: #ffe6a8;
   border-color: rgba(255, 207, 107, 0.4);
   background: linear-gradient(120deg, rgba(70, 35, 5, 0.92), rgba(30, 13, 2, 0.92));
 }
 
-body.top3-active #leaderboard {
+body.top3-active #leaderboard,
+#leaderboard.is-top3-mode {
   overflow: hidden;
-  gap: 10px;
+  gap: 12px;
+  align-content: center;
+  padding: 6px 4px;
 }
 
-body.top3-active #leaderboard li.top3-card {
+body.top3-active #leaderboard li.top3-card,
+#leaderboard.is-top3-mode li.top3-card {
+  display: grid;
   grid-template-columns: 1fr;
-  gap: 4px;
+  justify-items: center;
+  gap: 8px;
   text-align: center;
-  padding: 12px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  background: linear-gradient(160deg, rgba(255,255,255,0.14), rgba(255,255,255,0.06));
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.06), 0 10px 20px rgba(0, 0, 0, 0.3);
-  animation: popIn 360ms ease;
+  padding: 14px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 14px;
+  background: linear-gradient(165deg, rgba(255,255,255,0.16), rgba(255,255,255,0.05));
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08), 0 14px 26px rgba(0, 0, 0, 0.34);
+  animation: popIn 420ms cubic-bezier(0.2, 0.7, 0.2, 1);
 }
 
-body.top3-active #leaderboard li.top3-card--1 {
-  border-color: rgba(246, 211, 95, 0.7);
-  background: linear-gradient(160deg, rgba(246, 211, 95, 0.25), rgba(255,255,255,0.08));
+body.top3-active #leaderboard li.top3-card--1,
+#leaderboard.is-top3-mode li.top3-card--1 {
+  border-color: rgba(246, 211, 95, 0.85);
+  background: linear-gradient(165deg, rgba(246, 211, 95, 0.34), rgba(255,255,255,0.1));
+  box-shadow: inset 0 0 0 1px rgba(255, 236, 172, 0.3), 0 0 24px rgba(246, 211, 95, 0.28), 0 14px 28px rgba(0, 0, 0, 0.34);
 }
 
-body.top3-active #leaderboard li.top3-card--2 {
-  border-color: rgba(207, 218, 245, 0.6);
+body.top3-active #leaderboard li.top3-card--2,
+#leaderboard.is-top3-mode li.top3-card--2 {
+  border-color: rgba(207, 218, 245, 0.7);
+  background: linear-gradient(165deg, rgba(207, 218, 245, 0.3), rgba(255,255,255,0.06));
 }
 
-body.top3-active #leaderboard li.top3-card--3 {
-  border-color: rgba(242, 173, 115, 0.6);
+body.top3-active #leaderboard li.top3-card--3,
+#leaderboard.is-top3-mode li.top3-card--3 {
+  border-color: rgba(242, 173, 115, 0.72);
+  background: linear-gradient(165deg, rgba(242, 173, 115, 0.28), rgba(255,255,255,0.06));
 }
 
-body.top3-active .top3-rank {
-  font-size: calc(1.1rem * var(--text-scale));
-  letter-spacing: 0.04em;
+body.top3-active .top3-rank,
+#leaderboard.is-top3-mode .top3-rank {
+  font-size: calc(1.2rem * var(--text-scale));
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
   color: #ffe8a8;
+  text-align: center;
 }
 
-body.top3-active .top3-name {
-  font-size: calc(1.28rem * var(--text-scale));
+body.top3-active .top3-name,
+#leaderboard.is-top3-mode .top3-name {
+  font-size: calc(1.45rem * var(--text-scale));
   font-weight: 800;
-  text-shadow: 0 0 18px rgba(127, 216, 255, 0.45);
+  line-height: 1.1;
+  text-shadow: 0 0 18px rgba(127, 216, 255, 0.45), 0 3px 10px rgba(0, 0, 0, 0.35);
 }
 
-body.top3-active .top3-points {
-  font-size: calc(1.05rem * var(--text-scale));
+body.top3-active .top3-points,
+#leaderboard.is-top3-mode .top3-points {
+  font-size: calc(1.08rem * var(--text-scale));
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(3, 10, 28, 0.56);
+  border: 1px solid rgba(127, 216, 255, 0.25);
   color: var(--accent);
 }
 
@@ -318,7 +347,8 @@ body.compact-rows #leaderboard li.leaderboard-row {
 
   #leaderboard li.leaderboard-row > span:first-child { padding: 5px 0; border-radius: 8px; }
 
-  body.top3-active .top3-name {
+  body.top3-active .top3-name,
+#leaderboard.is-top3-mode .top3-name {
     font-size: calc(1.05rem * var(--text-scale));
   }
 }
