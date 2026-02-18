@@ -1367,27 +1367,49 @@ def _overlay_points_top10(file_paths):
     ]
 
 
-def _overlay_recent_race_payload(today_file):
-    if not today_file:
+def _overlay_data_sources(data_dir):
+    season_files = sorted(glob.glob(os.path.join(data_dir, 'allraces_*.csv')))
+    today_file = config.get_setting('allraces_file')
+
+    if today_file and os.path.isfile(today_file):
+        if today_file not in season_files:
+            season_files.append(today_file)
+        return season_files, today_file
+
+    latest_file = _find_latest_overlay_results_file(data_dir)
+    if latest_file and os.path.isfile(latest_file):
+        if latest_file not in season_files:
+            season_files.append(latest_file)
+        return season_files, latest_file
+
+    return season_files, None
+
+
+def _overlay_recent_race_payload(race_file):
+    if not race_file:
         return {'rows': [], 'top3_rows': [], 'race_key': None, 'race_type': None, 'race_timestamp': None, 'is_recent': False}
 
     race_groups = []
     groups_by_key = {}
 
     try:
-        with open(today_file, 'r', encoding='utf-8', errors='ignore') as f:
+        with open(race_file, 'r', encoding='utf-8', errors='ignore') as f:
             for row in csv.reader(f):
                 if len(row) < 6:
                     continue
 
-                placement = _safe_int(row[0])
+                placement_text = (row[0] or '').strip()
+                placement_digits = ''.join(ch for ch in placement_text if ch.isdigit())
+                placement = _safe_int(placement_digits)
                 if placement <= 0:
                     continue
 
                 race_id = (row[10] if len(row) >= 11 else '').strip()
                 race_timestamp = (row[5] or '').strip()
                 race_type = (row[4] or '').strip()
-                race_key = f"{race_id}|{race_timestamp}|{race_type}"
+                race_key = f"{race_id}|{race_timestamp}|{race_type}".strip('|')
+                if not race_key:
+                    race_key = race_timestamp or race_type or f"race-{len(race_groups) + 1}"
 
                 if race_key not in groups_by_key:
                     groups_by_key[race_key] = {
@@ -1432,8 +1454,7 @@ def _overlay_recent_race_payload(today_file):
 
 def _build_overlay_top3_payload():
     data_dir = config.get_setting('directory') or os.getcwd()
-    season_files = glob.glob(os.path.join(data_dir, 'allraces_*.csv'))
-    today_file = config.get_setting('allraces_file')
+    season_files, today_file = _overlay_data_sources(data_dir)
     recent_race = _overlay_recent_race_payload(today_file)
 
     views = [
