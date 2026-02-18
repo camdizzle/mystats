@@ -110,6 +110,10 @@ h1 {
 }
 
 #leaderboard li {
+  list-style: none;
+}
+
+#leaderboard li.leaderboard-row {
   display: grid;
   grid-template-columns: 56px 1fr auto;
   gap: 10px;
@@ -122,19 +126,41 @@ h1 {
   font-weight: 700;
 }
 
-#leaderboard li > span:first-child {
+#leaderboard li.leaderboard-row > span:first-child {
   text-align: center;
   border-radius: 10px;
   padding: 7px 0;
   background: rgba(0, 0, 0, 0.24);
 }
 
-#leaderboard li:nth-child(1) > span:first-child { background: #f6d35f; color: #231500; }
-#leaderboard li:nth-child(2) > span:first-child { background: #cfdaf5; color: #182448; }
-#leaderboard li:nth-child(3) > span:first-child { background: #f2ad73; color: #3a1600; }
+#leaderboard li.leaderboard-row--podium-1 > span:first-child { background: #f6d35f; color: #231500; }
+#leaderboard li.leaderboard-row--podium-2 > span:first-child { background: #cfdaf5; color: #182448; }
+#leaderboard li.leaderboard-row--podium-3 > span:first-child { background: #f2ad73; color: #3a1600; }
 
-#leaderboard li > span:last-child {
+#leaderboard li.leaderboard-row > span:last-child {
   color: var(--accent);
+}
+
+#leaderboard .leaderboard-section {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: calc(0.92rem * var(--text-scale));
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: rgba(3, 10, 28, 0.92);
+  border: 1px solid rgba(127, 216, 255, 0.2);
+}
+
+#leaderboard .leaderboard-gap {
+  height: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
 }
 
 body.top3-active .board-shell {
@@ -209,7 +235,7 @@ body.compact-rows #leaderboard {
   gap: 4px;
 }
 
-body.compact-rows #leaderboard li {
+body.compact-rows #leaderboard li.leaderboard-row {
   padding: 6px 8px;
 }
 
@@ -231,7 +257,7 @@ body.compact-rows #leaderboard li {
   .board-title { font-size: calc(0.82rem * var(--text-scale)); padding: 6px 8px; margin-bottom: 6px; }
 
   #leaderboard { gap: 6px; }
-  #leaderboard li {
+  #leaderboard li.leaderboard-row {
     grid-template-columns: 42px 1fr auto;
     gap: 8px;
     padding: 7px 8px;
@@ -239,7 +265,7 @@ body.compact-rows #leaderboard li {
     border-radius: 10px;
   }
 
-  #leaderboard li > span:first-child { padding: 5px 0; border-radius: 8px; }
+  #leaderboard li.leaderboard-row > span:first-child { padding: 5px 0; border-radius: 8px; }
 
   body.top3-active .top3-name {
     font-size: calc(1.05rem * var(--text-scale));
@@ -251,5 +277,5 @@ body.compact-rows #leaderboard li {
   h1 { font-size: calc(1.05rem * var(--text-scale)); }
   .pill { font-size: calc(0.62rem * var(--text-scale)); padding: 2px 5px; }
   #leaderboard { gap: 4px; }
-  #leaderboard li { padding: 5px 7px; }
+  #leaderboard li.leaderboard-row { padding: 5px 7px; }
 }
