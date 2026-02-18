@@ -31,13 +31,17 @@ const themes = {
 
 let settings = { ...defaultSettings };
 let refreshTimer = null;
-let rotationTimer = null;
+let pillRotationTimer = null;
+let viewFallbackTimer = null;
 let activeViewIndex = 0;
 let currentViews = [];
 let lastRaceKey = null;
 let top3ShowTimeout = null;
 let top3IsShowing = false;
 let activePillPage = 0;
+let leaderboardScrollTimer = null;
+let leaderboardScrollDirection = 1;
+let leaderboardScrollPauseUntil = 0;
 
 function clampNumber(value, min, max, fallback) {
   const num = Number(value);
@@ -62,7 +66,6 @@ function updateHeaderStats(s = {}) {
   renderPillPage();
 }
 
-
 function renderPillPage() {
   const pillPageSize = 3;
   headerPills.forEach((pill, idx) => {
@@ -80,9 +83,90 @@ function rotatePills() {
   renderPillPage();
 }
 
+function startPillRotationTimer() {
+  if (pillRotationTimer) clearInterval(pillRotationTimer);
+  pillRotationTimer = setInterval(rotatePills, settings.rotationSeconds * 1000);
+}
+
+function stopViewFallbackTimer() {
+  if (viewFallbackTimer) {
+    clearTimeout(viewFallbackTimer);
+    viewFallbackTimer = null;
+  }
+}
+
+function scheduleViewFallbackAdvance() {
+  stopViewFallbackTimer();
+  if (top3IsShowing || currentViews.length <= 1) return;
+
+  viewFallbackTimer = setTimeout(() => {
+    advanceView();
+  }, settings.rotationSeconds * 1000);
+}
+
+function stopLeaderboardAutoScroll() {
+  if (leaderboardScrollTimer) {
+    clearInterval(leaderboardScrollTimer);
+    leaderboardScrollTimer = null;
+  }
+}
+
+function advanceView() {
+  if (top3IsShowing || currentViews.length <= 1) return;
+  activeViewIndex = (activeViewIndex + 1) % currentViews.length;
+  renderCurrentView();
+}
+
+function startLeaderboardAutoScroll() {
+  stopLeaderboardAutoScroll();
+  stopViewFallbackTimer();
+
+  if (!leaderboard) return;
+  const maxScrollTop = leaderboard.scrollHeight - leaderboard.clientHeight;
+  if (maxScrollTop <= 2) {
+    leaderboard.scrollTop = 0;
+    scheduleViewFallbackAdvance();
+    return;
+  }
+
+  leaderboard.scrollTop = 0;
+  leaderboardScrollDirection = 1;
+  leaderboardScrollPauseUntil = Date.now() + 1200;
+
+  leaderboardScrollTimer = setInterval(() => {
+    const currentMax = leaderboard.scrollHeight - leaderboard.clientHeight;
+    if (currentMax <= 2) {
+      stopLeaderboardAutoScroll();
+      leaderboard.scrollTop = 0;
+      scheduleViewFallbackAdvance();
+      return;
+    }
+
+    const now = Date.now();
+    if (now < leaderboardScrollPauseUntil) return;
+
+    leaderboard.scrollTop += leaderboardScrollDirection * 1.4;
+
+    if (leaderboard.scrollTop >= currentMax - 1) {
+      leaderboard.scrollTop = currentMax;
+      leaderboardScrollDirection = -1;
+      leaderboardScrollPauseUntil = now + 1200;
+      return;
+    }
+
+    if (leaderboard.scrollTop <= 1) {
+      leaderboard.scrollTop = 0;
+      leaderboardScrollPauseUntil = now + 900;
+      advanceView();
+    }
+  }, 32);
+}
+
 function renderRows(rows) {
   if (!rows?.length) {
     leaderboard.innerHTML = '<li>No race data yet.</li>';
+    stopLeaderboardAutoScroll();
+    stopViewFallbackTimer();
     return;
   }
 
@@ -91,6 +175,7 @@ function renderRows(rows) {
     const decoratedName = emote ? `${emote} ${r.name}` : r.name;
     return `<li><span>#${r.placement}</span><span>${decoratedName}</span><span>${fmt(r.points)} pts</span></li>`;
   }).join('');
+  startLeaderboardAutoScroll();
 }
 
 function renderCurrentView() {
@@ -107,19 +192,6 @@ function renderCurrentView() {
   renderRows(view.rows || []);
 }
 
-function rotateView() {
-  if (!top3IsShowing && currentViews.length > 1) {
-    activeViewIndex = (activeViewIndex + 1) % currentViews.length;
-    renderCurrentView();
-  }
-  rotatePills();
-}
-
-function startRotationTimer() {
-  if (rotationTimer) clearInterval(rotationTimer);
-  rotationTimer = setInterval(rotateView, settings.rotationSeconds * 1000);
-}
-
 function startRefreshTimer() {
   if (refreshTimer) clearInterval(refreshTimer);
   refreshTimer = setInterval(refresh, settings.refreshSeconds * 1000);
@@ -129,6 +201,7 @@ function showTop3ForTenSeconds(top3View) {
   if (!top3View?.rows?.length) return;
 
   top3IsShowing = true;
+  stopViewFallbackTimer();
   if (top3ShowTimeout) clearTimeout(top3ShowTimeout);
 
   if (boardTitle) boardTitle.textContent = top3View.title || 'Top 3 Latest Race';
@@ -168,7 +241,10 @@ function applyServerSettings(raw = {}) {
 
   settings = next;
   applyTheme();
-  if (rotationChanged) startRotationTimer();
+  if (rotationChanged) {
+    startPillRotationTimer();
+    scheduleViewFallbackAdvance();
+  }
   if (refreshChanged) startRefreshTimer();
 }
 
@@ -211,7 +287,9 @@ async function refresh() {
   }
 }
 
+window.addEventListener('resize', startLeaderboardAutoScroll);
+
 renderPillPage();
 refresh();
 startRefreshTimer();
-startRotationTimer();
+startPillRotationTimer();

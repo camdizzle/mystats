@@ -79,10 +79,21 @@ h1 {
 
 #leaderboard {
   list-style: none;
-  padding: 0;
+  padding: 0 3px 0 0;
   margin: 0;
   display: grid;
   gap: 8px;
+  max-height: min(62vh, 430px);
+  overflow-y: auto;
+}
+
+#leaderboard::-webkit-scrollbar {
+  width: 6px;
+}
+
+#leaderboard::-webkit-scrollbar-thumb {
+  background: rgba(127, 216, 255, 0.45);
+  border-radius: 10px;
 }
 
 #leaderboard li {
