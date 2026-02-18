@@ -1171,6 +1171,12 @@ class PrintRedirector:
         if "Serving Flask app" in message or "Debug mode" in message:
             return  # Ignore these messages
 
+        # Tk widgets are not thread-safe. Flask request logs run from the
+        # Flask thread, so only touch the text widget from the Tk main thread.
+        if threading.current_thread() is not threading.main_thread():
+            sys.__stdout__.write(message)
+            return
+
         if self.widget and self.widget.winfo_exists():
             self.widget.insert(tk.END, message)
             self.widget.see(tk.END)
