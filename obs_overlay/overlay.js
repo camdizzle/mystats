@@ -1,5 +1,14 @@
 const $ = id => document.getElementById(id);
 const leaderboard = $('leaderboard');
+const boardTitle = document.querySelector('.board-title');
+const headerPills = [
+  $('stat-avg-today'),
+  $('stat-uniq-today'),
+  $('stat-races-today'),
+  $('stat-avg-season'),
+  $('stat-uniq-season'),
+  $('stat-races-season'),
+];
 const fmt = n => new Intl.NumberFormat().format(n || 0);
 
 const defaultSettings = {
@@ -22,12 +31,17 @@ const themes = {
 
 let settings = { ...defaultSettings };
 let refreshTimer = null;
-let rotationTimer = null;
+let pillRotationTimer = null;
+let viewFallbackTimer = null;
 let activeViewIndex = 0;
 let currentViews = [];
 let lastRaceKey = null;
 let top3ShowTimeout = null;
 let top3IsShowing = false;
+let activePillPage = 0;
+let leaderboardScrollTimer = null;
+let leaderboardScrollDirection = 1;
+let leaderboardScrollPauseUntil = 0;
 
 function clampNumber(value, min, max, fallback) {
   const num = Number(value);
@@ -49,11 +63,110 @@ function updateHeaderStats(s = {}) {
   $('stat-avg-season').textContent = `Avg Pts Season: ${fmt(s.avg_points_season)}`;
   $('stat-uniq-season').textContent = `Unique Racers Season: ${fmt(s.unique_racers_season)}`;
   $('stat-races-season').textContent = `Total Races Season: ${fmt(s.total_races_season)}`;
+  renderPillPage();
+}
+
+function renderPillPage() {
+  const pillPageSize = 3;
+  headerPills.forEach((pill, idx) => {
+    if (!pill) return;
+    const start = activePillPage * pillPageSize;
+    const end = start + pillPageSize;
+    pill.style.display = idx >= start && idx < end ? 'block' : 'none';
+  });
+}
+
+function rotatePills() {
+  const totalPages = Math.max(1, Math.ceil(headerPills.length / 3));
+  if (totalPages <= 1) return;
+  activePillPage = (activePillPage + 1) % totalPages;
+  renderPillPage();
+}
+
+function startPillRotationTimer() {
+  if (pillRotationTimer) clearInterval(pillRotationTimer);
+  pillRotationTimer = setInterval(rotatePills, settings.rotationSeconds * 1000);
+}
+
+function stopViewFallbackTimer() {
+  if (viewFallbackTimer) {
+    clearTimeout(viewFallbackTimer);
+    viewFallbackTimer = null;
+  }
+}
+
+function scheduleViewFallbackAdvance() {
+  stopViewFallbackTimer();
+  if (top3IsShowing || currentViews.length <= 1) return;
+
+  viewFallbackTimer = setTimeout(() => {
+    advanceView();
+  }, settings.rotationSeconds * 1000);
+}
+
+function stopLeaderboardAutoScroll() {
+  if (leaderboardScrollTimer) {
+    clearInterval(leaderboardScrollTimer);
+    leaderboardScrollTimer = null;
+  }
+}
+
+function advanceView() {
+  if (top3IsShowing || currentViews.length <= 1) return;
+  activeViewIndex = (activeViewIndex + 1) % currentViews.length;
+  renderCurrentView();
+}
+
+function startLeaderboardAutoScroll() {
+  stopLeaderboardAutoScroll();
+  stopViewFallbackTimer();
+
+  if (!leaderboard) return;
+  const maxScrollTop = leaderboard.scrollHeight - leaderboard.clientHeight;
+  if (maxScrollTop <= 2) {
+    leaderboard.scrollTop = 0;
+    scheduleViewFallbackAdvance();
+    return;
+  }
+
+  leaderboard.scrollTop = 0;
+  leaderboardScrollDirection = 1;
+  leaderboardScrollPauseUntil = Date.now() + 1200;
+
+  leaderboardScrollTimer = setInterval(() => {
+    const currentMax = leaderboard.scrollHeight - leaderboard.clientHeight;
+    if (currentMax <= 2) {
+      stopLeaderboardAutoScroll();
+      leaderboard.scrollTop = 0;
+      scheduleViewFallbackAdvance();
+      return;
+    }
+
+    const now = Date.now();
+    if (now < leaderboardScrollPauseUntil) return;
+
+    leaderboard.scrollTop += leaderboardScrollDirection * 1.4;
+
+    if (leaderboard.scrollTop >= currentMax - 1) {
+      leaderboard.scrollTop = currentMax;
+      leaderboardScrollDirection = -1;
+      leaderboardScrollPauseUntil = now + 1200;
+      return;
+    }
+
+    if (leaderboard.scrollTop <= 1) {
+      leaderboard.scrollTop = 0;
+      leaderboardScrollPauseUntil = now + 900;
+      advanceView();
+    }
+  }, 32);
 }
 
 function renderRows(rows) {
   if (!rows?.length) {
     leaderboard.innerHTML = '<li>No race data yet.</li>';
+    stopLeaderboardAutoScroll();
+    stopViewFallbackTimer();
     return;
   }
 
@@ -62,11 +175,12 @@ function renderRows(rows) {
     const decoratedName = emote ? `${emote} ${r.name}` : r.name;
     return `<li><span>#${r.placement}</span><span>${decoratedName}</span><span>${fmt(r.points)} pts</span></li>`;
   }).join('');
+  startLeaderboardAutoScroll();
 }
 
 function renderCurrentView() {
   if (!currentViews.length) {
-    $('.board-title').textContent = 'Top Results';
+    if (boardTitle) boardTitle.textContent = 'Top Results';
     renderRows([]);
     return;
   }
@@ -74,19 +188,8 @@ function renderCurrentView() {
   const safeIndex = Math.min(activeViewIndex, currentViews.length - 1);
   activeViewIndex = safeIndex;
   const view = currentViews[safeIndex];
-  $('.board-title').textContent = view.title || 'Top Results';
+  if (boardTitle) boardTitle.textContent = view.title || 'Top Results';
   renderRows(view.rows || []);
-}
-
-function rotateView() {
-  if (top3IsShowing || currentViews.length <= 1) return;
-  activeViewIndex = (activeViewIndex + 1) % currentViews.length;
-  renderCurrentView();
-}
-
-function startRotationTimer() {
-  if (rotationTimer) clearInterval(rotationTimer);
-  rotationTimer = setInterval(rotateView, settings.rotationSeconds * 1000);
 }
 
 function startRefreshTimer() {
@@ -98,9 +201,10 @@ function showTop3ForTenSeconds(top3View) {
   if (!top3View?.rows?.length) return;
 
   top3IsShowing = true;
+  stopViewFallbackTimer();
   if (top3ShowTimeout) clearTimeout(top3ShowTimeout);
 
-  $('.board-title').textContent = top3View.title || 'Top 3 Latest Race';
+  if (boardTitle) boardTitle.textContent = top3View.title || 'Top 3 Latest Race';
   renderRows(top3View.rows);
 
   top3ShowTimeout = setTimeout(() => {
@@ -137,7 +241,10 @@ function applyServerSettings(raw = {}) {
 
   settings = next;
   applyTheme();
-  if (rotationChanged) startRotationTimer();
+  if (rotationChanged) {
+    startPillRotationTimer();
+    scheduleViewFallbackAdvance();
+  }
   if (refreshChanged) startRefreshTimer();
 }
 
@@ -180,6 +287,9 @@ async function refresh() {
   }
 }
 
+window.addEventListener('resize', startLeaderboardAutoScroll);
+
+renderPillPage();
 refresh();
 startRefreshTimer();
-startRotationTimer();
+startPillRotationTimer();
