@@ -35,6 +35,49 @@ let lastRunCompletionEventId = 0;
 let suppressRunCompletionUntilNewEvent = true;
 let pendingRunCompletionEventId = 0;
 let displayedRunCompletionEventId = 0;
+const overlayStorageKey = 'mystats.tiltOverlay.snapshot.v1';
+
+function saveOverlaySnapshot(payload = {}) {
+  try {
+    const snapshot = {
+      savedAt: Date.now(),
+      title: payload.title || 'MyStats Tilt Run Tracker',
+      current_run: payload.current_run || {},
+      last_run: payload.last_run || {},
+      level_completion: payload.level_completion || {},
+      run_completion: payload.run_completion || {},
+      run_completion_event_id: Math.max(0, Number(payload.run_completion_event_id || 0)),
+      settings: payload.settings || {},
+    };
+    window.localStorage?.setItem(overlayStorageKey, JSON.stringify(snapshot));
+  } catch (error) {
+    // Best-effort cache. Ignore storage failures (private mode / quota).
+  }
+}
+
+function loadOverlaySnapshot() {
+  try {
+    const raw = window.localStorage?.getItem(overlayStorageKey);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+
+    const savedAt = Number(parsed.savedAt || 0);
+    const maxSnapshotAgeMs = 6 * 60 * 60 * 1000;
+    if (!savedAt || Date.now() - savedAt > maxSnapshotAgeMs) return null;
+
+    return parsed;
+  } catch (error) {
+    return null;
+  }
+}
+
+function renderSnapshot(snapshot = {}) {
+  $('overlay-title').textContent = snapshot.title || 'MyStats Tilt Run Tracker';
+  applyTheme(snapshot.settings || {});
+  renderCurrentRun(snapshot.current_run || {});
+  renderLastRun(snapshot.last_run || {});
+}
 
 function setLevelOverlayVisible(isVisible) {
   const levelOverlay = $('level-complete-overlay');
@@ -342,6 +385,7 @@ async function refresh() {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
     const payload = await response.json();
+    saveOverlaySnapshot(payload);
     $('overlay-title').textContent = payload.title || 'MyStats Tilt Run Tracker';
 
     const currentRun = payload.current_run || {};
@@ -409,6 +453,11 @@ async function refresh() {
 function startRefreshTimer() {
   if (refreshTimer) clearInterval(refreshTimer);
   refreshTimer = setInterval(refresh, refreshSeconds * 1000);
+}
+
+const initialSnapshot = loadOverlaySnapshot();
+if (initialSnapshot) {
+  renderSnapshot(initialSnapshot);
 }
 
 refresh();
