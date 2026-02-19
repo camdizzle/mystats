@@ -31,11 +31,7 @@ let lastRunOverlayKey = '';
 let levelOverlayActive = false;
 let runOverlayActive = false;
 let overlayBaselineInitialized = false;
-let priorRunStatus = 'idle';
-let priorRunId = '';
-let runRecapArmed = false;
-let runRecapCandidateRunId = '';
-let hasSeenActiveRunSinceLoad = false;
+let lastRunCompletionEventId = 0;
 
 function getLevelOverlayKey(level = {}) {
   const levelNum = Number(level.level || 0);
@@ -44,10 +40,10 @@ function getLevelOverlayKey(level = {}) {
   return `${levelNum}|${completedAt}`;
 }
 
-function getRunOverlayKey(lastRun = {}) {
-  const hasRun = !!(lastRun && lastRun.run_id && lastRun.ended_at);
+function getRunOverlayKey(runCompletion = {}) {
+  const hasRun = !!(runCompletion && runCompletion.run_id && runCompletion.ended_at);
   if (!hasRun) return '';
-  return `${lastRun.run_id}|${lastRun.ended_at}`;
+  return `${runCompletion.run_id}|${runCompletion.ended_at}`;
 }
 
 function hideRecapOverlays() {
@@ -335,29 +331,18 @@ async function refresh() {
     const currentRun = payload.current_run || {};
     const currentStatus = currentRun.status === 'active' ? 'active' : 'idle';
 
+    const runCompletion = payload.run_completion || {};
+    const runCompletionEventId = Math.max(0, Number(payload.run_completion_event_id || 0));
+
     if (!overlayBaselineInitialized) {
       lastLevelOverlayKey = getLevelOverlayKey(payload.level_completion || {});
-      lastRunOverlayKey = getRunOverlayKey(payload.last_run || {});
-      priorRunStatus = currentStatus;
-      priorRunId = String(currentRun.run_id || '').trim();
-      runRecapArmed = false;
-      runRecapCandidateRunId = '';
-      hasSeenActiveRunSinceLoad = currentStatus === 'active';
+      lastRunOverlayKey = getRunOverlayKey(runCompletion);
+      lastRunCompletionEventId = runCompletionEventId;
       hideRecapOverlays();
       overlayBaselineInitialized = true;
     }
 
     if (currentStatus === 'active') {
-      hasSeenActiveRunSinceLoad = true;
-    }
-
-    if (priorRunStatus === 'active' && currentStatus === 'idle' && hasSeenActiveRunSinceLoad) {
-      runRecapArmed = true;
-      runRecapCandidateRunId = priorRunId;
-    } else if (currentStatus === 'active') {
-      // A new run has started (or resumed). Never let an old run recap linger over active gameplay.
-      runRecapArmed = false;
-      runRecapCandidateRunId = '';
       hideRunCompletionOverlay();
     }
 
@@ -374,30 +359,25 @@ async function refresh() {
     renderLastRun(payload.last_run || {});
     const levelRecapShown = renderLevelCompletionOverlay(payload.level_completion || {});
 
-    const completedRunId = String((payload.last_run || {}).run_id || '').trim();
-    const runIdMatchesCandidate = !runRecapCandidateRunId || completedRunId === runRecapCandidateRunId;
-
-    if (currentStatus === 'idle' && runRecapArmed && runIdMatchesCandidate && !levelRecapShown) {
-      const runRecapShown = renderRunCompletionOverlay(payload.last_run || {});
+    const hasNewRunCompletionEvent = runCompletionEventId > lastRunCompletionEventId;
+    if (currentStatus === 'idle' && hasNewRunCompletionEvent && !levelRecapShown) {
+      const runRecapShown = renderRunCompletionOverlay(runCompletion);
       if (runRecapShown) {
-        runRecapArmed = false;
-        runRecapCandidateRunId = '';
+        lastRunCompletionEventId = runCompletionEventId;
       }
+    } else if (hasNewRunCompletionEvent && levelRecapShown) {
+      // Preserve the event while level recap is visible and show run recap on the next refresh.
+      // Intentionally do not advance lastRunCompletionEventId here.
+    } else if (!hasNewRunCompletionEvent && runCompletionEventId > 0) {
+      lastRunCompletionEventId = runCompletionEventId;
     }
-
-    priorRunStatus = currentStatus;
-    priorRunId = String(currentRun.run_id || '').trim();
 
   } catch (e) {
     $('run-status').textContent = 'Status: Unavailable';
     $('last-run-summary').textContent = 'Unable to load tilt overlay data from /api/overlay/tilt.';
     hideRecapOverlays();
     overlayBaselineInitialized = false;
-    priorRunStatus = 'idle';
-    priorRunId = '';
-    runRecapArmed = false;
-    runRecapCandidateRunId = '';
-    hasSeenActiveRunSinceLoad = false;
+    lastRunCompletionEventId = 0;
     updateTrackerVisibility();
   }
 }
