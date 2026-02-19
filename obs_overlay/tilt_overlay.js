@@ -32,6 +32,7 @@ let levelOverlayActive = false;
 let runOverlayActive = false;
 let overlayBaselineInitialized = false;
 let lastRunCompletionEventId = 0;
+let suppressRunCompletionUntilNewEvent = true;
 
 function getLevelOverlayKey(level = {}) {
   const levelNum = Number(level.level || 0);
@@ -338,6 +339,7 @@ async function refresh() {
       lastLevelOverlayKey = getLevelOverlayKey(payload.level_completion || {});
       lastRunOverlayKey = getRunOverlayKey(runCompletion);
       lastRunCompletionEventId = runCompletionEventId;
+      suppressRunCompletionUntilNewEvent = true;
       hideRecapOverlays();
       overlayBaselineInitialized = true;
     }
@@ -360,7 +362,11 @@ async function refresh() {
     const levelRecapShown = renderLevelCompletionOverlay(payload.level_completion || {});
 
     const hasNewRunCompletionEvent = runCompletionEventId > lastRunCompletionEventId;
-    if (currentStatus === 'idle' && hasNewRunCompletionEvent && !levelRecapShown) {
+    if (hasNewRunCompletionEvent) {
+      suppressRunCompletionUntilNewEvent = false;
+    }
+
+    if (currentStatus === 'idle' && !suppressRunCompletionUntilNewEvent && hasNewRunCompletionEvent && !levelRecapShown) {
       const runRecapShown = renderRunCompletionOverlay(runCompletion);
       if (runRecapShown) {
         lastRunCompletionEventId = runCompletionEventId;
@@ -376,8 +382,7 @@ async function refresh() {
     $('run-status').textContent = 'Status: Unavailable';
     $('last-run-summary').textContent = 'Unable to load tilt overlay data from /api/overlay/tilt.';
     hideRecapOverlays();
-    overlayBaselineInitialized = false;
-    lastRunCompletionEventId = 0;
+    // Keep baseline/event memory across transient fetch errors so historical run-complete events are not retriggered.
     updateTrackerVisibility();
   }
 }
