@@ -71,7 +71,17 @@ function stopAutoScroll(listId) {
 
 function updateTrackerVisibility() {
   const tracker = $('tilt-tracker-card');
-  const showingRecap = levelOverlayActive || runOverlayActive;
+  const levelOverlay = $('level-complete-overlay');
+  const runOverlay = $('run-complete-overlay');
+
+  // Keep state resilient if markup starts hidden or another code path hides an overlay.
+  if (!levelOverlay || levelOverlay.hidden) levelOverlayActive = false;
+  if (!runOverlay || runOverlay.hidden) runOverlayActive = false;
+
+  const showingRecap =
+    (levelOverlayActive && !!levelOverlay && !levelOverlay.hidden)
+    || (runOverlayActive && !!runOverlay && !runOverlay.hidden);
+
   if (tracker) tracker.hidden = showingRecap;
   document.body?.setAttribute('data-overlay-mode', showingRecap ? 'recap' : 'tracker');
 }
@@ -366,3 +376,6 @@ function startRefreshTimer() {
 
 refresh();
 startRefreshTimer();
+
+// Ensure recap overlays are hidden before the first payload is processed.
+hideRecapOverlays();
