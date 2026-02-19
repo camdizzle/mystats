@@ -32,6 +32,7 @@ let levelOverlaySeen = false;
 let runOverlaySeen = false;
 let levelOverlayActive = false;
 let runOverlayActive = false;
+let isFirstRefresh = true;
 
 function stopAutoScroll(listId) {
   const timerId = autoScrollTimers.get(listId);
@@ -43,8 +44,9 @@ function stopAutoScroll(listId) {
 
 function updateTrackerVisibility() {
   const tracker = $('tilt-tracker-card');
-  if (!tracker) return;
-  tracker.hidden = levelOverlayActive || runOverlayActive;
+  const showingRecap = levelOverlayActive || runOverlayActive;
+  if (tracker) tracker.hidden = showingRecap;
+  document.body?.setAttribute('data-overlay-mode', showingRecap ? 'recap' : 'tracker');
 }
 
 function startAutoScroll(listId) {
@@ -281,6 +283,7 @@ function renderRunCompletionOverlay(lastRun = {}) {
   runOverlayHideTimer = setTimeout(() => {
     host.hidden = true;
     runOverlayActive = false;
+    isFirstRefresh = false;
     updateTrackerVisibility();
   }, 15000);
 }
@@ -292,6 +295,19 @@ async function refresh() {
 
     const payload = await response.json();
     $('overlay-title').textContent = payload.title || 'MyStats Tilt Run Tracker';
+
+    if (isFirstRefresh && payload.suppress_initial_recaps) {
+      const initialLevel = payload.level_completion || {};
+      const initialRun = payload.last_run || {};
+      if (initialLevel.level && initialLevel.completed_at) {
+        lastLevelOverlayKey = `${initialLevel.level}|${initialLevel.completed_at}`;
+        levelOverlaySeen = true;
+      }
+      if (initialRun.run_id && initialRun.ended_at) {
+        lastRunOverlayKey = `${initialRun.run_id}|${initialRun.ended_at}`;
+        runOverlaySeen = true;
+      }
+    }
 
     applyTheme(payload.settings || {});
 
@@ -306,6 +322,7 @@ async function refresh() {
     renderLastRun(payload.last_run || {});
     renderLevelCompletionOverlay(payload.level_completion || {});
     renderRunCompletionOverlay(payload.last_run || {});
+    isFirstRefresh = false;
   } catch (e) {
     $('run-status').textContent = 'Status: Unavailable';
     $('last-run-summary').textContent = 'Unable to load tilt overlay data from /api/overlay/tilt.';
@@ -315,6 +332,7 @@ async function refresh() {
     if (runOverlay) runOverlay.hidden = true;
     levelOverlayActive = false;
     runOverlayActive = false;
+    isFirstRefresh = false;
     updateTrackerVisibility();
   }
 }

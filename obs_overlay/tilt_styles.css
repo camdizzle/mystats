@@ -386,3 +386,8 @@ h1 {
 .overlay-metric strong {
   font-size: calc(0.95rem * var(--text-scale));
 }
+
+
+body[data-overlay-mode='recap'] #tilt-tracker-card {
+  visibility: hidden;
+}

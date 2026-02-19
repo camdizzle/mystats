@@ -1710,6 +1710,7 @@ def _build_tilt_overlay_payload():
         'current_run': current_summary,
         'last_run': last_run_summary,
         'level_completion': level_completion,
+        'suppress_initial_recaps': True,
     }
     return payload
 
