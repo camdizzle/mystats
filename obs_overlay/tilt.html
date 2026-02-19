@@ -7,12 +7,12 @@
   <title>Tilt Overlay</title>
 </head>
 <body>
-  <main class='card'>
+  <main id='tilt-tracker-card' class='card'>
     <h1 id='overlay-title'>MyStats Tilt Run Tracker</h1>
 
     <section class='status-bar'>
       <span id='run-status' class='pill'>Status: Idle</span>
-      <span id='run-id' class='pill'>Run: -</span>
+      <span id='top-tiltee-pill' class='pill'>Top Tiltee: None</span>
       <span id='run-level' class='pill'>Level: 0</span>
       <span id='run-elapsed' class='pill'>Elapsed: 0:00</span>
     </section>
@@ -43,11 +43,23 @@
     <section class='panel last-run'>
       <h2>Last Completed Run</h2>
       <div id='last-run-summary' class='summary'>No completed tilt run yet.</div>
-      <ol id='last-run-standings' class='standings'>
-        <li>Waiting for first completed run.</li>
-      </ol>
     </section>
   </main>
+
+  <aside id='level-complete-overlay' class='level-overlay' aria-live='polite' hidden>
+    <div class='level-overlay__burst'>🎉 LEVEL CLEARED 🎉</div>
+    <div id='level-complete-title' class='level-overlay__title'>Level Complete</div>
+    <div id='level-complete-subtitle' class='level-overlay__subtitle'>Round recap</div>
+    <div id='level-complete-stats' class='level-overlay__stats'></div>
+  </aside>
+
+  <aside id='run-complete-overlay' class='run-overlay' aria-live='polite' hidden>
+    <div class='run-overlay__burst'>🏁 RUN COMPLETE 🏁</div>
+    <div id='run-complete-title' class='run-overlay__title'>Tilt Run Recap</div>
+    <div id='run-complete-subtitle' class='run-overlay__subtitle'>Top 3 finishers</div>
+    <ol id='run-complete-top3' class='run-overlay__top3'></ol>
+    <div id='run-complete-stats' class='run-overlay__stats'></div>
+  </aside>
 
   <script src='/overlay/tilt_overlay.js'></script>
 </body>

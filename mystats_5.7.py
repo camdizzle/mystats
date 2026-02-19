@@ -1452,6 +1452,10 @@ def _build_overlay_settings_payload():
         'text_scale': _safe_int(config.get_setting('overlay_text_scale') or 100) or 100,
         'show_medals': str(config.get_setting('overlay_show_medals') or 'True'),
         'compact_rows': str(config.get_setting('overlay_compact_rows') or 'False'),
+        'tilt_theme': (config.get_setting('tilt_overlay_theme') or config.get_setting('overlay_theme') or 'midnight').strip().lower(),
+        'tilt_scroll_step_px': _safe_int(config.get_setting('tilt_scroll_step_px') or 1) or 1,
+        'tilt_scroll_interval_ms': _safe_int(config.get_setting('tilt_scroll_interval_ms') or 40) or 40,
+        'tilt_scroll_pause_ms': _safe_int(config.get_setting('tilt_scroll_pause_ms') or 900) or 900,
     }
 
 
@@ -1669,6 +1673,8 @@ def _build_tilt_overlay_payload():
     current_elapsed = str(config.get_setting('tilt_current_elapsed') or '0:00')
     current_top_tiltee = str(config.get_setting('tilt_current_top_tiltee') or 'None')
 
+    lifetime_base_xp = get_int_setting('tilt_lifetime_base_xp', 0)
+
     current_summary = {
         'run_id': current_run_id,
         'run_short_id': current_run_id[:6] if current_run_id else '',
@@ -1681,21 +1687,29 @@ def _build_tilt_overlay_payload():
         'best_run_xp_today': get_int_setting('tilt_best_run_xp_today', 0),
         'total_xp_today': get_int_setting('tilt_total_xp_today', 0),
         'total_deaths_today': get_int_setting('tilt_total_deaths_today', 0),
-        'lifetime_expertise': get_int_setting('tilt_lifetime_expertise', 0),
+        'lifetime_expertise': get_int_setting('tilt_lifetime_expertise', 0) + lifetime_base_xp,
         'leader': {'name': sorted_run[0][0], 'points': sorted_run[0][1]} if sorted_run else None,
-        'standings': [{'name': name, 'points': points} for name, points in sorted_run[:10]],
+        'standings': [{'name': name, 'points': points} for name, points in sorted_run],
     }
 
     last_run_summary = parse_json_setting('tilt_last_run_summary', {})
     if not isinstance(last_run_summary, dict):
         last_run_summary = {}
 
+    level_completion = parse_json_setting('tilt_level_completion_overlay', {})
+    if not isinstance(level_completion, dict):
+        level_completion = {}
+
+    settings_payload = _build_overlay_settings_payload()
+    settings_payload['theme'] = settings_payload.get('tilt_theme') or settings_payload.get('theme') or 'midnight'
+
     payload = {
         'updated_at': datetime.now().isoformat(timespec='seconds'),
         'title': 'MyStats Tilt Run Tracker',
-        'settings': _build_overlay_settings_payload(),
+        'settings': settings_payload,
         'current_run': current_summary,
         'last_run': last_run_summary,
+        'level_completion': level_completion,
     }
     return payload
 
@@ -2566,6 +2580,36 @@ def open_settings_window():
     ttk.Checkbutton(overlay_tab, text="Compact row spacing", variable=overlay_compact_rows_var).grid(row=8, column=0, sticky="w", pady=(0, 2), columnspan=2)
     ttk.Label(overlay_tab, text="Restart MyStats after changing port. Visual changes apply on next refresh.", style="Small.TLabel").grid(row=9, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
+
+    tilt_overlay_frame = ttk.LabelFrame(overlay_tab, text="Tilt Overlay", style="Card.TLabelframe")
+    tilt_overlay_frame.grid(row=10, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+
+    ttk.Label(tilt_overlay_frame, text="Starting Lifetime XP", style="Small.TLabel").grid(row=0, column=0, sticky="w", padx=(10, 8), pady=(8, 4))
+    tilt_lifetime_base_entry = ttk.Entry(tilt_overlay_frame, width=12, justify='center')
+    tilt_lifetime_base_entry.grid(row=0, column=1, sticky="w", padx=(0, 10), pady=(8, 4))
+    tilt_lifetime_base_entry.insert(0, config.get_setting("tilt_lifetime_base_xp") or "0")
+
+    ttk.Label(tilt_overlay_frame, text="Tilt Theme", style="Small.TLabel").grid(row=1, column=0, sticky="w", padx=(10, 8), pady=4)
+    tilt_overlay_theme_var = tk.StringVar(value=(config.get_setting("tilt_overlay_theme") or config.get_setting("overlay_theme") or "midnight"))
+    ttk.Combobox(tilt_overlay_frame, textvariable=tilt_overlay_theme_var, values=["midnight", "ocean", "sunset", "forest", "mono"], width=18, state="readonly").grid(row=1, column=1, sticky="w", padx=(0, 10), pady=4)
+
+    ttk.Label(tilt_overlay_frame, text="Scroll Step (px)", style="Small.TLabel").grid(row=2, column=0, sticky="w", padx=(10, 8), pady=4)
+    tilt_scroll_step_entry = ttk.Entry(tilt_overlay_frame, width=12, justify='center')
+    tilt_scroll_step_entry.grid(row=2, column=1, sticky="w", padx=(0, 10), pady=4)
+    tilt_scroll_step_entry.insert(0, config.get_setting("tilt_scroll_step_px") or "1")
+
+    ttk.Label(tilt_overlay_frame, text="Scroll Tick (ms)", style="Small.TLabel").grid(row=3, column=0, sticky="w", padx=(10, 8), pady=4)
+    tilt_scroll_interval_entry = ttk.Entry(tilt_overlay_frame, width=12, justify='center')
+    tilt_scroll_interval_entry.grid(row=3, column=1, sticky="w", padx=(0, 10), pady=4)
+    tilt_scroll_interval_entry.insert(0, config.get_setting("tilt_scroll_interval_ms") or "40")
+
+    ttk.Label(tilt_overlay_frame, text="Edge Pause (ms)", style="Small.TLabel").grid(row=4, column=0, sticky="w", padx=(10, 8), pady=(4, 8))
+    tilt_scroll_pause_entry = ttk.Entry(tilt_overlay_frame, width=12, justify='center')
+    tilt_scroll_pause_entry.grid(row=4, column=1, sticky="w", padx=(0, 10), pady=(4, 8))
+    tilt_scroll_pause_entry.insert(0, config.get_setting("tilt_scroll_pause_ms") or "900")
+
+    ttk.Label(tilt_overlay_frame, text="Tip: Starting Lifetime XP lets you align totals with existing channel progress.", style="Small.TLabel").grid(row=5, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 8))
+
     def reset_settings_defaults():
         chunk_alert_var.set(True)
         announce_delay_var.set(False)
@@ -2625,6 +2669,15 @@ def open_settings_window():
         overlay_text_scale_entry.insert(0, "100")
         overlay_show_medals_var.set(True)
         overlay_compact_rows_var.set(False)
+        tilt_lifetime_base_entry.delete(0, tk.END)
+        tilt_lifetime_base_entry.insert(0, "0")
+        tilt_overlay_theme_var.set("midnight")
+        tilt_scroll_step_entry.delete(0, tk.END)
+        tilt_scroll_step_entry.insert(0, "1")
+        tilt_scroll_interval_entry.delete(0, tk.END)
+        tilt_scroll_interval_entry.insert(0, "40")
+        tilt_scroll_pause_entry.delete(0, tk.END)
+        tilt_scroll_pause_entry.insert(0, "900")
 
     footer = ttk.Frame(settings_window, style="App.TFrame")
     footer.pack(side="bottom", fill="x", padx=20, pady=10)
@@ -2677,6 +2730,11 @@ def open_settings_window():
         config.set_setting("overlay_text_scale", overlay_text_scale_entry.get(), persistent=True)
         config.set_setting("overlay_show_medals", str(overlay_show_medals_var.get()), persistent=True)
         config.set_setting("overlay_compact_rows", str(overlay_compact_rows_var.get()), persistent=True)
+        config.set_setting("tilt_lifetime_base_xp", tilt_lifetime_base_entry.get(), persistent=True)
+        config.set_setting("tilt_overlay_theme", tilt_overlay_theme_var.get(), persistent=True)
+        config.set_setting("tilt_scroll_step_px", tilt_scroll_step_entry.get(), persistent=True)
+        config.set_setting("tilt_scroll_interval_ms", tilt_scroll_interval_entry.get(), persistent=True)
+        config.set_setting("tilt_scroll_pause_ms", tilt_scroll_pause_entry.get(), persistent=True)
         settings_window.destroy()
 
     ttk.Button(footer, text="Save and Close", command=save_settings_and_close, style="Primary.TButton").pack(side="right")
@@ -3319,7 +3377,9 @@ class ConfigManager:
                                 'mycycle_cyclestats_rotation_index',
                                 'overlay_rotation_seconds', 'overlay_refresh_seconds', 'overlay_theme',
                                 'overlay_card_opacity', 'overlay_text_scale', 'overlay_show_medals',
-                                'overlay_compact_rows', 'overlay_server_port'}
+                                'overlay_compact_rows', 'overlay_server_port', 'tilt_lifetime_base_xp',
+                                'tilt_overlay_theme', 'tilt_scroll_step_px', 'tilt_scroll_interval_ms',
+                                'tilt_scroll_pause_ms'}
         self.transient_keys = set([])
         self.defaults = {
             'chat_br_results': 'True',
@@ -3365,7 +3425,12 @@ class ConfigManager:
             'overlay_card_opacity': '84',
             'overlay_text_scale': '100',
             'overlay_show_medals': 'True',
-            'overlay_compact_rows': 'False'
+            'overlay_compact_rows': 'False',
+            'tilt_lifetime_base_xp': '0',
+            'tilt_overlay_theme': 'midnight',
+            'tilt_scroll_step_px': '1',
+            'tilt_scroll_interval_ms': '40',
+            'tilt_scroll_pause_ms': '900'
         }
         self.load_settings()
 
@@ -3420,7 +3485,8 @@ class ConfigManager:
                    "narrative_alert_cooldown_races", "narrative_alert_min_lead_change_points", "narrative_alert_max_items",
                    "mycycle_min_place", "mycycle_max_place",
                    "overlay_rotation_seconds", "overlay_refresh_seconds", "overlay_card_opacity",
-                   "overlay_text_scale", "overlay_server_port"}:
+                   "overlay_text_scale", "overlay_server_port", "tilt_lifetime_base_xp",
+                   "tilt_scroll_step_px", "tilt_scroll_interval_ms", "tilt_scroll_pause_ms"}:
             if isinstance(value, int) or (isinstance(value, str) and value.isdigit()):
                 if key == "overlay_server_port":
                     port = int(value)
@@ -5434,6 +5500,7 @@ async def tilted(bot):
                 config.set_setting('tilt_run_xp', '0', persistent=False)
                 config.set_setting('tilt_run_points', '0', persistent=False)
                 config.set_setting('tilt_previous_run_xp', config.get_setting('tilt_run_xp') or '0', persistent=False)
+                config.set_setting('tilt_level_completion_overlay', '{}', persistent=False)
 
             if run_id is None:
                 run_id = base64.urlsafe_b64encode(uuid.uuid4().bytes).rstrip(b'=').decode('utf-8')
@@ -5518,8 +5585,10 @@ async def tilted(bot):
             config.set_setting('tilt_run_ledger', json.dumps(run_ledger), persistent=False)
 
             lifetime_expertise = get_int_setting('tilt_lifetime_expertise', 0)
-            if total_xp > lifetime_expertise:
-                lifetime_expertise = total_xp
+            lifetime_base_xp = get_int_setting('tilt_lifetime_base_xp', 0)
+            adjusted_total_xp = total_xp + lifetime_base_xp
+            if adjusted_total_xp > lifetime_expertise:
+                lifetime_expertise = adjusted_total_xp
             lifetime_expertise += earned_xp
             config.set_setting('tilt_lifetime_expertise', str(lifetime_expertise), persistent=False)
 
@@ -5560,6 +5629,24 @@ async def tilted(bot):
                     text_area.insert('end', f"\n{base_msg}{', '.join(limited_finishers)}\n")
                 else:
                     print("No player data to send for current level.")
+
+                total_active = len(active_users)
+                survivor_count = len(survivors)
+                death_rate = round(((deaths_this_level / total_active) * 100), 1) if total_active else 0
+                survival_rate = round(((survivor_count / total_active) * 100), 1) if total_active else 0
+                completion_summary = {
+                    'completed_at': datetime.now().isoformat(timespec='seconds'),
+                    'level': current_level,
+                    'top_tiltee': top_tiltee,
+                    'elapsed_time': elapsed_time,
+                    'level_points': level_points,
+                    'earned_xp': earned_xp,
+                    'survivors': survivor_count,
+                    'deaths': deaths_this_level,
+                    'death_rate': death_rate,
+                    'survival_rate': survival_rate,
+                }
+                config.set_setting('tilt_level_completion_overlay', json.dumps(completion_summary), persistent=False)
 
                 write_tilt_output_files({
                     'LastLevelPoints.txt': f"{level_points:,}",
@@ -5635,6 +5722,7 @@ async def tilted(bot):
                 config.set_setting('tilt_run_xp', '0', persistent=False)
                 config.set_setting('tilt_run_points', '0', persistent=False)
                 config.set_setting('tilt_run_ledger', '{}', persistent=False)
+                config.set_setting('tilt_level_completion_overlay', '{}', persistent=False)
                 run_id = None
 
             last_modified_tilt = current_modified_tilt
