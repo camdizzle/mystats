@@ -47,6 +47,20 @@ function getRunOverlayKey(lastRun = {}) {
   return `${lastRun.run_id}|${lastRun.ended_at}`;
 }
 
+function hideRecapOverlays() {
+  const levelOverlay = $('level-complete-overlay');
+  const runOverlay = $('run-complete-overlay');
+  if (levelOverlayHideTimer) clearTimeout(levelOverlayHideTimer);
+  if (runOverlayHideTimer) clearTimeout(runOverlayHideTimer);
+  levelOverlayHideTimer = null;
+  runOverlayHideTimer = null;
+  levelOverlayActive = false;
+  runOverlayActive = false;
+  if (levelOverlay) levelOverlay.hidden = true;
+  if (runOverlay) runOverlay.hidden = true;
+  updateTrackerVisibility();
+}
+
 function stopAutoScroll(listId) {
   const timerId = autoScrollTimers.get(listId);
   if (timerId) {
@@ -208,6 +222,7 @@ function renderLevelCompletionOverlay(level = {}) {
   lastLevelOverlayKey = overlayKey;
 
   const levelNum = Number(level.level || 0);
+
   const deathRate = Number(level.death_rate || 0).toFixed(1);
   const survivalRate = Number(level.survival_rate || 0).toFixed(1);
 
@@ -248,7 +263,7 @@ function renderLevelCompletionOverlay(level = {}) {
   }, 10000);
 }
 
-function renderRunCompletionOverlay(lastRun = {}) {
+function renderRunCompletionOverlay(lastRun = {}, shouldDisplay = true) {
   const host = $('run-complete-overlay');
   const title = $('run-complete-title');
   const subtitle = $('run-complete-subtitle');
@@ -259,6 +274,8 @@ function renderRunCompletionOverlay(lastRun = {}) {
   const runKey = getRunOverlayKey(lastRun);
   if (!runKey) return false;
   if (runKey === lastRunOverlayKey) return false;
+  if (!runKey || !shouldDisplay) return false;
+  if (runKey === lastRunOverlayKey) return;
   lastRunOverlayKey = runKey;
 
   const standings = Array.isArray(lastRun.standings) ? lastRun.standings.slice(0, 3) : [];
@@ -320,6 +337,11 @@ async function refresh() {
       lastLevelOverlayKey = getLevelOverlayKey(payload.level_completion || {});
       lastRunOverlayKey = getRunOverlayKey(payload.last_run || {});
       priorRunStatus = currentStatus;
+    if (!overlayBaselineInitialized) {
+      lastLevelOverlayKey = getLevelOverlayKey(payload.level_completion || {});
+      lastRunOverlayKey = getRunOverlayKey(payload.last_run || {});
+      const initialStatus = payload.current_run?.status === 'active' ? 'active' : 'idle';
+      priorRunStatus = initialStatus;
       runRecapArmed = false;
       hideRecapOverlays();
       overlayBaselineInitialized = true;
@@ -345,6 +367,16 @@ async function refresh() {
       const shown = renderRunCompletionOverlay(payload.last_run || {});
       if (shown) runRecapArmed = false;
     }
+    const currentRun = payload.current_run || {};
+    const currentStatus = currentRun.status === 'active' ? 'active' : 'idle';
+    const runJustEnded = priorRunStatus === 'active' && currentStatus === 'idle';
+    if (runJustEnded) runRecapArmed = true;
+
+    renderCurrentRun(currentRun);
+    renderLastRun(payload.last_run || {});
+    renderLevelCompletionOverlay(payload.level_completion || {});
+    const runRecapShown = renderRunCompletionOverlay(payload.last_run || {}, runRecapArmed);
+    if (runRecapShown) runRecapArmed = false;
 
     priorRunStatus = currentStatus;
   } catch (e) {
@@ -354,6 +386,16 @@ async function refresh() {
     overlayBaselineInitialized = false;
     priorRunStatus = 'idle';
     runRecapArmed = false;
+    const levelOverlay = $('level-complete-overlay');
+    if (levelOverlay) levelOverlay.hidden = true;
+    const runOverlay = $('run-complete-overlay');
+    if (runOverlay) runOverlay.hidden = true;
+    levelOverlayActive = false;
+    runOverlayActive = false;
+    overlayBaselineInitialized = false;
+    priorRunStatus = 'idle';
+    runRecapArmed = false;
+    updateTrackerVisibility();
   }
 }
 
