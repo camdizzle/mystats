@@ -6,6 +6,9 @@ const defaultSettings = {
   theme: 'midnight',
   card_opacity: 84,
   text_scale: 100,
+  tilt_scroll_step_px: 1,
+  tilt_scroll_interval_ms: 40,
+  tilt_scroll_pause_ms: 900,
 };
 
 const themes = {
@@ -18,6 +21,64 @@ const themes = {
 
 let refreshTimer = null;
 let refreshSeconds = 3;
+const autoScrollTimers = new Map();
+const autoScrollConfig = { stepPx: 1, intervalMs: 40, pauseMs: 900 };
+
+let levelOverlayHideTimer = null;
+let runOverlayHideTimer = null;
+let lastLevelOverlayKey = '';
+let lastRunOverlayKey = '';
+let levelOverlaySeen = false;
+let runOverlaySeen = false;
+let levelOverlayActive = false;
+let runOverlayActive = false;
+
+function stopAutoScroll(listId) {
+  const timerId = autoScrollTimers.get(listId);
+  if (timerId) {
+    clearInterval(timerId);
+    autoScrollTimers.delete(listId);
+  }
+}
+
+function updateTrackerVisibility() {
+  const tracker = $('tilt-tracker-card');
+  if (!tracker) return;
+  tracker.hidden = levelOverlayActive || runOverlayActive;
+}
+
+function startAutoScroll(listId) {
+  const host = $(listId);
+  if (!host) return;
+
+  stopAutoScroll(listId);
+  host.scrollTop = 0;
+
+  const maxScrollTop = host.scrollHeight - host.clientHeight;
+  if (maxScrollTop <= 0) return;
+
+  let direction = 1;
+  let isPaused = false;
+  const timerId = setInterval(() => {
+    if (isPaused) return;
+
+    host.scrollTop = host.scrollTop + direction * autoScrollConfig.stepPx;
+
+    if (host.scrollTop >= maxScrollTop) {
+      host.scrollTop = maxScrollTop;
+      direction = -1;
+      isPaused = true;
+      setTimeout(() => { isPaused = false; }, autoScrollConfig.pauseMs);
+    } else if (host.scrollTop <= 0) {
+      host.scrollTop = 0;
+      direction = 1;
+      isPaused = true;
+      setTimeout(() => { isPaused = false; }, autoScrollConfig.pauseMs);
+    }
+  }, autoScrollConfig.intervalMs);
+
+  autoScrollTimers.set(listId, timerId);
+}
 
 function applyTheme(settings = {}) {
   const merged = { ...defaultSettings, ...(settings || {}) };
@@ -31,6 +92,10 @@ function applyTheme(settings = {}) {
   root.style.setProperty('--panel', `rgba(${theme.panelBase}, ${opacity})`);
   root.style.setProperty('--panel-2', `rgba(${theme.panel2Base}, ${Math.max(0.6, opacity - 0.08)})`);
   root.style.setProperty('--text-scale', textScale.toString());
+
+  autoScrollConfig.stepPx = Math.max(1, Math.min(4, Number(merged.tilt_scroll_step_px || defaultSettings.tilt_scroll_step_px)));
+  autoScrollConfig.intervalMs = Math.max(20, Math.min(120, Number(merged.tilt_scroll_interval_ms || defaultSettings.tilt_scroll_interval_ms)));
+  autoScrollConfig.pauseMs = Math.max(0, Math.min(3000, Number(merged.tilt_scroll_pause_ms || defaultSettings.tilt_scroll_pause_ms)));
 }
 
 function renderStandings(listId, standings, emptyText) {
@@ -38,26 +103,31 @@ function renderStandings(listId, standings, emptyText) {
   if (!host) return;
   if (!Array.isArray(standings) || standings.length === 0) {
     host.innerHTML = `<li>${emptyText}</li>`;
+    if (listId === 'current-standings') stopAutoScroll(listId);
     return;
   }
 
   host.innerHTML = standings
-    .slice(0, 10)
     .map((row, i) => `<li><span>#${i + 1} ${row.name}</span><span>${fmt(row.points)} pts</span></li>`)
     .join('');
+
+  if (listId === 'current-standings') {
+    startAutoScroll(listId);
+  }
 }
 
 function renderCurrentRun(run = {}) {
   const isActive = run.status === 'active';
   $('run-status').textContent = `Status: ${isActive ? 'Active' : 'Idle'}`;
   $('run-status').classList.toggle('pill--active', isActive);
-  $('run-id').textContent = `Run: ${run.run_short_id || '-'}`;
   $('run-level').textContent = `Level: ${fmt(run.level)}`;
   $('run-elapsed').textContent = `Elapsed: ${run.elapsed_time || '0:00'}`;
 
   const leader = run.leader ? `${run.leader.name} (${fmt(run.leader.points)} pts)` : 'None';
+  const topTiltee = run.top_tiltee || 'None';
   $('current-leader').textContent = leader;
-  $('current-top-tiltee').textContent = run.top_tiltee || 'None';
+  $('current-top-tiltee').textContent = topTiltee;
+  $('top-tiltee-pill').textContent = `Top Tiltee: ${topTiltee}`;
   $('current-run-points').textContent = fmt(run.run_points);
   $('current-run-xp').textContent = fmt(run.run_xp);
   $('best-run-xp').textContent = fmt(run.best_run_xp_today);
@@ -73,13 +143,146 @@ function renderLastRun(lastRun = {}) {
   const hasRun = !!(lastRun && lastRun.run_id);
   if (!hasRun) {
     summary.textContent = 'No completed tilt run yet.';
-    renderStandings('last-run-standings', [], 'Waiting for first completed run.');
     return;
   }
 
   const leaderText = lastRun.leader ? `${lastRun.leader.name} (${fmt(lastRun.leader.points)} pts)` : 'None';
-  summary.textContent = `Run ${lastRun.run_short_id || '-'} ended at level ${fmt(lastRun.ended_level)} (${lastRun.elapsed_time || '0:00'}). Leader: ${leaderText}. Run points: ${fmt(lastRun.run_points)} | Run XP: ${fmt(lastRun.run_xp)} | Ended: ${lastRun.ended_at || 'n/a'}`;
-  renderStandings('last-run-standings', lastRun.standings, 'No final standings captured.');
+  summary.innerHTML = [
+    `<span class="summary__item"><span class="summary__label">Level</span>${fmt(lastRun.ended_level)}</span>`,
+    `<span class="summary__item"><span class="summary__label">Time</span>${lastRun.elapsed_time || '0:00'}</span>`,
+    `<span class="summary__item"><span class="summary__label">Leader</span>${leaderText}</span>`,
+    `<span class="summary__item"><span class="summary__label">Run Pts</span>${fmt(lastRun.run_points)}</span>`,
+    `<span class="summary__item"><span class="summary__label">Run XP</span>${fmt(lastRun.run_xp)}</span>`,
+    `<span class="summary__item"><span class="summary__label">Ended</span>${lastRun.ended_at || 'n/a'}</span>`,
+  ].join('');
+}
+
+function renderLevelCompletionOverlay(level = {}) {
+  const host = $('level-complete-overlay');
+  const stats = $('level-complete-stats');
+  const title = $('level-complete-title');
+  const subtitle = $('level-complete-subtitle');
+  if (!host || !stats) return;
+
+  const levelNum = Number(level.level || 0);
+  const completedAt = String(level.completed_at || '').trim();
+  if (!levelNum || !completedAt) {
+    if (!levelOverlayActive) {
+      host.hidden = true;
+      updateTrackerVisibility();
+    }
+    return;
+  }
+
+  const overlayKey = `${levelNum}|${completedAt}`;
+  if (!levelOverlaySeen) {
+    levelOverlaySeen = true;
+    lastLevelOverlayKey = overlayKey;
+    return;
+  }
+  if (overlayKey === lastLevelOverlayKey) return;
+  lastLevelOverlayKey = overlayKey;
+
+  const deathRate = Number(level.death_rate || 0).toFixed(1);
+  const survivalRate = Number(level.survival_rate || 0).toFixed(1);
+
+  if (title) title.textContent = `Level ${fmt(levelNum)} Complete`;
+  if (subtitle) subtitle.textContent = `${level.top_tiltee || 'None'} owned this round`;
+
+  const topTiltee = level.top_tiltee || 'None';
+  stats.innerHTML = `
+    <div class="overlay-hero">
+      <div class="overlay-hero__label">Top Tiltee</div>
+      <div class="overlay-hero__value">${topTiltee}</div>
+    </div>
+    <div class="overlay-pill-row">
+      <div class="overlay-pill">⏱ ${level.elapsed_time || '0:00'}</div>
+      <div class="overlay-pill">⭐ ${fmt(level.level_points)} pts</div>
+      <div class="overlay-pill">✨ +${fmt(level.earned_xp)} XP</div>
+    </div>
+    <div class="overlay-metrics">
+      <div class="overlay-metric"><span>Survivors</span><strong>${fmt(level.survivors)}</strong></div>
+      <div class="overlay-metric"><span>Deaths</span><strong>${fmt(level.deaths)}</strong></div>
+      <div class="overlay-metric"><span>Death Rate</span><strong>${deathRate}%</strong></div>
+      <div class="overlay-metric"><span>Survival</span><strong>${survivalRate}%</strong></div>
+    </div>
+  `;
+
+  levelOverlayActive = true;
+  runOverlayActive = false;
+  const runOverlay = $('run-complete-overlay');
+  if (runOverlay) runOverlay.hidden = true;
+  updateTrackerVisibility();
+  host.hidden = false;
+
+  if (levelOverlayHideTimer) clearTimeout(levelOverlayHideTimer);
+  levelOverlayHideTimer = setTimeout(() => {
+    host.hidden = true;
+    levelOverlayActive = false;
+    updateTrackerVisibility();
+  }, 10000);
+}
+
+function renderRunCompletionOverlay(lastRun = {}) {
+  const host = $('run-complete-overlay');
+  const title = $('run-complete-title');
+  const subtitle = $('run-complete-subtitle');
+  const top3 = $('run-complete-top3');
+  const stats = $('run-complete-stats');
+  if (!host || !title || !subtitle || !top3 || !stats) return;
+
+  const hasRun = !!(lastRun && lastRun.run_id && lastRun.ended_at);
+  if (!hasRun) return;
+
+  const runKey = `${lastRun.run_id}|${lastRun.ended_at}`;
+  if (!runOverlaySeen) {
+    runOverlaySeen = true;
+    lastRunOverlayKey = runKey;
+    return;
+  }
+  if (runKey === lastRunOverlayKey) return;
+  lastRunOverlayKey = runKey;
+
+  const standings = Array.isArray(lastRun.standings) ? lastRun.standings.slice(0, 3) : [];
+  title.textContent = `Run Complete • Level ${fmt(lastRun.ended_level)}`;
+  subtitle.textContent = `${lastRun.elapsed_time || '0:00'} total • ${fmt(lastRun.run_xp)} XP gained`;
+
+  top3.innerHTML = standings.length
+    ? standings.map((row, i) => `
+      <li>
+        <span class="run-overlay__rank run-overlay__rank--${i + 1}">${i + 1}</span>
+        <span class="run-overlay__name">${row.name}</span>
+        <span class="run-overlay__points">${fmt(row.points)} pts</span>
+      </li>
+    `).join('')
+    : '<li><span class="run-overlay__rank run-overlay__rank--1">1</span><span class="run-overlay__name">No results</span><span class="run-overlay__points">-</span></li>' ;
+
+  stats.innerHTML = `
+    <div class="overlay-hero overlay-hero--run">
+      <div class="overlay-hero__label">Top Tiltee</div>
+      <div class="overlay-hero__value">${lastRun.top_tiltee || 'None'}</div>
+    </div>
+    <div class="overlay-pill-row">
+      <div class="overlay-pill">🏆 ${fmt(lastRun.run_points)} pts</div>
+      <div class="overlay-pill">✨ ${fmt(lastRun.run_xp)} XP</div>
+      <div class="overlay-pill">💀 ${fmt(lastRun.total_deaths_today)} deaths</div>
+      <div class="overlay-pill">🔥 Best ${fmt(lastRun.best_run_xp_today)} XP</div>
+    </div>
+  `;
+
+  runOverlayActive = true;
+  levelOverlayActive = false;
+  const levelOverlay = $('level-complete-overlay');
+  if (levelOverlay) levelOverlay.hidden = true;
+  updateTrackerVisibility();
+  host.hidden = false;
+
+  if (runOverlayHideTimer) clearTimeout(runOverlayHideTimer);
+  runOverlayHideTimer = setTimeout(() => {
+    host.hidden = true;
+    runOverlayActive = false;
+    updateTrackerVisibility();
+  }, 15000);
 }
 
 async function refresh() {
@@ -101,9 +304,18 @@ async function refresh() {
 
     renderCurrentRun(payload.current_run || {});
     renderLastRun(payload.last_run || {});
+    renderLevelCompletionOverlay(payload.level_completion || {});
+    renderRunCompletionOverlay(payload.last_run || {});
   } catch (e) {
     $('run-status').textContent = 'Status: Unavailable';
     $('last-run-summary').textContent = 'Unable to load tilt overlay data from /api/overlay/tilt.';
+    const levelOverlay = $('level-complete-overlay');
+    if (levelOverlay) levelOverlay.hidden = true;
+    const runOverlay = $('run-complete-overlay');
+    if (runOverlay) runOverlay.hidden = true;
+    levelOverlayActive = false;
+    runOverlayActive = false;
+    updateTrackerVisibility();
   }
 }
 
