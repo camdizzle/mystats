@@ -36,6 +36,14 @@ let suppressRunCompletionUntilNewEvent = true;
 let pendingRunCompletionEventId = 0;
 let displayedRunCompletionEventId = 0;
 
+function setRunOverlayVisible(isVisible) {
+  const runOverlay = $('run-complete-overlay');
+  if (!runOverlay) return;
+  runOverlay.hidden = !isVisible;
+  runOverlay.style.display = isVisible ? '' : 'none';
+  runOverlay.setAttribute('aria-hidden', isVisible ? 'false' : 'true');
+}
+
 function getLevelOverlayKey(level = {}) {
   const levelNum = Number(level.level || 0);
   const completedAt = String(level.completed_at || '').trim();
@@ -51,7 +59,6 @@ function getRunOverlayKey(runCompletion = {}) {
 
 function hideRecapOverlays() {
   const levelOverlay = $('level-complete-overlay');
-  const runOverlay = $('run-complete-overlay');
   if (levelOverlayHideTimer) clearTimeout(levelOverlayHideTimer);
   if (runOverlayHideTimer) clearTimeout(runOverlayHideTimer);
   levelOverlayHideTimer = null;
@@ -59,16 +66,15 @@ function hideRecapOverlays() {
   levelOverlayActive = false;
   runOverlayActive = false;
   if (levelOverlay) levelOverlay.hidden = true;
-  if (runOverlay) runOverlay.hidden = true;
+  setRunOverlayVisible(false);
   updateTrackerVisibility();
 }
 
 function hideRunCompletionOverlay() {
-  const runOverlay = $('run-complete-overlay');
   if (runOverlayHideTimer) clearTimeout(runOverlayHideTimer);
   runOverlayHideTimer = null;
   runOverlayActive = false;
-  if (runOverlay) runOverlay.hidden = true;
+  setRunOverlayVisible(false);
   updateTrackerVisibility();
 }
 
@@ -311,11 +317,11 @@ function renderRunCompletionOverlay(lastRun = {}, shouldDisplay = true) {
   const levelOverlay = $('level-complete-overlay');
   if (levelOverlay) levelOverlay.hidden = true;
   updateTrackerVisibility();
-  host.hidden = false;
+  setRunOverlayVisible(true);
 
   if (runOverlayHideTimer) clearTimeout(runOverlayHideTimer);
   runOverlayHideTimer = setTimeout(() => {
-    host.hidden = true;
+    setRunOverlayVisible(false);
     runOverlayActive = false;
     updateTrackerVisibility();
   }, 15000);
@@ -403,3 +409,7 @@ startRefreshTimer();
 
 // Ensure recap overlays are hidden before the first payload is processed.
 hideRecapOverlays();
+hideRunCompletionOverlay();
+const tracker = $('tilt-tracker-card');
+if (tracker) tracker.hidden = false;
+document.body?.setAttribute('data-overlay-mode', 'tracker');
