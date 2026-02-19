@@ -76,24 +76,6 @@ function updateTrackerVisibility() {
   document.body?.setAttribute('data-overlay-mode', showingRecap ? 'recap' : 'tracker');
 }
 
-function hideRecapOverlays() {
-  const levelOverlay = $('level-complete-overlay');
-  const runOverlay = $('run-complete-overlay');
-
-  if (levelOverlayHideTimer) clearTimeout(levelOverlayHideTimer);
-  if (runOverlayHideTimer) clearTimeout(runOverlayHideTimer);
-  levelOverlayHideTimer = null;
-  runOverlayHideTimer = null;
-
-  levelOverlayActive = false;
-  runOverlayActive = false;
-
-  if (levelOverlay) levelOverlay.hidden = true;
-  if (runOverlay) runOverlay.hidden = true;
-
-  updateTrackerVisibility();
-}
-
 function startAutoScroll(listId) {
   const host = $(listId);
   if (!host) return;
@@ -207,7 +189,7 @@ function renderLevelCompletionOverlay(level = {}) {
   const stats = $('level-complete-stats');
   const title = $('level-complete-title');
   const subtitle = $('level-complete-subtitle');
-  if (!host || !stats) return;
+  if (!host || !stats) return false;
 
   const overlayKey = getLevelOverlayKey(level);
   if (!overlayKey) {
@@ -215,10 +197,10 @@ function renderLevelCompletionOverlay(level = {}) {
       host.hidden = true;
       updateTrackerVisibility();
     }
-    return;
+    return false;
   }
 
-  if (overlayKey === lastLevelOverlayKey) return;
+  if (overlayKey === lastLevelOverlayKey) return false;
   lastLevelOverlayKey = overlayKey;
 
   const levelNum = Number(level.level || 0);
@@ -261,6 +243,8 @@ function renderLevelCompletionOverlay(level = {}) {
     levelOverlayActive = false;
     updateTrackerVisibility();
   }, 10000);
+
+  return true;
 }
 
 function renderRunCompletionOverlay(lastRun = {}, shouldDisplay = true) {
@@ -272,10 +256,8 @@ function renderRunCompletionOverlay(lastRun = {}, shouldDisplay = true) {
   if (!host || !title || !subtitle || !top3 || !stats) return false;
 
   const runKey = getRunOverlayKey(lastRun);
-  if (!runKey) return false;
+  if (!shouldDisplay || !runKey) return false;
   if (runKey === lastRunOverlayKey) return false;
-  if (!runKey || !shouldDisplay) return false;
-  if (runKey === lastRunOverlayKey) return;
   lastRunOverlayKey = runKey;
 
   const standings = Array.isArray(lastRun.standings) ? lastRun.standings.slice(0, 3) : [];
@@ -337,11 +319,6 @@ async function refresh() {
       lastLevelOverlayKey = getLevelOverlayKey(payload.level_completion || {});
       lastRunOverlayKey = getRunOverlayKey(payload.last_run || {});
       priorRunStatus = currentStatus;
-    if (!overlayBaselineInitialized) {
-      lastLevelOverlayKey = getLevelOverlayKey(payload.level_completion || {});
-      lastRunOverlayKey = getRunOverlayKey(payload.last_run || {});
-      const initialStatus = payload.current_run?.status === 'active' ? 'active' : 'idle';
-      priorRunStatus = initialStatus;
       runRecapArmed = false;
       hideRecapOverlays();
       overlayBaselineInitialized = true;
@@ -361,37 +338,18 @@ async function refresh() {
 
     renderCurrentRun(currentRun);
     renderLastRun(payload.last_run || {});
-    renderLevelCompletionOverlay(payload.level_completion || {});
+    const levelRecapShown = renderLevelCompletionOverlay(payload.level_completion || {});
 
-    if (runRecapArmed) {
+    if (runRecapArmed && !levelRecapShown) {
       const shown = renderRunCompletionOverlay(payload.last_run || {});
       if (shown) runRecapArmed = false;
     }
-    const currentRun = payload.current_run || {};
-    const currentStatus = currentRun.status === 'active' ? 'active' : 'idle';
-    const runJustEnded = priorRunStatus === 'active' && currentStatus === 'idle';
-    if (runJustEnded) runRecapArmed = true;
-
-    renderCurrentRun(currentRun);
-    renderLastRun(payload.last_run || {});
-    renderLevelCompletionOverlay(payload.level_completion || {});
-    const runRecapShown = renderRunCompletionOverlay(payload.last_run || {}, runRecapArmed);
-    if (runRecapShown) runRecapArmed = false;
 
     priorRunStatus = currentStatus;
   } catch (e) {
     $('run-status').textContent = 'Status: Unavailable';
     $('last-run-summary').textContent = 'Unable to load tilt overlay data from /api/overlay/tilt.';
     hideRecapOverlays();
-    overlayBaselineInitialized = false;
-    priorRunStatus = 'idle';
-    runRecapArmed = false;
-    const levelOverlay = $('level-complete-overlay');
-    if (levelOverlay) levelOverlay.hidden = true;
-    const runOverlay = $('run-complete-overlay');
-    if (runOverlay) runOverlay.hidden = true;
-    levelOverlayActive = false;
-    runOverlayActive = false;
     overlayBaselineInitialized = false;
     priorRunStatus = 'idle';
     runRecapArmed = false;
