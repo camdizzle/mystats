@@ -31,7 +31,8 @@ let lastRunOverlayKey = '';
 let levelOverlayActive = false;
 let runOverlayActive = false;
 let overlayBaselineInitialized = false;
-let sawActiveRunThisSession = false;
+let priorRunStatus = 'idle';
+let runRecapArmed = false;
 
 function getLevelOverlayKey(level = {}) {
   const levelNum = Number(level.level || 0);
@@ -317,12 +318,15 @@ async function refresh() {
     if (!overlayBaselineInitialized) {
       lastLevelOverlayKey = getLevelOverlayKey(payload.level_completion || {});
       lastRunOverlayKey = getRunOverlayKey(payload.last_run || {});
-      sawActiveRunThisSession = currentStatus === 'active';
+      priorRunStatus = currentStatus;
+      runRecapArmed = false;
       hideRecapOverlays();
       overlayBaselineInitialized = true;
     }
 
-    if (currentStatus === 'active') sawActiveRunThisSession = true;
+    if (priorRunStatus === 'active' && currentStatus === 'idle') {
+      runRecapArmed = true;
+    }
 
     applyTheme(payload.settings || {});
 
@@ -337,16 +341,20 @@ async function refresh() {
     renderLastRun(payload.last_run || {});
     const levelRecapShown = renderLevelCompletionOverlay(payload.level_completion || {});
 
-    if (!levelRecapShown && sawActiveRunThisSession) {
-      renderRunCompletionOverlay(payload.last_run || {});
+    if (runRecapArmed && !levelRecapShown) {
+      const runRecapShown = renderRunCompletionOverlay(payload.last_run || {});
+      if (runRecapShown) runRecapArmed = false;
     }
+
+    priorRunStatus = currentStatus;
 
   } catch (e) {
     $('run-status').textContent = 'Status: Unavailable';
     $('last-run-summary').textContent = 'Unable to load tilt overlay data from /api/overlay/tilt.';
     hideRecapOverlays();
     overlayBaselineInitialized = false;
-    sawActiveRunThisSession = false;
+    priorRunStatus = 'idle';
+    runRecapArmed = false;
     updateTrackerVisibility();
   }
 }
