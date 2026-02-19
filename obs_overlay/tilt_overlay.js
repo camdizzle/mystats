@@ -128,21 +128,14 @@ function startAutoScroll(listId) {
   const maxScrollTop = host.scrollHeight - host.clientHeight;
   if (maxScrollTop <= 0) return;
 
-  let direction = 1;
   let isPaused = false;
   const timerId = setInterval(() => {
     if (isPaused) return;
 
-    host.scrollTop = host.scrollTop + direction * autoScrollConfig.stepPx;
+    host.scrollTop = host.scrollTop + autoScrollConfig.stepPx;
 
     if (host.scrollTop >= maxScrollTop) {
-      host.scrollTop = maxScrollTop;
-      direction = -1;
-      isPaused = true;
-      setTimeout(() => { isPaused = false; }, autoScrollConfig.pauseMs);
-    } else if (host.scrollTop <= 0) {
       host.scrollTop = 0;
-      direction = 1;
       isPaused = true;
       setTimeout(() => { isPaused = false; }, autoScrollConfig.pauseMs);
     }
