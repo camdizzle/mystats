@@ -28,11 +28,24 @@ let levelOverlayHideTimer = null;
 let runOverlayHideTimer = null;
 let lastLevelOverlayKey = '';
 let lastRunOverlayKey = '';
-let levelOverlaySeen = false;
-let runOverlaySeen = false;
 let levelOverlayActive = false;
 let runOverlayActive = false;
-let isFirstRefresh = true;
+let overlayBaselineInitialized = false;
+let priorRunId = '';
+let runRecapArmed = false;
+
+function getLevelOverlayKey(level = {}) {
+  const levelNum = Number(level.level || 0);
+  const completedAt = String(level.completed_at || '').trim();
+  if (!levelNum || !completedAt) return '';
+  return `${levelNum}|${completedAt}`;
+}
+
+function getRunOverlayKey(lastRun = {}) {
+  const hasRun = !!(lastRun && lastRun.run_id && lastRun.ended_at);
+  if (!hasRun) return '';
+  return `${lastRun.run_id}|${lastRun.ended_at}`;
+}
 
 function stopAutoScroll(listId) {
   const timerId = autoScrollTimers.get(listId);
@@ -47,6 +60,24 @@ function updateTrackerVisibility() {
   const showingRecap = levelOverlayActive || runOverlayActive;
   if (tracker) tracker.hidden = showingRecap;
   document.body?.setAttribute('data-overlay-mode', showingRecap ? 'recap' : 'tracker');
+}
+
+function hideRecapOverlays() {
+  const levelOverlay = $('level-complete-overlay');
+  const runOverlay = $('run-complete-overlay');
+
+  if (levelOverlayHideTimer) clearTimeout(levelOverlayHideTimer);
+  if (runOverlayHideTimer) clearTimeout(runOverlayHideTimer);
+  levelOverlayHideTimer = null;
+  runOverlayHideTimer = null;
+
+  levelOverlayActive = false;
+  runOverlayActive = false;
+
+  if (levelOverlay) levelOverlay.hidden = true;
+  if (runOverlay) runOverlay.hidden = true;
+
+  updateTrackerVisibility();
 }
 
 function startAutoScroll(listId) {
@@ -113,9 +144,7 @@ function renderStandings(listId, standings, emptyText) {
     .map((row, i) => `<li><span>#${i + 1} ${row.name}</span><span>${fmt(row.points)} pts</span></li>`)
     .join('');
 
-  if (listId === 'current-standings') {
-    startAutoScroll(listId);
-  }
+  if (listId === 'current-standings') startAutoScroll(listId);
 }
 
 function renderCurrentRun(run = {}) {
@@ -166,9 +195,8 @@ function renderLevelCompletionOverlay(level = {}) {
   const subtitle = $('level-complete-subtitle');
   if (!host || !stats) return;
 
-  const levelNum = Number(level.level || 0);
-  const completedAt = String(level.completed_at || '').trim();
-  if (!levelNum || !completedAt) {
+  const overlayKey = getLevelOverlayKey(level);
+  if (!overlayKey) {
     if (!levelOverlayActive) {
       host.hidden = true;
       updateTrackerVisibility();
@@ -176,15 +204,10 @@ function renderLevelCompletionOverlay(level = {}) {
     return;
   }
 
-  const overlayKey = `${levelNum}|${completedAt}`;
-  if (!levelOverlaySeen) {
-    levelOverlaySeen = true;
-    lastLevelOverlayKey = overlayKey;
-    return;
-  }
   if (overlayKey === lastLevelOverlayKey) return;
   lastLevelOverlayKey = overlayKey;
 
+  const levelNum = Number(level.level || 0);
   const deathRate = Number(level.death_rate || 0).toFixed(1);
   const survivalRate = Number(level.survival_rate || 0).toFixed(1);
 
@@ -231,18 +254,11 @@ function renderRunCompletionOverlay(lastRun = {}) {
   const subtitle = $('run-complete-subtitle');
   const top3 = $('run-complete-top3');
   const stats = $('run-complete-stats');
-  if (!host || !title || !subtitle || !top3 || !stats) return;
+  if (!host || !title || !subtitle || !top3 || !stats) return false;
 
-  const hasRun = !!(lastRun && lastRun.run_id && lastRun.ended_at);
-  if (!hasRun) return;
-
-  const runKey = `${lastRun.run_id}|${lastRun.ended_at}`;
-  if (!runOverlaySeen) {
-    runOverlaySeen = true;
-    lastRunOverlayKey = runKey;
-    return;
-  }
-  if (runKey === lastRunOverlayKey) return;
+  const runKey = getRunOverlayKey(lastRun);
+  if (!runKey) return false;
+  if (runKey === lastRunOverlayKey) return false;
   lastRunOverlayKey = runKey;
 
   const standings = Array.isArray(lastRun.standings) ? lastRun.standings.slice(0, 3) : [];
@@ -257,7 +273,7 @@ function renderRunCompletionOverlay(lastRun = {}) {
         <span class="run-overlay__points">${fmt(row.points)} pts</span>
       </li>
     `).join('')
-    : '<li><span class="run-overlay__rank run-overlay__rank--1">1</span><span class="run-overlay__name">No results</span><span class="run-overlay__points">-</span></li>' ;
+    : '<li><span class="run-overlay__rank run-overlay__rank--1">1</span><span class="run-overlay__name">No results</span><span class="run-overlay__points">-</span></li>';
 
   stats.innerHTML = `
     <div class="overlay-hero overlay-hero--run">
@@ -283,9 +299,10 @@ function renderRunCompletionOverlay(lastRun = {}) {
   runOverlayHideTimer = setTimeout(() => {
     host.hidden = true;
     runOverlayActive = false;
-    isFirstRefresh = false;
     updateTrackerVisibility();
   }, 15000);
+
+  return true;
 }
 
 async function refresh() {
@@ -296,18 +313,21 @@ async function refresh() {
     const payload = await response.json();
     $('overlay-title').textContent = payload.title || 'MyStats Tilt Run Tracker';
 
-    if (isFirstRefresh && payload.suppress_initial_recaps) {
-      const initialLevel = payload.level_completion || {};
-      const initialRun = payload.last_run || {};
-      if (initialLevel.level && initialLevel.completed_at) {
-        lastLevelOverlayKey = `${initialLevel.level}|${initialLevel.completed_at}`;
-        levelOverlaySeen = true;
-      }
-      if (initialRun.run_id && initialRun.ended_at) {
-        lastRunOverlayKey = `${initialRun.run_id}|${initialRun.ended_at}`;
-        runOverlaySeen = true;
-      }
+    const currentRun = payload.current_run || {};
+    const currentRunId = String(currentRun.run_id || '').trim();
+
+    if (!overlayBaselineInitialized) {
+      lastLevelOverlayKey = getLevelOverlayKey(payload.level_completion || {});
+      lastRunOverlayKey = getRunOverlayKey(payload.last_run || {});
+      priorRunId = currentRunId;
+      runRecapArmed = false;
+      hideRecapOverlays();
+      overlayBaselineInitialized = true;
     }
+
+    const lastRunId = String(payload.last_run?.run_id || '').trim();
+    const runJustEnded = !!priorRunId && !currentRunId && lastRunId === priorRunId;
+    if (runJustEnded) runRecapArmed = true;
 
     applyTheme(payload.settings || {});
 
@@ -318,22 +338,23 @@ async function refresh() {
       startRefreshTimer();
     }
 
-    renderCurrentRun(payload.current_run || {});
+    renderCurrentRun(currentRun);
     renderLastRun(payload.last_run || {});
     renderLevelCompletionOverlay(payload.level_completion || {});
-    renderRunCompletionOverlay(payload.last_run || {});
-    isFirstRefresh = false;
+
+    if (runRecapArmed) {
+      const shown = renderRunCompletionOverlay(payload.last_run || {});
+      if (shown) runRecapArmed = false;
+    }
+
+    priorRunId = currentRunId;
   } catch (e) {
     $('run-status').textContent = 'Status: Unavailable';
     $('last-run-summary').textContent = 'Unable to load tilt overlay data from /api/overlay/tilt.';
-    const levelOverlay = $('level-complete-overlay');
-    if (levelOverlay) levelOverlay.hidden = true;
-    const runOverlay = $('run-complete-overlay');
-    if (runOverlay) runOverlay.hidden = true;
-    levelOverlayActive = false;
-    runOverlayActive = false;
-    isFirstRefresh = false;
-    updateTrackerVisibility();
+    hideRecapOverlays();
+    overlayBaselineInitialized = false;
+    priorRunId = '';
+    runRecapArmed = false;
   }
 }
 
