@@ -36,6 +36,22 @@ let suppressRunCompletionUntilNewEvent = true;
 let pendingRunCompletionEventId = 0;
 let displayedRunCompletionEventId = 0;
 
+function setLevelOverlayVisible(isVisible) {
+  const levelOverlay = $('level-complete-overlay');
+  if (!levelOverlay) return;
+  levelOverlay.hidden = !isVisible;
+  levelOverlay.style.display = isVisible ? '' : 'none';
+  levelOverlay.setAttribute('aria-hidden', isVisible ? 'false' : 'true');
+}
+
+function setRunOverlayVisible(isVisible) {
+  const runOverlay = $('run-complete-overlay');
+  if (!runOverlay) return;
+  runOverlay.hidden = !isVisible;
+  runOverlay.style.display = isVisible ? '' : 'none';
+  runOverlay.setAttribute('aria-hidden', isVisible ? 'false' : 'true');
+}
+
 function getLevelOverlayKey(level = {}) {
   const levelNum = Number(level.level || 0);
   const completedAt = String(level.completed_at || '').trim();
@@ -50,25 +66,30 @@ function getRunOverlayKey(runCompletion = {}) {
 }
 
 function hideRecapOverlays() {
-  const levelOverlay = $('level-complete-overlay');
-  const runOverlay = $('run-complete-overlay');
   if (levelOverlayHideTimer) clearTimeout(levelOverlayHideTimer);
   if (runOverlayHideTimer) clearTimeout(runOverlayHideTimer);
   levelOverlayHideTimer = null;
   runOverlayHideTimer = null;
   levelOverlayActive = false;
   runOverlayActive = false;
-  if (levelOverlay) levelOverlay.hidden = true;
-  if (runOverlay) runOverlay.hidden = true;
+  setLevelOverlayVisible(false);
+  setRunOverlayVisible(false);
+  updateTrackerVisibility();
+}
+
+function hideLevelCompletionOverlay() {
+  if (levelOverlayHideTimer) clearTimeout(levelOverlayHideTimer);
+  levelOverlayHideTimer = null;
+  levelOverlayActive = false;
+  setLevelOverlayVisible(false);
   updateTrackerVisibility();
 }
 
 function hideRunCompletionOverlay() {
-  const runOverlay = $('run-complete-overlay');
   if (runOverlayHideTimer) clearTimeout(runOverlayHideTimer);
   runOverlayHideTimer = null;
   runOverlayActive = false;
-  if (runOverlay) runOverlay.hidden = true;
+  setRunOverlayVisible(false);
   updateTrackerVisibility();
 }
 
@@ -215,7 +236,7 @@ function renderLevelCompletionOverlay(level = {}) {
   const overlayKey = getLevelOverlayKey(level);
   if (!overlayKey) {
     if (!levelOverlayActive) {
-      host.hidden = true;
+      setLevelOverlayVisible(false);
       updateTrackerVisibility();
     }
     return false;
@@ -254,11 +275,11 @@ function renderLevelCompletionOverlay(level = {}) {
   levelOverlayActive = true;
   hideRunCompletionOverlay();
   updateTrackerVisibility();
-  host.hidden = false;
+  setLevelOverlayVisible(true);
 
   if (levelOverlayHideTimer) clearTimeout(levelOverlayHideTimer);
   levelOverlayHideTimer = setTimeout(() => {
-    host.hidden = true;
+    setLevelOverlayVisible(false);
     levelOverlayActive = false;
     updateTrackerVisibility();
   }, 10000);
@@ -308,14 +329,13 @@ function renderRunCompletionOverlay(lastRun = {}, shouldDisplay = true) {
 
   runOverlayActive = true;
   levelOverlayActive = false;
-  const levelOverlay = $('level-complete-overlay');
-  if (levelOverlay) levelOverlay.hidden = true;
+  setLevelOverlayVisible(false);
   updateTrackerVisibility();
-  host.hidden = false;
+  setRunOverlayVisible(true);
 
   if (runOverlayHideTimer) clearTimeout(runOverlayHideTimer);
   runOverlayHideTimer = setTimeout(() => {
-    host.hidden = true;
+    setRunOverlayVisible(false);
     runOverlayActive = false;
     updateTrackerVisibility();
   }, 15000);
@@ -403,3 +423,8 @@ startRefreshTimer();
 
 // Ensure recap overlays are hidden before the first payload is processed.
 hideRecapOverlays();
+hideLevelCompletionOverlay();
+hideRunCompletionOverlay();
+const tracker = $('tilt-tracker-card');
+if (tracker) tracker.hidden = false;
+document.body?.setAttribute('data-overlay-mode', 'tracker');
