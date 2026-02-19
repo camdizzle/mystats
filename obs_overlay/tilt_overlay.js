@@ -209,17 +209,40 @@ function applyTheme(settings = {}) {
 function renderStandings(listId, standings, emptyText) {
   const host = $(listId);
   if (!host) return;
+
+  const hasRows = Array.isArray(standings) && standings.length > 0;
+  const rowsMarkup = hasRows
+    ? standings
+      .map((row, i) => `<li><span>#${i + 1} ${row.name}</span><span>${fmt(row.points)} pts</span></li>`)
+      .join('')
+    : '';
+  const renderKey = hasRows ? rowsMarkup : `__empty__:${emptyText}`;
+
+  if (host.dataset.renderKey === renderKey) {
+    if (listId === 'current-standings' && hasRows && !autoScrollTimers.has(listId)) {
+      startAutoScroll(listId);
+    }
+    return;
+  }
+
+  host.dataset.renderKey = renderKey;
   host.dataset.loopHeight = '0';
 
-  if (!Array.isArray(standings) || standings.length === 0) {
+  if (!hasRows) {
     host.innerHTML = `<li>${emptyText}</li>`;
     if (listId === 'current-standings') stopAutoScroll(listId);
     return;
   }
 
-  const rowsMarkup = standings
-    .map((row, i) => `<li><span>#${i + 1} ${row.name}</span><span>${fmt(row.points)} pts</span></li>`)
-    .join('');
+  host.innerHTML = rowsMarkup;
+
+  if (listId === 'current-standings') {
+    const needsLoop = host.scrollHeight - host.clientHeight > 0;
+    if (needsLoop) {
+      host.dataset.loopHeight = String(host.scrollHeight);
+      host.insertAdjacentHTML('beforeend', rowsMarkup);
+    }
+  }
 
   host.innerHTML = rowsMarkup;
 
