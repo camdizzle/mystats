@@ -7,7 +7,7 @@
   --text-scale: 1;
   --overlay-frame-gap: 12px;
   --overlay-frame-width: min(680px, calc(100vw - (var(--overlay-frame-gap) * 2)));
-  --overlay-frame-height: calc(100vh - (var(--overlay-frame-gap) * 2));
+  --overlay-frame-height: min(560px, calc(100vh - (var(--overlay-frame-gap) * 2)));
 }
 
 * { box-sizing: border-box; }
@@ -190,7 +190,7 @@ h1 {
   animation: levelOverlayIn 260ms ease-out;
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 8px;
 }
 
@@ -252,7 +252,7 @@ h1 {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  justify-content: center;
+  justify-content: flex-start;
 }
 
 .run-overlay__burst {
