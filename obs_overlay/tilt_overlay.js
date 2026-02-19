@@ -248,7 +248,7 @@ function renderLevelCompletionOverlay(level = {}) {
   }, 10000);
 }
 
-function renderRunCompletionOverlay(lastRun = {}) {
+function renderRunCompletionOverlay(lastRun = {}, shouldDisplay = true) {
   const host = $('run-complete-overlay');
   const title = $('run-complete-title');
   const subtitle = $('run-complete-subtitle');
