@@ -235,7 +235,19 @@ def parse_tilt_level_state(level_rows):
     level_xp_raw = get_field(['points', 'levelexp', 'expertise'], fallback_index=3, default='0')
     total_xp_raw = get_field(['totalexp', 'totalexpertise'], fallback_index=4, default='0')
     live_raw = get_field(['live', 'islive'], fallback_index=5, default='')
-    level_passed_raw = get_field(['levelpassed', 'passed'], fallback_index=6, default='false').lower()
+
+    level_passed_raw = get_field(['levelpassed', 'passed'], fallback_index=None, default='')
+    if not level_passed_raw:
+        # Tilt exports can be either 6 columns (no live flag) or 7 columns (with live flag).
+        # Prefer explicit index 6 when present, then index 5, and finally the last column.
+        for idx in (6, 5, len(row) - 1):
+            if 0 <= idx < len(row):
+                candidate = str(row[idx]).strip()
+                if candidate:
+                    level_passed_raw = candidate
+                    break
+
+    level_passed_normalized = str(level_passed_raw).strip().lower()
 
     try:
         level_xp = int(float(level_xp_raw))
@@ -254,7 +266,7 @@ def parse_tilt_level_state(level_rows):
         'level_xp': level_xp,
         'total_xp': total_xp,
         'live': live_raw,
-        'level_passed': level_passed_raw == 'true'
+        'level_passed': level_passed_normalized in ('true', '1', 'yes', 'y')
     }
 
 
