@@ -189,7 +189,7 @@ function renderLevelCompletionOverlay(level = {}) {
   const stats = $('level-complete-stats');
   const title = $('level-complete-title');
   const subtitle = $('level-complete-subtitle');
-  if (!host || !stats) return;
+  if (!host || !stats) return false;
 
   const overlayKey = getLevelOverlayKey(level);
   if (!overlayKey) {
@@ -197,10 +197,10 @@ function renderLevelCompletionOverlay(level = {}) {
       host.hidden = true;
       updateTrackerVisibility();
     }
-    return;
+    return false;
   }
 
-  if (overlayKey === lastLevelOverlayKey) return;
+  if (overlayKey === lastLevelOverlayKey) return false;
   lastLevelOverlayKey = overlayKey;
 
   const levelNum = Number(level.level || 0);
@@ -243,6 +243,8 @@ function renderLevelCompletionOverlay(level = {}) {
     levelOverlayActive = false;
     updateTrackerVisibility();
   }, 10000);
+
+  return true;
 }
 
 function renderRunCompletionOverlay(lastRun = {}, shouldDisplay = true) {
@@ -254,10 +256,8 @@ function renderRunCompletionOverlay(lastRun = {}, shouldDisplay = true) {
   if (!host || !title || !subtitle || !top3 || !stats) return false;
 
   const runKey = getRunOverlayKey(lastRun);
-  if (!runKey) return false;
+  if (!shouldDisplay || !runKey) return false;
   if (runKey === lastRunOverlayKey) return false;
-  if (!runKey || !shouldDisplay) return false;
-  if (runKey === lastRunOverlayKey) return;
   lastRunOverlayKey = runKey;
 
   const standings = Array.isArray(lastRun.standings) ? lastRun.standings.slice(0, 3) : [];
@@ -338,9 +338,9 @@ async function refresh() {
 
     renderCurrentRun(currentRun);
     renderLastRun(payload.last_run || {});
-    renderLevelCompletionOverlay(payload.level_completion || {});
+    const levelRecapShown = renderLevelCompletionOverlay(payload.level_completion || {});
 
-    if (runRecapArmed) {
+    if (runRecapArmed && !levelRecapShown) {
       const shown = renderRunCompletionOverlay(payload.last_run || {});
       if (shown) runRecapArmed = false;
     }
