@@ -33,6 +33,8 @@ let runOverlayActive = false;
 let overlayBaselineInitialized = false;
 let lastRunCompletionEventId = 0;
 let suppressRunCompletionUntilNewEvent = true;
+let pendingRunCompletionEventId = 0;
+let displayedRunCompletionEventId = 0;
 
 function getLevelOverlayKey(level = {}) {
   const levelNum = Number(level.level || 0);
@@ -339,6 +341,8 @@ async function refresh() {
       lastLevelOverlayKey = getLevelOverlayKey(payload.level_completion || {});
       lastRunOverlayKey = getRunOverlayKey(runCompletion);
       lastRunCompletionEventId = runCompletionEventId;
+      pendingRunCompletionEventId = 0;
+      displayedRunCompletionEventId = runCompletionEventId;
       suppressRunCompletionUntilNewEvent = true;
       hideRecapOverlays();
       overlayBaselineInitialized = true;
@@ -363,19 +367,21 @@ async function refresh() {
 
     const hasNewRunCompletionEvent = runCompletionEventId > lastRunCompletionEventId;
     if (hasNewRunCompletionEvent) {
+      pendingRunCompletionEventId = runCompletionEventId;
+      lastRunCompletionEventId = runCompletionEventId;
       suppressRunCompletionUntilNewEvent = false;
     }
 
-    if (currentStatus === 'idle' && !suppressRunCompletionUntilNewEvent && hasNewRunCompletionEvent && !levelRecapShown) {
+    const hasPendingRunCompletionEvent = pendingRunCompletionEventId > displayedRunCompletionEventId;
+    if (currentStatus === 'idle' && !suppressRunCompletionUntilNewEvent && hasPendingRunCompletionEvent && !levelRecapShown) {
       const runRecapShown = renderRunCompletionOverlay(runCompletion);
       if (runRecapShown) {
-        lastRunCompletionEventId = runCompletionEventId;
+        displayedRunCompletionEventId = pendingRunCompletionEventId;
+        pendingRunCompletionEventId = 0;
       }
-    } else if (hasNewRunCompletionEvent && levelRecapShown) {
+    } else if (hasPendingRunCompletionEvent && levelRecapShown) {
       // Preserve the event while level recap is visible and show run recap on the next refresh.
-      // Intentionally do not advance lastRunCompletionEventId here.
-    } else if (!hasNewRunCompletionEvent && runCompletionEventId > 0) {
-      lastRunCompletionEventId = runCompletionEventId;
+      // Intentionally keep pendingRunCompletionEventId set until level recap clears.
     }
 
   } catch (e) {
