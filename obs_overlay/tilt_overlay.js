@@ -76,6 +76,24 @@ function updateTrackerVisibility() {
   document.body?.setAttribute('data-overlay-mode', showingRecap ? 'recap' : 'tracker');
 }
 
+function hideRecapOverlays() {
+  const levelOverlay = $('level-complete-overlay');
+  const runOverlay = $('run-complete-overlay');
+
+  if (levelOverlayHideTimer) clearTimeout(levelOverlayHideTimer);
+  if (runOverlayHideTimer) clearTimeout(runOverlayHideTimer);
+  levelOverlayHideTimer = null;
+  runOverlayHideTimer = null;
+
+  levelOverlayActive = false;
+  runOverlayActive = false;
+
+  if (levelOverlay) levelOverlay.hidden = true;
+  if (runOverlay) runOverlay.hidden = true;
+
+  updateTrackerVisibility();
+}
+
 function startAutoScroll(listId) {
   const host = $(listId);
   if (!host) return;
@@ -140,9 +158,7 @@ function renderStandings(listId, standings, emptyText) {
     .map((row, i) => `<li><span>#${i + 1} ${row.name}</span><span>${fmt(row.points)} pts</span></li>`)
     .join('');
 
-  if (listId === 'current-standings') {
-    startAutoScroll(listId);
-  }
+  if (listId === 'current-standings') startAutoScroll(listId);
 }
 
 function renderCurrentRun(run = {}) {
@@ -201,6 +217,7 @@ function renderLevelCompletionOverlay(level = {}) {
     }
     return;
   }
+
   if (overlayKey === lastLevelOverlayKey) return;
   lastLevelOverlayKey = overlayKey;
 
@@ -252,9 +269,11 @@ function renderRunCompletionOverlay(lastRun = {}, shouldDisplay = true) {
   const subtitle = $('run-complete-subtitle');
   const top3 = $('run-complete-top3');
   const stats = $('run-complete-stats');
-  if (!host || !title || !subtitle || !top3 || !stats) return;
+  if (!host || !title || !subtitle || !top3 || !stats) return false;
 
   const runKey = getRunOverlayKey(lastRun);
+  if (!runKey) return false;
+  if (runKey === lastRunOverlayKey) return false;
   if (!runKey || !shouldDisplay) return false;
   if (runKey === lastRunOverlayKey) return;
   lastRunOverlayKey = runKey;
@@ -271,7 +290,7 @@ function renderRunCompletionOverlay(lastRun = {}, shouldDisplay = true) {
         <span class="run-overlay__points">${fmt(row.points)} pts</span>
       </li>
     `).join('')
-    : '<li><span class="run-overlay__rank run-overlay__rank--1">1</span><span class="run-overlay__name">No results</span><span class="run-overlay__points">-</span></li>' ;
+    : '<li><span class="run-overlay__rank run-overlay__rank--1">1</span><span class="run-overlay__name">No results</span><span class="run-overlay__points">-</span></li>';
 
   stats.innerHTML = `
     <div class="overlay-hero overlay-hero--run">
@@ -311,6 +330,13 @@ async function refresh() {
     const payload = await response.json();
     $('overlay-title').textContent = payload.title || 'MyStats Tilt Run Tracker';
 
+    const currentRun = payload.current_run || {};
+    const currentStatus = currentRun.status === 'active' ? 'active' : 'idle';
+
+    if (!overlayBaselineInitialized) {
+      lastLevelOverlayKey = getLevelOverlayKey(payload.level_completion || {});
+      lastRunOverlayKey = getRunOverlayKey(payload.last_run || {});
+      priorRunStatus = currentStatus;
     if (!overlayBaselineInitialized) {
       lastLevelOverlayKey = getLevelOverlayKey(payload.level_completion || {});
       lastRunOverlayKey = getRunOverlayKey(payload.last_run || {});
@@ -321,6 +347,9 @@ async function refresh() {
       overlayBaselineInitialized = true;
     }
 
+    const runJustEnded = priorRunStatus === 'active' && currentStatus === 'idle';
+    if (runJustEnded) runRecapArmed = true;
+
     applyTheme(payload.settings || {});
 
     const refreshFromPayload = Number(payload.settings?.refresh_seconds || defaultSettings.refresh_seconds);
@@ -330,6 +359,14 @@ async function refresh() {
       startRefreshTimer();
     }
 
+    renderCurrentRun(currentRun);
+    renderLastRun(payload.last_run || {});
+    renderLevelCompletionOverlay(payload.level_completion || {});
+
+    if (runRecapArmed) {
+      const shown = renderRunCompletionOverlay(payload.last_run || {});
+      if (shown) runRecapArmed = false;
+    }
     const currentRun = payload.current_run || {};
     const currentStatus = currentRun.status === 'active' ? 'active' : 'idle';
     const runJustEnded = priorRunStatus === 'active' && currentStatus === 'idle';
@@ -345,6 +382,10 @@ async function refresh() {
   } catch (e) {
     $('run-status').textContent = 'Status: Unavailable';
     $('last-run-summary').textContent = 'Unable to load tilt overlay data from /api/overlay/tilt.';
+    hideRecapOverlays();
+    overlayBaselineInitialized = false;
+    priorRunStatus = 'idle';
+    runRecapArmed = false;
     const levelOverlay = $('level-complete-overlay');
     if (levelOverlay) levelOverlay.hidden = true;
     const runOverlay = $('run-complete-overlay');
