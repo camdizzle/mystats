@@ -168,19 +168,20 @@ function startAutoScroll(listId) {
   stopAutoScroll(listId);
   host.scrollTop = 0;
 
+  const loopHeight = Number(host.dataset.loopHeight || 0);
   const maxScrollTop = host.scrollHeight - host.clientHeight;
-  if (maxScrollTop <= 0) return;
+  if (maxScrollTop <= 0 && loopHeight <= 0) return;
 
-  let isPaused = false;
   const timerId = setInterval(() => {
-    if (isPaused) return;
-
     host.scrollTop = host.scrollTop + autoScrollConfig.stepPx;
 
-    if (host.scrollTop >= maxScrollTop) {
+    if (loopHeight > 0 && host.scrollTop >= loopHeight) {
+      host.scrollTop -= loopHeight;
+      return;
+    }
+
+    if (loopHeight <= 0 && host.scrollTop >= maxScrollTop) {
       host.scrollTop = 0;
-      isPaused = true;
-      setTimeout(() => { isPaused = false; }, autoScrollConfig.pauseMs);
     }
   }, autoScrollConfig.intervalMs);
 
@@ -208,15 +209,27 @@ function applyTheme(settings = {}) {
 function renderStandings(listId, standings, emptyText) {
   const host = $(listId);
   if (!host) return;
+  host.dataset.loopHeight = '0';
+
   if (!Array.isArray(standings) || standings.length === 0) {
     host.innerHTML = `<li>${emptyText}</li>`;
     if (listId === 'current-standings') stopAutoScroll(listId);
     return;
   }
 
-  host.innerHTML = standings
+  const rowsMarkup = standings
     .map((row, i) => `<li><span>#${i + 1} ${row.name}</span><span>${fmt(row.points)} pts</span></li>`)
     .join('');
+
+  host.innerHTML = rowsMarkup;
+
+  if (listId === 'current-standings') {
+    const needsLoop = host.scrollHeight - host.clientHeight > 0;
+    if (needsLoop) {
+      host.dataset.loopHeight = String(host.scrollHeight);
+      host.insertAdjacentHTML('beforeend', rowsMarkup);
+    }
+  }
 
   if (listId === 'current-standings') startAutoScroll(listId);
 }
