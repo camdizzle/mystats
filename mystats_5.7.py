@@ -1700,6 +1700,12 @@ def _build_tilt_overlay_payload():
     if not isinstance(level_completion, dict):
         level_completion = {}
 
+    run_completion = parse_json_setting('tilt_run_completion_overlay', {})
+    if not isinstance(run_completion, dict):
+        run_completion = {}
+
+    run_completion_event_id = get_int_setting('tilt_run_completion_event_id', 0)
+
     settings_payload = _build_overlay_settings_payload()
     settings_payload['theme'] = settings_payload.get('tilt_theme') or settings_payload.get('theme') or 'midnight'
 
@@ -1710,6 +1716,8 @@ def _build_tilt_overlay_payload():
         'current_run': current_summary,
         'last_run': last_run_summary,
         'level_completion': level_completion,
+        'run_completion': run_completion,
+        'run_completion_event_id': run_completion_event_id,
         'suppress_initial_recaps': True,
     }
     return payload
@@ -5502,6 +5510,7 @@ async def tilted(bot):
                 config.set_setting('tilt_run_points', '0', persistent=False)
                 config.set_setting('tilt_previous_run_xp', config.get_setting('tilt_run_xp') or '0', persistent=False)
                 config.set_setting('tilt_level_completion_overlay', '{}', persistent=False)
+                config.set_setting('tilt_run_completion_overlay', '{}', persistent=False)
 
             if run_id is None:
                 run_id = base64.urlsafe_b64encode(uuid.uuid4().bytes).rstrip(b'=').decode('utf-8')
@@ -5717,6 +5726,9 @@ async def tilted(bot):
                     'standings': [{'name': name, 'points': int(points)} for name, points in top_users_today],
                 }
                 config.set_setting('tilt_last_run_summary', json.dumps(last_run_summary), persistent=False)
+                config.set_setting('tilt_run_completion_overlay', json.dumps(last_run_summary), persistent=False)
+                next_run_completion_event_id = get_int_setting('tilt_run_completion_event_id', 0) + 1
+                config.set_setting('tilt_run_completion_event_id', str(next_run_completion_event_id), persistent=False)
 
                 config.set_setting('tilt_previous_run_xp', str(run_xp), persistent=False)
                 config.set_setting('tilt_current_run_id', '', persistent=False)
