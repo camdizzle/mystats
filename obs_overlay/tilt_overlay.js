@@ -266,9 +266,11 @@ function renderCurrentRun(run = {}) {
 
   const leader = run.leader ? `${run.leader.name} (${fmt(run.leader.points)} pts)` : 'None';
   const topTiltee = run.top_tiltee || 'None';
+  const topTilteeCount = Number(run.top_tiltee_count || 0);
+  const topTilteeWithCount = topTiltee === 'None' ? 'None' : `${topTiltee} (${fmt(topTilteeCount)} tops)`;
   $('current-leader').textContent = leader;
-  $('current-top-tiltee').textContent = topTiltee;
-  $('top-tiltee-pill').textContent = `Top Tiltee: ${topTiltee}`;
+  $('current-top-tiltee').textContent = topTilteeWithCount;
+  $('top-tiltee-pill').textContent = `Top Tiltee: ${topTilteeWithCount}`;
   $('current-run-points').textContent = fmt(run.run_points);
   $('current-run-xp').textContent = fmt(run.run_xp);
   $('best-run-xp').textContent = fmt(run.best_run_xp_today);

@@ -277,6 +277,33 @@ def parse_tilt_result_row(row):
     return username, points, run_id
 
 
+def parse_tilt_result_detail(row):
+    """Parse a tilt results row and return details used by tilt analytics and chat commands."""
+    parsed = parse_tilt_result_row(row)
+    if parsed is None:
+        return None
+
+    username, points, run_id = parsed
+
+    is_top_tiltee = False
+    if len(row) >= 2:
+        raw_top_value = str(row[-2]).strip().lower()
+        is_top_tiltee = raw_top_value in ('1', 'true', 'yes', 'y')
+
+    return {
+        'run_id': run_id,
+        'username': username,
+        'points': points,
+        'is_top_tiltee': is_top_tiltee,
+    }
+
+
+def is_tilt_top_tiltee_milestone(count):
+    if count in (3, 5):
+        return True
+    return count >= 10 and count % 5 == 0
+
+
 def get_tilt_multiplier(level_number):
     if 1 <= level_number <= 14:
         return 1.0 / 3.0
@@ -1691,6 +1718,7 @@ def _build_tilt_overlay_payload():
     current_level = get_int_setting('tilt_current_level', 0)
     current_elapsed = str(config.get_setting('tilt_current_elapsed') or '0:00')
     current_top_tiltee = str(config.get_setting('tilt_current_top_tiltee') or 'None')
+    current_top_tiltee_count = get_int_setting('tilt_current_top_tiltee_count', 0)
 
     lifetime_base_xp = get_int_setting('tilt_lifetime_base_xp', 0)
 
@@ -1701,6 +1729,7 @@ def _build_tilt_overlay_payload():
         'level': current_level,
         'elapsed_time': current_elapsed,
         'top_tiltee': current_top_tiltee,
+        'top_tiltee_count': current_top_tiltee_count,
         'run_points': get_int_setting('tilt_run_points', 0),
         'run_xp': get_int_setting('tilt_run_xp', 0),
         'best_run_xp_today': get_int_setting('tilt_best_run_xp_today', 0),
@@ -5040,6 +5069,53 @@ class Bot(commands.Bot):
         )
 
 
+    @commands.command(name='toptiltees')
+    async def toptiltees_command(self, ctx):
+        season_points_by_player = defaultdict(int)
+        top_tiltee_counts = defaultdict(int)
+
+        for tilts_file in glob.glob(os.path.join(config.get_setting('directory'), "tilts_*.csv")):
+            try:
+                with open(tilts_file, 'rb') as f:
+                    raw_data = f.read()
+                result = chardet.detect(raw_data)
+                encoding = result['encoding'] if result['encoding'] else 'utf-8'
+
+                with open(tilts_file, 'r', encoding=encoding, errors='ignore') as f:
+                    reader = csv.reader(f)
+                    for row in reader:
+                        detail = parse_tilt_result_detail(row)
+                        if detail is None:
+                            continue
+
+                        username = detail['username']
+                        season_points_by_player[username] += detail['points']
+                        if detail['is_top_tiltee']:
+                            top_tiltee_counts[username] += 1
+            except FileNotFoundError:
+                continue
+            except Exception as e:
+                print(e)
+
+        if not top_tiltee_counts:
+            await send_chat_message(ctx.channel, "No top tiltee data available yet.", category="mystats")
+            return
+
+        ranked = sorted(
+            top_tiltee_counts.items(),
+            key=lambda item: (item[1], season_points_by_player.get(item[0], 0)),
+            reverse=True
+        )[:10]
+
+        items = [
+            f"({idx}) {name} {tops} tops, {season_points_by_player.get(name, 0):,} points"
+            for idx, (name, tops) in enumerate(ranked, start=1)
+        ]
+
+        message = "Top Tiltees: " + ", ".join(items) + "."
+        await send_chat_message(ctx.channel, message, category="mystats")
+
+
     @commands.command(name='top10tilees')
     async def top10tilees_command(self, ctx):
         data = defaultdict(int)
@@ -5587,6 +5663,9 @@ async def tilted(bot):
     last_modified_tilt = None
     run_id = None
     max_message_length = 480
+    tilt_levels_count = 0
+    last_tilt_narrative_alert_level_count = 0
+    current_tilt_points_leader = None
 
     while not bot.stop_event.is_set():
         try:
@@ -5640,11 +5719,14 @@ async def tilted(bot):
                 run_id = base64.urlsafe_b64encode(uuid.uuid4().bytes).rstrip(b'=').decode('utf-8')
                 config.set_setting('tilt_run_started_at', datetime.now().strftime('%Y-%m-%d %H:%M:%S'), persistent=False)
                 config.set_setting('tilt_run_ledger', '{}', persistent=False)
+                config.set_setting('tilt_top_tiltee_ledger', '{}', persistent=False)
+                config.set_setting('tilt_current_top_tiltee_count', '0', persistent=False)
                 config.set_setting('tilt_run_xp', '0', persistent=False)
                 config.set_setting('tilt_run_points', '0', persistent=False)
                 config.set_setting('tilt_previous_run_xp', config.get_setting('tilt_run_xp') or '0', persistent=False)
                 config.set_setting('tilt_level_completion_overlay', '{}', persistent=False)
                 config.set_setting('tilt_run_completion_overlay', '{}', persistent=False)
+                current_tilt_points_leader = None
 
             if run_id is None:
                 run_id = base64.urlsafe_b64encode(uuid.uuid4().bytes).rstrip(b'=').decode('utf-8')
@@ -5657,6 +5739,13 @@ async def tilted(bot):
                     run_ledger = {}
             except Exception:
                 run_ledger = {}
+
+            try:
+                tilt_top_tiltee_ledger = json.loads(config.get_setting('tilt_top_tiltee_ledger') or '{}')
+                if not isinstance(tilt_top_tiltee_ledger, dict):
+                    tilt_top_tiltee_ledger = {}
+            except Exception:
+                tilt_top_tiltee_ledger = {}
 
             tilt_player_file = config.get_setting('tilt_player_file')
             tilt_rows = safe_read_csv_rows(tilt_player_file)
@@ -5737,6 +5826,15 @@ async def tilted(bot):
             config.set_setting('tilt_lifetime_expertise', str(lifetime_expertise), persistent=False)
 
             if level_passed:
+                tilt_levels_count += 1
+
+                top_tiltee_run_count = 0
+                if top_tiltee and top_tiltee != 'None':
+                    top_tiltee_run_count = int(tilt_top_tiltee_ledger.get(top_tiltee, 0)) + 1
+                    tilt_top_tiltee_ledger[top_tiltee] = top_tiltee_run_count
+                config.set_setting('tilt_top_tiltee_ledger', json.dumps(tilt_top_tiltee_ledger), persistent=False)
+                config.set_setting('tilt_current_top_tiltee_count', str(top_tiltee_run_count), persistent=False)
+
                 tilts_results_file = config.get_setting('tilts_results_file')
                 if not tilts_results_file:
                     create_results_files()
@@ -5753,10 +5851,46 @@ async def tilted(bot):
                             event_ids = [0]
 
                         for _, _, row in survivors:
-                            data_to_write = [run_id, current_level] + row + [event_ids]
+                            is_top_tiltee = str(row[0]).strip().lower() == top_tiltee.lower()
+                            data_to_write = [run_id, current_level] + row + [str(is_top_tiltee), event_ids]
                             writer.writerow(data_to_write)
                 except Exception as e:
                     print(f"Error opening/writing to tilts_results_file: {e}")
+
+                narrative_messages = []
+                if is_chat_response_enabled("chat_narrative_alerts"):
+                    if is_chat_response_enabled("narrative_alert_grinder_enabled") and is_tilt_top_tiltee_milestone(top_tiltee_run_count):
+                        narrative_messages.append(
+                            f"🏁 Grinder: {top_tiltee} reached {top_tiltee_run_count} top-tiltee appearances this run"
+                        )
+
+                    if is_chat_response_enabled("narrative_alert_winmilestone_enabled") and top_tiltee_run_count > 0:
+                        narrative_messages.append(
+                            f"🏆 Top Tiltee Milestone: {top_tiltee} now has {top_tiltee_run_count} tops this run"
+                        )
+
+                    if is_chat_response_enabled("narrative_alert_leadchange_enabled") and run_ledger:
+                        sorted_points = sorted(run_ledger.items(), key=lambda item: item[1], reverse=True)
+                        leader_username, leader_points = sorted_points[0]
+                        second_place_points = sorted_points[1][1] if len(sorted_points) > 1 else 0
+                        lead_gap = leader_points - second_place_points
+                        min_lead_gap = max(0, get_int_setting("narrative_alert_min_lead_change_points", 500))
+                        tied_for_lead = len(sorted_points) > 1 and second_place_points == leader_points
+                        if (not tied_for_lead and leader_username != current_tilt_points_leader
+                                and lead_gap >= min_lead_gap):
+                            current_tilt_points_leader = leader_username
+                            narrative_messages.append(
+                                f"📈 Lead Change: {leader_username} now leads by {lead_gap:,} points"
+                            )
+
+                if narrative_messages:
+                    cooldown_races = max(0, get_int_setting("narrative_alert_cooldown_races", 3))
+                    max_items = max(1, get_int_setting("narrative_alert_max_items", 3))
+                    if cooldown_races == 0 or (tilt_levels_count - last_tilt_narrative_alert_level_count) >= cooldown_races:
+                        combined_narrative = "📣 Player Alerts: " + " | ".join(narrative_messages[:max_items]) + "."
+                        if is_chat_response_enabled("chat_tilt_results"):
+                            await send_chat_message(bot.channel, combined_narrative, category="tilt")
+                        last_tilt_narrative_alert_level_count = tilt_levels_count
 
                 finisher_names = [username for username, _, _ in survivors]
                 limited_finishers = finisher_names[:get_chat_max_names()]
@@ -5782,6 +5916,7 @@ async def tilted(bot):
                     'completed_at': datetime.now().isoformat(timespec='seconds'),
                     'level': current_level,
                     'top_tiltee': top_tiltee,
+                    'top_tiltee_count': top_tiltee_run_count,
                     'elapsed_time': elapsed_time,
                     'level_points': level_points,
                     'earned_xp': earned_xp,
@@ -5851,6 +5986,7 @@ async def tilted(bot):
                     'ended_level': current_level,
                     'elapsed_time': elapsed_time,
                     'top_tiltee': top_tiltee,
+                    'top_tiltee_count': get_int_setting('tilt_current_top_tiltee_count', 0),
                     'leader': {'name': top_user_names[0], 'points': int(top_users_today[0][1])} if top_users_today else None,
                     'run_points': run_points,
                     'run_xp': run_xp,
@@ -5869,8 +6005,11 @@ async def tilted(bot):
                 config.set_setting('tilt_run_xp', '0', persistent=False)
                 config.set_setting('tilt_run_points', '0', persistent=False)
                 config.set_setting('tilt_run_ledger', '{}', persistent=False)
+                config.set_setting('tilt_top_tiltee_ledger', '{}', persistent=False)
+                config.set_setting('tilt_current_top_tiltee_count', '0', persistent=False)
                 config.set_setting('tilt_level_completion_overlay', '{}', persistent=False)
                 run_id = None
+                current_tilt_points_leader = None
 
             last_modified_tilt = current_modified_tilt
         except Exception as e:
