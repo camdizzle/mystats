@@ -31,8 +31,10 @@ let lastRunOverlayKey = '';
 let levelOverlayActive = false;
 let runOverlayActive = false;
 let overlayBaselineInitialized = false;
-let priorRunStatus = 'idle';
-let runRecapArmed = false;
+let lastRunCompletionEventId = 0;
+let suppressRunCompletionUntilNewEvent = true;
+let pendingRunCompletionEventId = 0;
+let displayedRunCompletionEventId = 0;
 
 function getLevelOverlayKey(level = {}) {
   const levelNum = Number(level.level || 0);
@@ -41,10 +43,10 @@ function getLevelOverlayKey(level = {}) {
   return `${levelNum}|${completedAt}`;
 }
 
-function getRunOverlayKey(lastRun = {}) {
-  const hasRun = !!(lastRun && lastRun.run_id && lastRun.ended_at);
+function getRunOverlayKey(runCompletion = {}) {
+  const hasRun = !!(runCompletion && runCompletion.run_id && runCompletion.ended_at);
   if (!hasRun) return '';
-  return `${lastRun.run_id}|${lastRun.ended_at}`;
+  return `${runCompletion.run_id}|${runCompletion.ended_at}`;
 }
 
 function hideRecapOverlays() {
@@ -332,20 +334,21 @@ async function refresh() {
     const currentRun = payload.current_run || {};
     const currentStatus = currentRun.status === 'active' ? 'active' : 'idle';
 
+    const runCompletion = payload.run_completion || {};
+    const runCompletionEventId = Math.max(0, Number(payload.run_completion_event_id || 0));
+
     if (!overlayBaselineInitialized) {
       lastLevelOverlayKey = getLevelOverlayKey(payload.level_completion || {});
-      lastRunOverlayKey = getRunOverlayKey(payload.last_run || {});
-      priorRunStatus = currentStatus;
-      runRecapArmed = false;
+      lastRunOverlayKey = getRunOverlayKey(runCompletion);
+      lastRunCompletionEventId = runCompletionEventId;
+      pendingRunCompletionEventId = 0;
+      displayedRunCompletionEventId = runCompletionEventId;
+      suppressRunCompletionUntilNewEvent = true;
       hideRecapOverlays();
       overlayBaselineInitialized = true;
     }
 
-    if (priorRunStatus === 'active' && currentStatus === 'idle') {
-      runRecapArmed = true;
-    } else if (currentStatus === 'active') {
-      // A new run has started (or resumed). Never let an old run recap linger over active gameplay.
-      runRecapArmed = false;
+    if (currentStatus === 'active') {
       hideRunCompletionOverlay();
     }
 
@@ -362,20 +365,30 @@ async function refresh() {
     renderLastRun(payload.last_run || {});
     const levelRecapShown = renderLevelCompletionOverlay(payload.level_completion || {});
 
-    if (currentStatus === 'idle' && runRecapArmed && !levelRecapShown) {
-      const runRecapShown = renderRunCompletionOverlay(payload.last_run || {});
-      if (runRecapShown) runRecapArmed = false;
+    const hasNewRunCompletionEvent = runCompletionEventId > lastRunCompletionEventId;
+    if (hasNewRunCompletionEvent) {
+      pendingRunCompletionEventId = runCompletionEventId;
+      lastRunCompletionEventId = runCompletionEventId;
+      suppressRunCompletionUntilNewEvent = false;
     }
 
-    priorRunStatus = currentStatus;
+    const hasPendingRunCompletionEvent = pendingRunCompletionEventId > displayedRunCompletionEventId;
+    if (currentStatus === 'idle' && !suppressRunCompletionUntilNewEvent && hasPendingRunCompletionEvent && !levelRecapShown) {
+      const runRecapShown = renderRunCompletionOverlay(runCompletion);
+      if (runRecapShown) {
+        displayedRunCompletionEventId = pendingRunCompletionEventId;
+        pendingRunCompletionEventId = 0;
+      }
+    } else if (hasPendingRunCompletionEvent && levelRecapShown) {
+      // Preserve the event while level recap is visible and show run recap on the next refresh.
+      // Intentionally keep pendingRunCompletionEventId set until level recap clears.
+    }
 
   } catch (e) {
     $('run-status').textContent = 'Status: Unavailable';
     $('last-run-summary').textContent = 'Unable to load tilt overlay data from /api/overlay/tilt.';
     hideRecapOverlays();
-    overlayBaselineInitialized = false;
-    priorRunStatus = 'idle';
-    runRecapArmed = false;
+    // Keep baseline/event memory across transient fetch errors so historical run-complete events are not retriggered.
     updateTrackerVisibility();
   }
 }
