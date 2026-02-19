@@ -258,6 +258,25 @@ def parse_tilt_level_state(level_rows):
     }
 
 
+def parse_tilt_result_row(row):
+    """Parse a tilt results row written by `tilted` and return (username, points, run_id)."""
+    if len(row) < 5:
+        return None
+
+    run_id = row[0].strip()
+    username = row[2].strip()
+
+    if not username:
+        return None
+
+    try:
+        points = int(float(row[4]))
+    except (TypeError, ValueError):
+        return None
+
+    return username, points, run_id
+
+
 def get_tilt_multiplier(level_number):
     if 1 <= level_number <= 14:
         return 1.0 / 3.0
@@ -4946,6 +4965,121 @@ class Bot(commands.Bot):
         )
 
 
+    @commands.command(name='mytilts')
+    async def mytilts_command(self, ctx, username: str = None):
+        if username is None:
+            target_name = ctx.author.name
+            display_name = ctx.author.name
+        else:
+            target_name = username.split()[0].lstrip('@')
+            display_name = target_name
+
+        runs_today = set()
+        season_runs = set()
+        levels_today = 0
+        levels_season = 0
+        points_today = 0
+        points_season = 0
+
+        _, _, _, adjusted_time = time_manager.get_adjusted_time()
+        today_date = adjusted_time.strftime("%Y-%m-%d")
+
+        for tilts_file in glob.glob(os.path.join(config.get_setting('directory'), "tilts_*.csv")):
+            try:
+                with open(tilts_file, 'rb') as f:
+                    raw_data = f.read()
+                result = chardet.detect(raw_data)
+                encoding = result['encoding'] if result['encoding'] else 'utf-8'
+
+                with open(tilts_file, 'r', encoding=encoding, errors='ignore') as f:
+                    reader = csv.reader(f)
+                    for row in reader:
+                        parsed = parse_tilt_result_row(row)
+                        if parsed is None:
+                            continue
+
+                        racer, points, run_id = parsed
+                        if racer.lower() != target_name.lower():
+                            continue
+
+                        file_date = os.path.basename(tilts_file)[6:16]
+                        levels_season += 1
+                        points_season += points
+                        season_runs.add(run_id)
+
+                        if file_date == today_date:
+                            levels_today += 1
+                            points_today += points
+                            runs_today.add(run_id)
+
+
+            except FileNotFoundError:
+                continue
+            except Exception as e:
+                print(e)
+
+        if points_season == 0 and levels_season == 0:
+            await send_chat_message(
+                ctx.channel,
+                f"{display_name}: No tilt data found this season.",
+                category="mystats"
+            )
+            return
+
+        avg_today = points_today / levels_today if levels_today else 0
+        avg_season = points_season / levels_season if levels_season else 0
+
+        avg_today_rounded_down = math.floor(avg_today * 10) / 10
+        avg_season_rounded_down = math.floor(avg_season * 10) / 10
+
+        await send_chat_message(
+            ctx.channel,
+            f"{display_name}: Today Tilt - {len(runs_today)} runs, {points_today:,} points, {levels_today:,} levels, PPL: {avg_today_rounded_down:.1f} | "
+            f"Season Tilt - {len(season_runs)} runs, {points_season:,} points, {levels_season:,} levels, PPL: {avg_season_rounded_down:.1f}",
+            category="mystats"
+        )
+
+
+    @commands.command(name='top10tilees')
+    async def top10tilees_command(self, ctx):
+        data = defaultdict(int)
+
+        for tilts_file in glob.glob(os.path.join(config.get_setting('directory'), "tilts_*.csv")):
+            try:
+                with open(tilts_file, 'rb') as f:
+                    raw_data = f.read()
+                result = chardet.detect(raw_data)
+                encoding = result['encoding'] if result['encoding'] else 'utf-8'
+
+                with open(tilts_file, 'r', encoding=encoding, errors='ignore') as f:
+                    reader = csv.reader(f)
+                    for row in reader:
+                        parsed = parse_tilt_result_row(row)
+                        if parsed is None:
+                            continue
+
+                        racer, points, _ = parsed
+                        data[racer] += points
+            except FileNotFoundError:
+                continue
+            except Exception as e:
+                print(e)
+
+        if not data:
+            await send_chat_message(ctx.channel, "No tilt data available yet.", category="mystats")
+            return
+
+        top_tilees = sorted(data.items(), key=lambda x: x[1], reverse=True)[:10]
+        message = "Top 10 Tilees by Tilt Points: "
+        for i, (racer, points) in enumerate(top_tilees):
+            place = i + 1
+            message += "{} {} {} points{}".format(
+                "(" + str(place) + ")", racer, format(points, ','), ", " if i < len(top_tilees) - 1 else "."
+            )
+
+        await send_chat_message(ctx.channel, message, category="mystats")
+
+
     
     @commands.command(name='top10nwr')
     async def top10nwr_command(self, ctx):
@@ -5680,7 +5814,7 @@ async def tilted(bot):
                 if limited_run_results:
                     standings_items = [f"{username} - {points} points" for username, points in limited_run_results]
                     chunks = chunked_join_messages(
-                        f"Run {run_id[:6]} is over! Final standings: ",
+                        "Tilt run complete! Final standings: ",
                         "Run standings cont: ",
                         standings_items,
                         max_length=max_message_length
@@ -5688,11 +5822,11 @@ async def tilted(bot):
                     for chunk in chunks:
                         if is_chat_response_enabled("chat_tilt_results"):
                             await send_chat_message(bot.channel, chunk, category="tilt")
-                    text_area.insert('end', f"\nRun {run_id[:6]} is over! Final standings: {', '.join(standings_items)}\n")
+                    text_area.insert('end', f"\nTilt run complete! Final standings: {', '.join(standings_items)}\n")
                 else:
                     if is_chat_response_enabled("chat_tilt_results"):
-                        await send_chat_message(bot.channel, f"Run {run_id[:6]} is over! No results to display.", category="tilt")
-                    text_area.insert('end', f"\nRun {run_id[:6]} is over! No results to display.\n")
+                        await send_chat_message(bot.channel, "Tilt run complete! No results to display.", category="tilt")
+                    text_area.insert('end', f"\nTilt run complete! No results to display.\n")
 
                 top_users_today = sorted(run_ledger.items(), key=lambda x: x[1], reverse=True)[:10]
                 top_user_names = [name for name, _ in top_users_today]
