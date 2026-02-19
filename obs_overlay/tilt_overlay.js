@@ -28,6 +28,8 @@ let levelOverlayHideTimer = null;
 let runOverlayHideTimer = null;
 let lastLevelOverlayKey = '';
 let lastRunOverlayKey = '';
+let levelOverlaySeen = false;
+let runOverlaySeen = false;
 let levelOverlayActive = false;
 let runOverlayActive = false;
 
@@ -173,6 +175,11 @@ function renderLevelCompletionOverlay(level = {}) {
   }
 
   const overlayKey = `${levelNum}|${completedAt}`;
+  if (!levelOverlaySeen) {
+    levelOverlaySeen = true;
+    lastLevelOverlayKey = overlayKey;
+    return;
+  }
   if (overlayKey === lastLevelOverlayKey) return;
   lastLevelOverlayKey = overlayKey;
 
@@ -228,6 +235,11 @@ function renderRunCompletionOverlay(lastRun = {}) {
   if (!hasRun) return;
 
   const runKey = `${lastRun.run_id}|${lastRun.ended_at}`;
+  if (!runOverlaySeen) {
+    runOverlaySeen = true;
+    lastRunOverlayKey = runKey;
+    return;
+  }
   if (runKey === lastRunOverlayKey) return;
   lastRunOverlayKey = runKey;
 
