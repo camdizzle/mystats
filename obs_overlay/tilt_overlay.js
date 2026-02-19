@@ -61,6 +61,15 @@ function hideRecapOverlays() {
   updateTrackerVisibility();
 }
 
+function hideRunCompletionOverlay() {
+  const runOverlay = $('run-complete-overlay');
+  if (runOverlayHideTimer) clearTimeout(runOverlayHideTimer);
+  runOverlayHideTimer = null;
+  runOverlayActive = false;
+  if (runOverlay) runOverlay.hidden = true;
+  updateTrackerVisibility();
+}
+
 function stopAutoScroll(listId) {
   const timerId = autoScrollTimers.get(listId);
   if (timerId) {
@@ -241,9 +250,7 @@ function renderLevelCompletionOverlay(level = {}) {
   `;
 
   levelOverlayActive = true;
-  runOverlayActive = false;
-  const runOverlay = $('run-complete-overlay');
-  if (runOverlay) runOverlay.hidden = true;
+  hideRunCompletionOverlay();
   updateTrackerVisibility();
   host.hidden = false;
 
@@ -336,6 +343,10 @@ async function refresh() {
 
     if (priorRunStatus === 'active' && currentStatus === 'idle') {
       runRecapArmed = true;
+    } else if (currentStatus === 'active') {
+      // A new run has started (or resumed). Never let an old run recap linger over active gameplay.
+      runRecapArmed = false;
+      hideRunCompletionOverlay();
     }
 
     applyTheme(payload.settings || {});
@@ -351,7 +362,7 @@ async function refresh() {
     renderLastRun(payload.last_run || {});
     const levelRecapShown = renderLevelCompletionOverlay(payload.level_completion || {});
 
-    if (runRecapArmed && !levelRecapShown) {
+    if (currentStatus === 'idle' && runRecapArmed && !levelRecapShown) {
       const runRecapShown = renderRunCompletionOverlay(payload.last_run || {});
       if (runRecapShown) runRecapArmed = false;
     }
