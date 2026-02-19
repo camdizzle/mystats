@@ -32,7 +32,10 @@ let levelOverlayActive = false;
 let runOverlayActive = false;
 let overlayBaselineInitialized = false;
 let priorRunStatus = 'idle';
+let priorRunId = '';
 let runRecapArmed = false;
+let runRecapCandidateRunId = '';
+let hasSeenActiveRunSinceLoad = false;
 
 function getLevelOverlayKey(level = {}) {
   const levelNum = Number(level.level || 0);
@@ -336,16 +339,25 @@ async function refresh() {
       lastLevelOverlayKey = getLevelOverlayKey(payload.level_completion || {});
       lastRunOverlayKey = getRunOverlayKey(payload.last_run || {});
       priorRunStatus = currentStatus;
+      priorRunId = String(currentRun.run_id || '').trim();
       runRecapArmed = false;
+      runRecapCandidateRunId = '';
+      hasSeenActiveRunSinceLoad = currentStatus === 'active';
       hideRecapOverlays();
       overlayBaselineInitialized = true;
     }
 
-    if (priorRunStatus === 'active' && currentStatus === 'idle') {
+    if (currentStatus === 'active') {
+      hasSeenActiveRunSinceLoad = true;
+    }
+
+    if (priorRunStatus === 'active' && currentStatus === 'idle' && hasSeenActiveRunSinceLoad) {
       runRecapArmed = true;
+      runRecapCandidateRunId = priorRunId;
     } else if (currentStatus === 'active') {
       // A new run has started (or resumed). Never let an old run recap linger over active gameplay.
       runRecapArmed = false;
+      runRecapCandidateRunId = '';
       hideRunCompletionOverlay();
     }
 
@@ -362,12 +374,19 @@ async function refresh() {
     renderLastRun(payload.last_run || {});
     const levelRecapShown = renderLevelCompletionOverlay(payload.level_completion || {});
 
-    if (currentStatus === 'idle' && runRecapArmed && !levelRecapShown) {
+    const completedRunId = String((payload.last_run || {}).run_id || '').trim();
+    const runIdMatchesCandidate = !runRecapCandidateRunId || completedRunId === runRecapCandidateRunId;
+
+    if (currentStatus === 'idle' && runRecapArmed && runIdMatchesCandidate && !levelRecapShown) {
       const runRecapShown = renderRunCompletionOverlay(payload.last_run || {});
-      if (runRecapShown) runRecapArmed = false;
+      if (runRecapShown) {
+        runRecapArmed = false;
+        runRecapCandidateRunId = '';
+      }
     }
 
     priorRunStatus = currentStatus;
+    priorRunId = String(currentRun.run_id || '').trim();
 
   } catch (e) {
     $('run-status').textContent = 'Status: Unavailable';
@@ -375,7 +394,10 @@ async function refresh() {
     hideRecapOverlays();
     overlayBaselineInitialized = false;
     priorRunStatus = 'idle';
+    priorRunId = '';
     runRecapArmed = false;
+    runRecapCandidateRunId = '';
+    hasSeenActiveRunSinceLoad = false;
     updateTrackerVisibility();
   }
 }
