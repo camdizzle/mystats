@@ -352,6 +352,8 @@ def get_season_quest_updates():
     if not is_chat_response_enabled("season_quests_enabled"):
         return []
 
+    tilt_totals, _ = get_tilt_season_stats()
+
     quest_definitions = [
         {
             'target_key': 'season_quest_target_races',
@@ -377,6 +379,24 @@ def get_season_quest_updates():
             'value': get_int_setting('br_hs_season', 0),
             'message': "🎯 Season Quest Complete: BR high score reached {value:,} (target {target:,})!"
         },
+        {
+            'target_key': 'season_quest_target_tilt_levels',
+            'complete_key': 'season_quest_complete_tilt_levels',
+            'value': tilt_totals['levels'],
+            'message': "🎯 Season Quest Complete: {value:,} / {target:,} tilt levels participated!"
+        },
+        {
+            'target_key': 'season_quest_target_tilt_tops',
+            'complete_key': 'season_quest_complete_tilt_tops',
+            'value': tilt_totals['top_tiltees'],
+            'message': "🎯 Season Quest Complete: {value:,} / {target:,} top-tiltee finishes!"
+        },
+        {
+            'target_key': 'season_quest_target_tilt_points',
+            'complete_key': 'season_quest_complete_tilt_points',
+            'value': tilt_totals['points'],
+            'message': "🎯 Season Quest Complete: {value:,} / {target:,} tilt points earned!"
+        },
     ]
 
     quest_messages = []
@@ -401,7 +421,60 @@ def get_season_quest_targets():
         'points': get_int_setting('season_quest_target_points', 0),
         'race_hs': get_int_setting('season_quest_target_race_hs', 0),
         'br_hs': get_int_setting('season_quest_target_br_hs', 0),
+        'tilt_levels': get_int_setting('season_quest_target_tilt_levels', 0),
+        'tilt_tops': get_int_setting('season_quest_target_tilt_tops', 0),
+        'tilt_points': get_int_setting('season_quest_target_tilt_points', 0),
     }
+
+
+def get_tilt_season_stats():
+    user_stats = {}
+    totals = {'levels': 0, 'top_tiltees': 0, 'points': 0}
+
+    directory = config.get_setting('directory')
+    if not directory:
+        return totals, user_stats
+
+    for tilt_results in glob.glob(os.path.join(directory, "tilts_*.csv")):
+        try:
+            with open(tilt_results, 'rb') as f:
+                raw_data = f.read()
+            result = chardet.detect(raw_data)
+            encoding = result['encoding'] if result['encoding'] else 'utf-8'
+
+            with open(tilt_results, 'r', encoding=encoding, errors='ignore') as f:
+                reader = csv.reader(f)
+                for row in reader:
+                    detail = parse_tilt_result_detail(row)
+                    if detail is None:
+                        continue
+
+                    username = detail['username'].strip().lower()
+                    if not username:
+                        continue
+
+                    if username not in user_stats:
+                        user_stats[username] = {
+                            'display_name': detail['username'].strip() or username,
+                            'tilt_levels': 0,
+                            'tilt_top_tiltee': 0,
+                            'tilt_points': 0,
+                        }
+
+                    user_stats[username]['tilt_levels'] += 1
+                    user_stats[username]['tilt_points'] += detail['points']
+                    totals['levels'] += 1
+                    totals['points'] += detail['points']
+
+                    if detail['is_top_tiltee']:
+                        user_stats[username]['tilt_top_tiltee'] += 1
+                        totals['top_tiltees'] += 1
+        except FileNotFoundError:
+            continue
+        except Exception as e:
+            print(f"Error reading tilt stats from {tilt_results}: {e}")
+
+    return totals, user_stats
 
 
 def get_user_season_stats():
@@ -430,6 +503,9 @@ def get_user_season_stats():
                             'points': 0,
                             'race_hs': 0,
                             'br_hs': 0,
+                            'tilt_levels': 0,
+                            'tilt_top_tiltee': 0,
+                            'tilt_points': 0,
                         }
 
                     if display_name:
@@ -452,6 +528,27 @@ def get_user_season_stats():
             continue
         except Exception as e:
             print(f"Error reading season stats from {allraces}: {e}")
+
+    _, tilt_user_stats = get_tilt_season_stats()
+    for username, tilt_stats in tilt_user_stats.items():
+        if username not in user_stats:
+            user_stats[username] = {
+                'display_name': tilt_stats.get('display_name') or username,
+                'races': 0,
+                'points': 0,
+                'race_hs': 0,
+                'br_hs': 0,
+                'tilt_levels': 0,
+                'tilt_top_tiltee': 0,
+                'tilt_points': 0,
+            }
+
+        user_stats[username]['tilt_levels'] += tilt_stats.get('tilt_levels', 0)
+        user_stats[username]['tilt_top_tiltee'] += tilt_stats.get('tilt_top_tiltee', 0)
+        user_stats[username]['tilt_points'] += tilt_stats.get('tilt_points', 0)
+
+        if not user_stats[username].get('display_name'):
+            user_stats[username]['display_name'] = tilt_stats.get('display_name') or username
 
     return user_stats
 
@@ -482,6 +579,9 @@ def get_user_quest_progress(username):
         ("Season Points", stats['points'], targets['points']),
         ("Race High Score", stats['race_hs'], targets['race_hs']),
         ("BR High Score", stats['br_hs'], targets['br_hs']),
+        ("Tilt Levels", stats['tilt_levels'], targets['tilt_levels']),
+        ("Top Tiltees", stats['tilt_top_tiltee'], targets['tilt_tops']),
+        ("Tilt Points", stats['tilt_points'], targets['tilt_points']),
     ]
 
     completed = 0
@@ -522,6 +622,9 @@ def get_quest_completion_leaderboard(limit=100):
             ('points', stats['points']),
             ('race_hs', stats['race_hs']),
             ('br_hs', stats['br_hs']),
+            ('tilt_levels', stats.get('tilt_levels', 0)),
+            ('tilt_tops', stats.get('tilt_top_tiltee', 0)),
+            ('tilt_points', stats.get('tilt_points', 0)),
         ]
 
         for key, current_value in checks:
@@ -544,6 +647,9 @@ def get_quest_completion_leaderboard(limit=100):
             'points': stats['points'],
             'race_hs': stats['race_hs'],
             'br_hs': stats['br_hs'],
+            'tilt_levels': stats.get('tilt_levels', 0),
+            'tilt_top_tiltee': stats.get('tilt_top_tiltee', 0),
+            'tilt_points': stats.get('tilt_points', 0),
         })
 
     leaderboard.sort(key=lambda row: (row['completed'], row['points'], row['races']), reverse=True)
@@ -564,7 +670,7 @@ def open_quest_completion_window(parent_window):
 
     ttk.Label(popup, text="Season Quest Completion Leaderboard", style="Small.TLabel").pack(anchor="w", padx=12, pady=(10, 4))
 
-    columns = ("rank", "user", "completed", "races", "points", "race_hs", "br_hs")
+    columns = ("rank", "user", "completed", "races", "points", "race_hs", "br_hs", "tilt_levels", "tilt_tops", "tilt_points")
     tree = ttk.Treeview(popup, columns=columns, show="headings", height=18)
     tree.heading("rank", text="#")
     tree.heading("user", text="User")
@@ -573,6 +679,9 @@ def open_quest_completion_window(parent_window):
     tree.heading("points", text="Points")
     tree.heading("race_hs", text="Race HS")
     tree.heading("br_hs", text="BR HS")
+    tree.heading("tilt_levels", text="Tilt Lvls")
+    tree.heading("tilt_tops", text="Top Tiltees")
+    tree.heading("tilt_points", text="Tilt Pts")
 
     tree.column("rank", width=50, anchor="center")
     tree.column("user", width=190, anchor="w")
@@ -581,6 +690,9 @@ def open_quest_completion_window(parent_window):
     tree.column("points", width=120, anchor="e")
     tree.column("race_hs", width=90, anchor="e")
     tree.column("br_hs", width=90, anchor="e")
+    tree.column("tilt_levels", width=90, anchor="e")
+    tree.column("tilt_tops", width=100, anchor="e")
+    tree.column("tilt_points", width=110, anchor="e")
 
     for idx, row in enumerate(leaderboard, start=1):
         completed_text = f"{row['completed']}/{row['active_quests']}" if row['active_quests'] > 0 else "0/0"
@@ -592,6 +704,9 @@ def open_quest_completion_window(parent_window):
             f"{row['points']:,}",
             f"{row['race_hs']:,}",
             f"{row['br_hs']:,}",
+            f"{row.get('tilt_levels', 0):,}",
+            f"{row.get('tilt_top_tiltee', 0):,}",
+            f"{row.get('tilt_points', 0):,}",
         ))
 
     scrollbar = ttk.Scrollbar(popup, orient="vertical", command=tree.yview)
@@ -2273,7 +2388,7 @@ def open_settings_window():
     general_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
     audio_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
     chat_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
-    tilt_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
+    tilt_tab_container = ttk.Frame(notebook, style="App.TFrame")
     season_quests_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
     rivals_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
     mycycle_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
@@ -2283,12 +2398,45 @@ def open_settings_window():
     notebook.add(general_tab, text="General")
     notebook.add(audio_tab, text="Audio")
     notebook.add(chat_tab, text="Chat")
-    notebook.add(tilt_tab, text="Tilt")
+    notebook.add(tilt_tab_container, text="Tilt")
     notebook.add(season_quests_tab, text="Season Quests")
     notebook.add(rivals_tab, text="Rivals")
     notebook.add(mycycle_tab, text="MyCycle")
     notebook.add(appearance_tab, text="Appearance")
     notebook.add(overlay_tab, text="Overlay")
+
+    tilt_canvas = tk.Canvas(tilt_tab_container, highlightthickness=0, bd=0)
+    tilt_scrollbar = ttk.Scrollbar(tilt_tab_container, orient="vertical", command=tilt_canvas.yview)
+    tilt_canvas.configure(yscrollcommand=tilt_scrollbar.set)
+    tilt_scrollbar.pack(side="right", fill="y")
+    tilt_canvas.pack(side="left", fill="both", expand=True)
+
+    tilt_tab = ttk.Frame(tilt_canvas, style="App.TFrame", padding=10)
+    tilt_canvas_window = tilt_canvas.create_window((0, 0), window=tilt_tab, anchor="nw")
+
+    def _update_tilt_scroll_region(_event=None):
+        tilt_canvas.configure(scrollregion=tilt_canvas.bbox("all"))
+
+    def _resize_tilt_inner_frame(event):
+        tilt_canvas.itemconfigure(tilt_canvas_window, width=event.width)
+
+    tilt_tab.bind("<Configure>", _update_tilt_scroll_region)
+    tilt_canvas.bind("<Configure>", _resize_tilt_inner_frame)
+
+    def _on_tilt_mousewheel(event):
+        delta = event.delta
+        if delta == 0:
+            return
+        tilt_canvas.yview_scroll(int(-1 * (delta / 120)), "units")
+
+    def _bind_tilt_mousewheel(_event=None):
+        tilt_canvas.bind_all("<MouseWheel>", _on_tilt_mousewheel)
+
+    def _unbind_tilt_mousewheel(_event=None):
+        tilt_canvas.unbind_all("<MouseWheel>")
+
+    tilt_canvas.bind("<Enter>", _bind_tilt_mousewheel)
+    tilt_canvas.bind("<Leave>", _unbind_tilt_mousewheel)
 
     # --- General tab ---
     ttk.Label(general_tab, text="Core app settings", style="Small.TLabel").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
@@ -2512,15 +2660,33 @@ def open_settings_window():
     season_quest_br_hs_entry.grid(row=5, column=1, sticky="w", pady=(2, 4))
     season_quest_br_hs_entry.insert(0, config.get_setting("season_quest_target_br_hs") or "3000")
 
-    ttk.Label(season_quests_tab, text="Tip: Set any target to 0 to disable that specific quest.", style="Small.TLabel").grid(row=6, column=0, columnspan=2, sticky="w", pady=(8, 4))
+    tilt_quest_frame = ttk.LabelFrame(season_quests_tab, text="Tilt Season Quests", style="Card.TLabelframe")
+    tilt_quest_frame.grid(row=6, column=0, columnspan=2, sticky="ew", pady=(8, 4))
+
+    ttk.Label(tilt_quest_frame, text="Tilt Levels Participated", style="Small.TLabel").grid(row=0, column=0, sticky="w", padx=(10, 8), pady=(8, 4))
+    season_quest_tilt_levels_entry = ttk.Entry(tilt_quest_frame, width=12, justify='center')
+    season_quest_tilt_levels_entry.grid(row=0, column=1, sticky="w", padx=(0, 10), pady=(8, 4))
+    season_quest_tilt_levels_entry.insert(0, config.get_setting("season_quest_target_tilt_levels") or "1000")
+
+    ttk.Label(tilt_quest_frame, text="Top Tiltee Finishes", style="Small.TLabel").grid(row=1, column=0, sticky="w", padx=(10, 8), pady=4)
+    season_quest_tilt_tops_entry = ttk.Entry(tilt_quest_frame, width=12, justify='center')
+    season_quest_tilt_tops_entry.grid(row=1, column=1, sticky="w", padx=(0, 10), pady=4)
+    season_quest_tilt_tops_entry.insert(0, config.get_setting("season_quest_target_tilt_tops") or "100")
+
+    ttk.Label(tilt_quest_frame, text="Tilt Points Earned", style="Small.TLabel").grid(row=2, column=0, sticky="w", padx=(10, 8), pady=(4, 8))
+    season_quest_tilt_points_entry = ttk.Entry(tilt_quest_frame, width=12, justify='center')
+    season_quest_tilt_points_entry.grid(row=2, column=1, sticky="w", padx=(0, 10), pady=(4, 8))
+    season_quest_tilt_points_entry.insert(0, config.get_setting("season_quest_target_tilt_points") or "500000")
+
+    ttk.Label(season_quests_tab, text="Tip: Set any target to 0 to disable that specific quest.", style="Small.TLabel").grid(row=7, column=0, columnspan=2, sticky="w", pady=(8, 4))
 
     def reset_season_quest_progress():
-        for completion_key in ("season_quest_complete_races", "season_quest_complete_points", "season_quest_complete_race_hs", "season_quest_complete_br_hs"):
+        for completion_key in ("season_quest_complete_races", "season_quest_complete_points", "season_quest_complete_race_hs", "season_quest_complete_br_hs", "season_quest_complete_tilt_levels", "season_quest_complete_tilt_tops", "season_quest_complete_tilt_points"):
             config.set_setting(completion_key, "False", persistent=True)
         messagebox.showinfo("Season Quests", "Season quest completion flags have been reset.")
 
-    ttk.Button(season_quests_tab, text="Reset Quest Progress", command=reset_season_quest_progress).grid(row=7, column=0, sticky="w", pady=(8, 0))
-    ttk.Button(season_quests_tab, text="View Quest Completion", command=lambda: open_quest_completion_window(settings_window)).grid(row=7, column=1, sticky="w", pady=(8, 0))
+    ttk.Button(season_quests_tab, text="Reset Quest Progress", command=reset_season_quest_progress).grid(row=8, column=0, sticky="w", pady=(8, 0))
+    ttk.Button(season_quests_tab, text="View Quest Completion", command=lambda: open_quest_completion_window(settings_window)).grid(row=8, column=1, sticky="w", pady=(8, 0))
 
     # --- Rivals tab ---
     ttk.Label(rivals_tab, text="Configure rivalry detection and commands", style="Small.TLabel").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
@@ -2725,6 +2891,12 @@ def open_settings_window():
         season_quest_race_hs_entry.insert(0, "3000")
         season_quest_br_hs_entry.delete(0, tk.END)
         season_quest_br_hs_entry.insert(0, "3000")
+        season_quest_tilt_levels_entry.delete(0, tk.END)
+        season_quest_tilt_levels_entry.insert(0, "1000")
+        season_quest_tilt_tops_entry.delete(0, tk.END)
+        season_quest_tilt_tops_entry.insert(0, "100")
+        season_quest_tilt_points_entry.delete(0, tk.END)
+        season_quest_tilt_points_entry.insert(0, "500000")
         chunk_alert_trigger_entry.delete(0, tk.END)
         chunk_alert_trigger_entry.insert(0, "1000")
         delay_seconds_entry.delete(0, tk.END)
@@ -2783,6 +2955,9 @@ def open_settings_window():
         config.set_setting("season_quest_target_points", season_quest_points_entry.get(), persistent=True)
         config.set_setting("season_quest_target_race_hs", season_quest_race_hs_entry.get(), persistent=True)
         config.set_setting("season_quest_target_br_hs", season_quest_br_hs_entry.get(), persistent=True)
+        config.set_setting("season_quest_target_tilt_levels", season_quest_tilt_levels_entry.get(), persistent=True)
+        config.set_setting("season_quest_target_tilt_tops", season_quest_tilt_tops_entry.get(), persistent=True)
+        config.set_setting("season_quest_target_tilt_points", season_quest_tilt_points_entry.get(), persistent=True)
         config.set_setting("rivals_enabled", str(rivals_enabled_var.get()), persistent=True)
         config.set_setting("rivals_min_races", rivals_min_races_entry.get(), persistent=True)
         config.set_setting("rivals_max_point_gap", rivals_max_gap_entry.get(), persistent=True)
@@ -3443,8 +3618,11 @@ class ConfigManager:
                                 'narrative_alert_leadchange_enabled', 'narrative_alert_cooldown_races',
                                 'narrative_alert_min_lead_change_points', 'narrative_alert_max_items', 'chat_max_names',
                                 'season_quests_enabled', 'season_quest_target_races', 'season_quest_target_points',
-                                'season_quest_target_race_hs', 'season_quest_target_br_hs', 'season_quest_complete_races',
-                                'season_quest_complete_points', 'season_quest_complete_race_hs', 'season_quest_complete_br_hs',
+                                'season_quest_target_race_hs', 'season_quest_target_br_hs', 'season_quest_target_tilt_levels',
+                                'season_quest_target_tilt_tops', 'season_quest_target_tilt_points',
+                                'season_quest_complete_races', 'season_quest_complete_points', 'season_quest_complete_race_hs',
+                                'season_quest_complete_br_hs', 'season_quest_complete_tilt_levels',
+                                'season_quest_complete_tilt_tops', 'season_quest_complete_tilt_points',
                                 'rivals_enabled', 'rivals_min_races', 'rivals_max_point_gap', 'rivals_pair_count',
                                 'mycycle_enabled', 'mycycle_announcements_enabled', 'mycycle_include_br',
                                 'mycycle_min_place', 'mycycle_max_place', 'mycycle_primary_session_id',
@@ -3474,10 +3652,16 @@ class ConfigManager:
             'season_quest_target_points': '500000',
             'season_quest_target_race_hs': '3000',
             'season_quest_target_br_hs': '3000',
+            'season_quest_target_tilt_levels': '1000',
+            'season_quest_target_tilt_tops': '100',
+            'season_quest_target_tilt_points': '500000',
             'season_quest_complete_races': 'False',
             'season_quest_complete_points': 'False',
             'season_quest_complete_race_hs': 'False',
             'season_quest_complete_br_hs': 'False',
+            'season_quest_complete_tilt_levels': 'False',
+            'season_quest_complete_tilt_tops': 'False',
+            'season_quest_complete_tilt_points': 'False',
             'rivals_enabled': 'True',
             'rivals_min_races': '50',
             'rivals_max_point_gap': '1500',
@@ -3556,6 +3740,7 @@ class ConfigManager:
                 return False
 
         if key in {"season_quest_target_races", "season_quest_target_points", "season_quest_target_race_hs", "season_quest_target_br_hs",
+                   "season_quest_target_tilt_levels", "season_quest_target_tilt_tops", "season_quest_target_tilt_points",
                    "rivals_min_races", "rivals_max_point_gap", "rivals_pair_count",
                    "narrative_alert_cooldown_races", "narrative_alert_min_lead_change_points", "narrative_alert_max_items",
                    "mycycle_min_place", "mycycle_max_place",
@@ -4248,6 +4433,9 @@ def reset_season_stats():
         'season_quest_complete_points',
         'season_quest_complete_race_hs',
         'season_quest_complete_br_hs',
+        'season_quest_complete_tilt_levels',
+        'season_quest_complete_tilt_tops',
+        'season_quest_complete_tilt_points',
     ):
         config.set_setting(completion_key, 'False', persistent=True)
 
