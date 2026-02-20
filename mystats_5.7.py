@@ -5156,6 +5156,91 @@ class Bot(commands.Bot):
         await send_chat_message(ctx.channel, message, category="mystats")
 
 
+    @commands.command(name='tiltdeath')
+    async def tiltdeath_command(self, ctx):
+        run_max_levels = defaultdict(int)
+        player_run_levels = defaultdict(set)
+
+        for tilts_file in glob.glob(os.path.join(config.get_setting('directory'), "tilts_*.csv")):
+            try:
+                with open(tilts_file, 'rb') as f:
+                    raw_data = f.read()
+                result = chardet.detect(raw_data)
+                encoding = result['encoding'] if result['encoding'] else 'utf-8'
+
+                with open(tilts_file, 'r', encoding=encoding, errors='ignore') as f:
+                    reader = csv.reader(f)
+                    for row in reader:
+                        parsed = parse_tilt_result_row(row)
+                        if parsed is None or len(row) < 2:
+                            continue
+
+                        username, _, run_id = parsed
+                        try:
+                            level_number = int(''.join(ch for ch in str(row[1]).strip() if ch.isdigit()) or '0')
+                        except (TypeError, ValueError):
+                            continue
+
+                        if level_number <= 0:
+                            continue
+
+                        run_max_levels[run_id] = max(run_max_levels[run_id], level_number)
+                        player_run_levels[(username, run_id)].add(level_number)
+            except FileNotFoundError:
+                continue
+            except Exception as e:
+                print(e)
+
+        if not player_run_levels:
+            await send_chat_message(ctx.channel, "No tilt data available yet.", category="mystats")
+            return
+
+        player_totals = defaultdict(lambda: {'deaths': 0, 'levels_participated': 0})
+
+        for (username, run_id), levels_survived in player_run_levels.items():
+            run_max_level = run_max_levels.get(run_id, 0)
+            if run_max_level <= 0 or not levels_survived:
+                continue
+
+            survived_count = len(levels_survived)
+            last_survived_level = max(levels_survived)
+            died_this_run = 1 if last_survived_level < run_max_level else 0
+            levels_participated = survived_count + died_this_run
+
+            player_totals[username]['deaths'] += died_this_run
+            player_totals[username]['levels_participated'] += levels_participated
+
+        qualified = []
+        for username, totals in player_totals.items():
+            levels_participated = totals['levels_participated']
+            deaths = totals['deaths']
+            if levels_participated < 20:
+                continue
+
+            death_rate = (deaths / levels_participated) * 100
+            qualified.append((username, deaths, death_rate))
+
+        if not qualified:
+            await send_chat_message(
+                ctx.channel,
+                "No tilt death-rate data yet (minimum 20 levels participated required).",
+                category="mystats"
+            )
+            return
+
+        ranked = sorted(qualified, key=lambda item: (item[2], item[1], item[0].lower()))[:10]
+        message_items = [
+            f"({idx}) {username} {deaths} deaths, {death_rate:.1f}%"
+            for idx, (username, deaths, death_rate) in enumerate(ranked, start=1)
+        ]
+
+        await send_chat_message(
+            ctx.channel,
+            "Top 10 Lowest Tilt Death Rate (min 20 levels): " + ", ".join(message_items) + ".",
+            category="mystats"
+        )
+
+
     
     @commands.command(name='top10nwr')
     async def top10nwr_command(self, ctx):
