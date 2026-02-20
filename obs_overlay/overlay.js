@@ -112,6 +112,7 @@ function showLeaderboardView() {
   if (splashScreen) {
     splashScreen.classList.remove('is-visible');
     splashScreen.setAttribute('aria-hidden', 'true');
+    splashScreen.setAttribute('visible', 'false');
   }
 }
 
@@ -121,6 +122,7 @@ function showSplashView() {
   if (splashScreen) {
     splashScreen.classList.add('is-visible');
     splashScreen.setAttribute('aria-hidden', 'false');
+    splashScreen.setAttribute('visible', 'true');
   }
 
   clearCycleRestartTimer();
@@ -226,13 +228,15 @@ function startLeaderboardAutoScroll() {
   }, 32);
 }
 
+
 function hasReachedEndOfStackedViews() {
   if (!leaderboard) return false;
 
   const finalRow = leaderboard.querySelector('.leaderboard-row--final');
-  if (!finalRow) {
-    return true;
-  }
+  if (!finalRow) return false;
+
+  const currentMax = leaderboard.scrollHeight - leaderboard.clientHeight;
+  if (currentMax > 2 && leaderboard.scrollTop < currentMax - 10) return false;
 
   const listBounds = leaderboard.getBoundingClientRect();
   const finalRowBounds = finalRow.getBoundingClientRect();
@@ -273,15 +277,6 @@ function renderCombinedRows(views) {
     return;
   }
 
-  let lastRowTarget = null;
-  for (let viewIndex = views.length - 1; viewIndex >= 0; viewIndex -= 1) {
-    const rows = Array.isArray(views[viewIndex]?.rows) ? views[viewIndex].rows : [];
-    if (rows.length) {
-      lastRowTarget = { viewIndex, rowIndex: rows.length - 1 };
-      break;
-    }
-  }
-
   const markup = views.map((view, viewIndex) => {
     const sectionTitle = view.title || 'Top Results';
     const rows = Array.isArray(view.rows) ? view.rows : [];
@@ -291,10 +286,7 @@ function renderCombinedRows(views) {
       const emote = settings.showMedals ? getPlacementEmote(r.placement) : '';
       const decoratedName = emote ? `${emote} ${r.name}` : r.name;
       const podiumClass = rowIndex < 3 ? ` leaderboard-row--podium-${rowIndex + 1}` : '';
-      const finalRowClass = lastRowTarget && lastRowTarget.viewIndex === viewIndex && lastRowTarget.rowIndex === rowIndex
-        ? ' leaderboard-row--final'
-        : '';
-      return `<li class="leaderboard-row${podiumClass}${finalRowClass}"><span class="row-rank">#${escapeHtml(r.placement)}</span><span>${escapeHtml(decoratedName)}</span><span>${fmt(r.points)} pts</span></li>`;
+      return `<li class="leaderboard-row${podiumClass}"><span class="row-rank">#${escapeHtml(r.placement)}</span><span>${escapeHtml(decoratedName)}</span><span>${fmt(r.points)} pts</span></li>`;
     }).join('');
 
     const gap = viewIndex > 0 ? '<li class="leaderboard-gap" aria-hidden="true"></li>' : '';
@@ -302,6 +294,13 @@ function renderCombinedRows(views) {
   }).join('');
 
   leaderboard.innerHTML = markup;
+
+  const renderedRows = Array.from(leaderboard.querySelectorAll('.leaderboard-row'));
+  renderedRows.forEach((row) => row.classList.remove('leaderboard-row--final'));
+  const finalRenderedRow = renderedRows[renderedRows.length - 1];
+  if (finalRenderedRow) {
+    finalRenderedRow.classList.add('leaderboard-row--final');
+  }
 
   sectionAnchors = Array.from(leaderboard.querySelectorAll('.leaderboard-section-title')).map((el) => ({
     title: el.dataset.sectionTitle || 'Top Results',
