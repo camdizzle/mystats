@@ -117,6 +117,8 @@ function showLeaderboardView() {
 }
 
 function showSplashView() {
+  if (!hasReachedEndOfStackedViews()) return;
+
   stopLeaderboardAutoScroll();
   if (boardShell) boardShell.classList.add('is-hidden');
   if (splashScreen) {
@@ -221,7 +223,7 @@ function startLeaderboardAutoScroll() {
 
     leaderboard.scrollTop += 1.4;
 
-    if (leaderboard.scrollTop >= currentMax - 1 && hasReachedEndOfStackedViews()) {
+    if (leaderboard.scrollTop >= currentMax - 1) {
       leaderboard.scrollTop = currentMax;
       showSplashView();
     }
