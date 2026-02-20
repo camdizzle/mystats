@@ -62,12 +62,17 @@ function getPlacementEmote(placement) {
 }
 
 function updateHeaderStats(s = {}) {
-  $('stat-avg-today').textContent = `Avg Pts Today: ${fmt(s.avg_points_today)}`;
-  $('stat-uniq-today').textContent = `Unique Racers Today: ${fmt(s.unique_racers_today)}`;
-  $('stat-races-today').textContent = `Total Races Today: ${fmt(s.total_races_today)}`;
-  $('stat-avg-season').textContent = `Avg Pts Season: ${fmt(s.avg_points_season)}`;
-  $('stat-uniq-season').textContent = `Unique Racers Season: ${fmt(s.unique_racers_season)}`;
-  $('stat-races-season').textContent = `Total Races Season: ${fmt(s.total_races_season)}`;
+  const setPillValue = (id, value) => {
+    const valueEl = document.querySelector(`#${id} .pill-value`);
+    if (valueEl) valueEl.textContent = fmt(value);
+  };
+
+  setPillValue('stat-avg-today', s.avg_points_today);
+  setPillValue('stat-uniq-today', s.unique_racers_today);
+  setPillValue('stat-races-today', s.total_races_today);
+  setPillValue('stat-avg-season', s.avg_points_season);
+  setPillValue('stat-uniq-season', s.unique_racers_season);
+  setPillValue('stat-races-season', s.total_races_season);
   renderPillPage();
 }
 
