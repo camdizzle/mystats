@@ -2470,9 +2470,11 @@ def open_settings_window():
     window_height = 700
     center_toplevel(settings_window, window_width, window_height)
     settings_window.minsize(720, 640)
+    settings_window.grid_rowconfigure(0, weight=1)
+    settings_window.grid_columnconfigure(0, weight=1)
 
     content_frame = ttk.Frame(settings_window, style="App.TFrame")
-    content_frame.pack(fill="both", expand=True, padx=10, pady=(10, 0))
+    content_frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=(10, 0))
 
     notebook = ttk.Notebook(content_frame)
     notebook.pack(fill="both", expand=True)
@@ -3035,7 +3037,7 @@ def open_settings_window():
         tilt_scroll_pause_entry.insert(0, "900")
 
     footer = ttk.Frame(settings_window, style="App.TFrame")
-    footer.pack(side="bottom", fill="x", padx=20, pady=10)
+    footer.grid(row=1, column=0, sticky="ew", padx=20, pady=10)
 
     ttk.Button(footer, text="Reset Defaults", command=reset_settings_defaults).pack(side="left")
 
