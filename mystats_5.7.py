@@ -61,6 +61,10 @@ DEBUG = False
 HAS_TTKBOOTSTRAP = ttkbootstrap_module is not None
 DEFAULT_UI_THEME = "darkly"
 app_style = None
+season_quest_tree = None
+rivals_tree = None
+mycycle_tree = None
+mycycle_session_label = None
 
 logging.basicConfig(
     level=logging.INFO,
@@ -3229,6 +3233,7 @@ def build_stats_sidebar(parent):
 
 def build_main_content(parent):
     global chatbot_label, login_button, text_area
+    global season_quest_tree, rivals_tree, mycycle_tree, mycycle_session_label
 
     top_frame1 = ttk.Frame(parent, style="App.TFrame")
     top_frame1.grid(row=0, column=1, sticky='ew', padx=(5, 0))
@@ -3246,8 +3251,149 @@ def build_main_content(parent):
     login_button = ttk.Button(login_button_frame, text="Custom Bot Login", command=open_login_url, style="Primary.TButton")
     login_button.grid(row=1, column=1, sticky='e', padx=(0, 5))
 
-    text_area = tk.Text(parent, wrap='word', height=30, width=60, bg="black", fg="white")
-    text_area.grid(row=1, column=1, sticky='nsew', padx=(0, 5), pady=5)
+    notebook = ttk.Notebook(parent)
+    notebook.grid(row=1, column=1, sticky='nsew', padx=(0, 5), pady=5)
+
+    console_tab = ttk.Frame(notebook, style="App.TFrame")
+    season_quests_tab = ttk.Frame(notebook, style="App.TFrame")
+    rivals_tab = ttk.Frame(notebook, style="App.TFrame")
+    mycycle_tab = ttk.Frame(notebook, style="App.TFrame")
+
+    notebook.add(console_tab, text="Console")
+    notebook.add(season_quests_tab, text="Season Quests")
+    notebook.add(rivals_tab, text="Rivals")
+    notebook.add(mycycle_tab, text="MyCycle")
+
+    console_tab.grid_rowconfigure(0, weight=1)
+    console_tab.grid_columnconfigure(0, weight=1)
+
+    text_area = tk.Text(console_tab, wrap='word', height=30, width=60, bg="black", fg="white")
+    text_area.grid(row=0, column=0, sticky='nsew')
+    console_scrollbar = ttk.Scrollbar(console_tab, orient="vertical", command=text_area.yview)
+    console_scrollbar.grid(row=0, column=1, sticky="ns")
+    text_area.configure(yscrollcommand=console_scrollbar.set)
+
+    # Season quest leaderboard tab
+    ttk.Label(
+        season_quests_tab,
+        text="Season Quest leaderboard (top 100)",
+        style="Small.TLabel"
+    ).pack(anchor="w", padx=8, pady=(8, 4))
+    season_quest_columns = ("rank", "user", "completed", "points", "races", "tilt_points")
+    season_quest_tree = ttk.Treeview(season_quests_tab, columns=season_quest_columns, show="headings", height=20)
+    season_quest_tree.heading("rank", text="#")
+    season_quest_tree.heading("user", text="Player")
+    season_quest_tree.heading("completed", text="Completed")
+    season_quest_tree.heading("points", text="Points")
+    season_quest_tree.heading("races", text="Races")
+    season_quest_tree.heading("tilt_points", text="Tilt Pts")
+    season_quest_tree.column("rank", width=45, anchor="center")
+    season_quest_tree.column("user", width=190, anchor="w")
+    season_quest_tree.column("completed", width=110, anchor="center")
+    season_quest_tree.column("points", width=120, anchor="e")
+    season_quest_tree.column("races", width=95, anchor="e")
+    season_quest_tree.column("tilt_points", width=105, anchor="e")
+    season_quest_scrollbar = ttk.Scrollbar(season_quests_tab, orient="vertical", command=season_quest_tree.yview)
+    season_quest_tree.configure(yscrollcommand=season_quest_scrollbar.set)
+    season_quest_tree.pack(side="left", fill="both", expand=True, padx=(8, 0), pady=(0, 8))
+    season_quest_scrollbar.pack(side="right", fill="y", padx=(0, 8), pady=(0, 8))
+
+    # Rivals leaderboard tab
+    ttk.Label(
+        rivals_tab,
+        text="Rivals leaderboard (closest point gaps)",
+        style="Small.TLabel"
+    ).pack(anchor="w", padx=8, pady=(8, 4))
+    rivals_columns = ("rank", "player_a", "points_a", "player_b", "points_b", "gap")
+    rivals_tree = ttk.Treeview(rivals_tab, columns=rivals_columns, show="headings", height=20)
+    rivals_tree.heading("rank", text="#")
+    rivals_tree.heading("player_a", text="Player A")
+    rivals_tree.heading("points_a", text="A Points")
+    rivals_tree.heading("player_b", text="Player B")
+    rivals_tree.heading("points_b", text="B Points")
+    rivals_tree.heading("gap", text="Gap")
+    rivals_tree.column("rank", width=45, anchor="center")
+    rivals_tree.column("player_a", width=180, anchor="w")
+    rivals_tree.column("points_a", width=120, anchor="e")
+    rivals_tree.column("player_b", width=180, anchor="w")
+    rivals_tree.column("points_b", width=120, anchor="e")
+    rivals_tree.column("gap", width=90, anchor="e")
+    rivals_scrollbar = ttk.Scrollbar(rivals_tab, orient="vertical", command=rivals_tree.yview)
+    rivals_tree.configure(yscrollcommand=rivals_scrollbar.set)
+    rivals_tree.pack(side="left", fill="both", expand=True, padx=(8, 0), pady=(0, 8))
+    rivals_scrollbar.pack(side="right", fill="y", padx=(0, 8), pady=(0, 8))
+
+    # MyCycle leaderboard tab
+    mycycle_session_label = ttk.Label(mycycle_tab, text="MyCycle leaderboard", style="Small.TLabel")
+    mycycle_session_label.pack(anchor="w", padx=8, pady=(8, 4))
+    mycycle_columns = ("rank", "user", "cycles", "progress", "cycle_races")
+    mycycle_tree = ttk.Treeview(mycycle_tab, columns=mycycle_columns, show="headings", height=20)
+    mycycle_tree.heading("rank", text="#")
+    mycycle_tree.heading("user", text="Player")
+    mycycle_tree.heading("cycles", text="Cycles")
+    mycycle_tree.heading("progress", text="Progress")
+    mycycle_tree.heading("cycle_races", text="Current Cycle Races")
+    mycycle_tree.column("rank", width=45, anchor="center")
+    mycycle_tree.column("user", width=220, anchor="w")
+    mycycle_tree.column("cycles", width=90, anchor="e")
+    mycycle_tree.column("progress", width=120, anchor="e")
+    mycycle_tree.column("cycle_races", width=160, anchor="e")
+    mycycle_scrollbar = ttk.Scrollbar(mycycle_tab, orient="vertical", command=mycycle_tree.yview)
+    mycycle_tree.configure(yscrollcommand=mycycle_scrollbar.set)
+    mycycle_tree.pack(side="left", fill="both", expand=True, padx=(8, 0), pady=(0, 8))
+    mycycle_scrollbar.pack(side="right", fill="y", padx=(0, 8), pady=(0, 8))
+
+
+def refresh_main_leaderboards():
+    if not root or not root.winfo_exists():
+        return
+
+    try:
+        if season_quest_tree and season_quest_tree.winfo_exists():
+            season_quest_tree.delete(*season_quest_tree.get_children())
+            for idx, row in enumerate(get_quest_completion_leaderboard(limit=100), start=1):
+                season_quest_tree.insert("", "end", values=(
+                    idx,
+                    row.get('display_name') or row.get('user') or '-',
+                    f"{row.get('completed', 0):,}/{row.get('target_count', 0):,}",
+                    f"{row.get('points', 0):,}",
+                    f"{row.get('races', 0):,}",
+                    f"{row.get('tilt_points', 0):,}",
+                ))
+
+        if rivals_tree and rivals_tree.winfo_exists():
+            rivals_tree.delete(*rivals_tree.get_children())
+            for idx, row in enumerate(get_global_rivalries(limit=200), start=1):
+                rivals_tree.insert("", "end", values=(
+                    idx,
+                    row.get('display_a') or '-',
+                    f"{row.get('points_a', 0):,}",
+                    row.get('display_b') or '-',
+                    f"{row.get('points_b', 0):,}",
+                    f"±{row.get('point_gap', 0):,}",
+                ))
+
+        if mycycle_tree and mycycle_tree.winfo_exists():
+            mycycle_tree.delete(*mycycle_tree.get_children())
+            session, leaderboard = get_mycycle_leaderboard(limit=250)
+            if mycycle_session_label and mycycle_session_label.winfo_exists():
+                if session:
+                    mycycle_session_label.config(text=f"MyCycle leaderboard • Session: {session.get('name', 'Unknown')}")
+                else:
+                    mycycle_session_label.config(text="MyCycle leaderboard • No active session")
+
+            for idx, row in enumerate(leaderboard, start=1):
+                mycycle_tree.insert("", "end", values=(
+                    idx,
+                    row.get('display_name') or row.get('username') or '-',
+                    f"{row.get('cycles_completed', 0):,}",
+                    f"{row.get('progress_hits', 0):,}/{row.get('progress_total', 0):,}",
+                    f"{row.get('current_cycle_races', 0):,}",
+                ))
+    except Exception as error:
+        print(f"Failed to refresh leaderboard tabs: {error}")
+
+    root.after(15000, refresh_main_leaderboards)
 
 
 def initialize_main_window():
@@ -3264,8 +3410,8 @@ def initialize_main_window():
     root_window.protocol("WM_DELETE_WINDOW", on_close)
     root_window.title("MyStats - Marbles On Stream Companion Application")
 
-    window_width = 800
-    window_height = 500
+    window_width = 1040
+    window_height = 650
     screen_width = root_window.winfo_screenwidth()
     screen_height = root_window.winfo_screenheight()
     pos_x = (screen_width // 2) - (window_width // 2)
@@ -4646,6 +4792,7 @@ def startup(text_widget):
 
 # Schedule the startup function to run after the window is ready
 root.after(100, lambda: startup(text_area))
+root.after(250, refresh_main_leaderboards)
 
 
 # Initialize the Bot
