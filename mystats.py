@@ -5583,8 +5583,8 @@ class Bot(commands.Bot):
         await send_chat_message(ctx.channel, message, category="mystats")
 
 
-    @commands.command(name='top10tilees')
-    async def top10tilees_command(self, ctx):
+    @commands.command(name='top10tiltees')
+    async def top10tiltees_command(self, ctx):
         data = defaultdict(int)
 
         for tilts_file in glob.glob(os.path.join(config.get_setting('directory'), "tilts_*.csv")):
