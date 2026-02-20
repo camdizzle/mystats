@@ -238,11 +238,12 @@ function hasReachedEndOfStackedViews() {
   if (!finalRow) return false;
 
   const currentMax = leaderboard.scrollHeight - leaderboard.clientHeight;
-  if (currentMax > 2 && leaderboard.scrollTop < currentMax - 10) return false;
+  const nearBottom = currentMax <= 2 || leaderboard.scrollTop >= currentMax - 4;
+  if (!nearBottom) return false;
 
   const listBounds = leaderboard.getBoundingClientRect();
   const finalRowBounds = finalRow.getBoundingClientRect();
-  return finalRowBounds.bottom <= listBounds.bottom + 2;
+  return finalRowBounds.bottom <= listBounds.bottom + 24;
 }
 
 function escapeHtml(value) {
@@ -297,6 +298,12 @@ function renderCombinedRows(views) {
 
   leaderboard.innerHTML = markup;
 
+  const renderedRows = Array.from(leaderboard.querySelectorAll('.leaderboard-row'));
+  renderedRows.forEach((row) => row.classList.remove('leaderboard-row--final'));
+  const finalRenderedRow = renderedRows[renderedRows.length - 1];
+  if (finalRenderedRow) {
+    finalRenderedRow.classList.add('leaderboard-row--final');
+  }
 
   sectionAnchors = Array.from(leaderboard.querySelectorAll('.leaderboard-section-title')).map((el) => ({
     title: el.dataset.sectionTitle || 'Top Results',
