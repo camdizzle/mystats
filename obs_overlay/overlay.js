@@ -117,6 +117,8 @@ function showLeaderboardView() {
 }
 
 function showSplashView() {
+  if (!hasReachedEndOfStackedViews()) return;
+
   stopLeaderboardAutoScroll();
   if (boardShell) boardShell.classList.add('is-hidden');
   if (splashScreen) {
