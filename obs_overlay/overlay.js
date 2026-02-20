@@ -230,6 +230,21 @@ function startLeaderboardAutoScroll() {
   }, 32);
 }
 
+
+function hasReachedEndOfStackedViews() {
+  if (!leaderboard) return false;
+
+  const finalRow = leaderboard.querySelector('.leaderboard-row--final');
+  if (!finalRow) return false;
+
+  const currentMax = leaderboard.scrollHeight - leaderboard.clientHeight;
+  if (currentMax > 2 && leaderboard.scrollTop < currentMax - 10) return false;
+
+  const listBounds = leaderboard.getBoundingClientRect();
+  const finalRowBounds = finalRow.getBoundingClientRect();
+  return finalRowBounds.bottom <= listBounds.bottom + 2;
+}
+
 function escapeHtml(value) {
   return String(value ?? '')
     .replace(/&/g, '&amp;')
