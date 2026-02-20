@@ -218,7 +218,12 @@ function startLeaderboardAutoScroll() {
     if (now < leaderboardScrollPauseUntil) return;
 
     const lastTopTenRow = leaderboard.querySelector('.leaderboard-row:last-of-type');
-    const splashTriggerTop = lastTopTenRow?.offsetTop ?? currentMax;
+    const splashTriggerTop = lastTopTenRow
+      ? Math.min(
+          currentMax,
+          Math.max(0, lastTopTenRow.offsetTop + lastTopTenRow.offsetHeight - leaderboard.clientHeight),
+        )
+      : currentMax;
 
     leaderboard.scrollTop += 1.4;
 
