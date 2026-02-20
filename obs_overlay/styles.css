@@ -244,6 +244,10 @@ body.top3-active #leaderboard li.leaderboard-section-title,
   color: #ffe6a8;
   border-color: rgba(255, 207, 107, 0.4);
   background: linear-gradient(120deg, rgba(70, 35, 5, 0.92), rgba(30, 13, 2, 0.92));
+  position: static;
+  padding: 4px 8px;
+  font-size: calc(0.96rem * var(--text-scale));
+  line-height: 1;
 }
 
 body.top3-active #leaderboard,
@@ -290,25 +294,27 @@ body.top3-active #leaderboard li.top3-card--3,
 
 body.top3-active .top3-rank,
 #leaderboard.is-top3-mode .top3-rank {
-  font-size: calc(1.2rem * var(--text-scale));
+  font-size: calc(1.55rem * var(--text-scale));
   font-weight: 900;
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: #ffe8a8;
   text-align: center;
+  line-height: 1;
 }
 
 body.top3-active .top3-name,
 #leaderboard.is-top3-mode .top3-name {
-  font-size: calc(1.45rem * var(--text-scale));
+  width: 100%;
+  font-size: calc(2.25rem * var(--text-scale));
   font-weight: 800;
-  line-height: 1.1;
+  line-height: 1;
   text-shadow: 0 0 18px rgba(127, 216, 255, 0.45), 0 3px 10px rgba(0, 0, 0, 0.35);
 }
 
 body.top3-active .top3-points,
 #leaderboard.is-top3-mode .top3-points {
-  font-size: calc(1.08rem * var(--text-scale));
+  font-size: calc(1.35rem * var(--text-scale));
   font-weight: 700;
   padding: 4px 10px;
   border-radius: 999px;
@@ -367,7 +373,7 @@ body.compact-rows #leaderboard li.leaderboard-row {
 
   body.top3-active .top3-name,
 #leaderboard.is-top3-mode .top3-name {
-    font-size: calc(1.05rem * var(--text-scale));
+    font-size: calc(1.5rem * var(--text-scale));
   }
 }
 
