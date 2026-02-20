@@ -5470,18 +5470,20 @@ class Bot(commands.Bot):
             target_name = username.split()[0].lstrip('@')
             display_name = target_name
 
-        runs_today = set()
-        season_runs = set()
-        levels_today = 0
-        levels_season = 0
         points_today = 0
         points_season = 0
+        run_max_levels_season = defaultdict(int)
+        run_max_levels_today = defaultdict(int)
+        player_run_levels_season = defaultdict(set)
+        player_run_levels_today = defaultdict(set)
+        last_passed_level = 0
 
         _, _, _, adjusted_time = time_manager.get_adjusted_time()
         today_date = adjusted_time.strftime("%Y-%m-%d")
 
-        for tilts_file in glob.glob(os.path.join(config.get_setting('directory'), "tilts_*.csv")):
+        for tilts_file in sorted(glob.glob(os.path.join(config.get_setting('directory'), "tilts_*.csv"))):
             try:
+                file_date = os.path.basename(tilts_file)[6:16]
                 with open(tilts_file, 'rb') as f:
                     raw_data = f.read()
                 result = chardet.detect(raw_data)
@@ -5491,22 +5493,33 @@ class Bot(commands.Bot):
                     reader = csv.reader(f)
                     for row in reader:
                         parsed = parse_tilt_result_row(row)
-                        if parsed is None:
+                        if parsed is None or len(row) < 2:
                             continue
 
                         racer, points, run_id = parsed
+                        try:
+                            level_number = int(''.join(ch for ch in str(row[1]).strip() if ch.isdigit()) or '0')
+                        except (TypeError, ValueError):
+                            level_number = 0
+
+                        if level_number > 0:
+                            run_max_levels_season[run_id] = max(run_max_levels_season[run_id], level_number)
+                            if file_date == today_date:
+                                run_max_levels_today[run_id] = max(run_max_levels_today[run_id], level_number)
+
                         if racer.lower() != target_name.lower():
                             continue
 
-                        file_date = os.path.basename(tilts_file)[6:16]
-                        levels_season += 1
                         points_season += points
-                        season_runs.add(run_id)
+                        if level_number > 0:
+                            player_run_levels_season[run_id].add(level_number)
+                            last_passed_level = level_number
 
                         if file_date == today_date:
-                            levels_today += 1
                             points_today += points
-                            runs_today.add(run_id)
+                            if level_number > 0:
+                                run_max_levels_today[run_id] = max(run_max_levels_today[run_id], level_number)
+                                player_run_levels_today[run_id].add(level_number)
 
 
             except FileNotFoundError:
@@ -5514,7 +5527,7 @@ class Bot(commands.Bot):
             except Exception as e:
                 print(e)
 
-        if points_season == 0 and levels_season == 0:
+        if points_season == 0 and not player_run_levels_season:
             await send_chat_message(
                 ctx.channel,
                 f"{display_name}: No tilt data found this season.",
@@ -5522,16 +5535,22 @@ class Bot(commands.Bot):
             )
             return
 
-        avg_today = points_today / levels_today if levels_today else 0
-        avg_season = points_season / levels_season if levels_season else 0
+        deaths_season = 0
+        for run_id, levels_survived in player_run_levels_season.items():
+            run_max = run_max_levels_season.get(run_id, 0)
+            if run_max > 0 and levels_survived and max(levels_survived) < run_max:
+                deaths_season += 1
 
-        avg_today_rounded_down = math.floor(avg_today * 10) / 10
-        avg_season_rounded_down = math.floor(avg_season * 10) / 10
+        deaths_today = 0
+        for run_id, levels_survived in player_run_levels_today.items():
+            run_max = run_max_levels_today.get(run_id, 0)
+            if run_max > 0 and levels_survived and max(levels_survived) < run_max:
+                deaths_today += 1
 
         await send_chat_message(
             ctx.channel,
-            f"{display_name}: Today Tilt - {len(runs_today)} runs, {points_today:,} points, {levels_today:,} levels, PPL: {avg_today_rounded_down:.1f} | "
-            f"Season Tilt - {len(season_runs)} runs, {points_season:,} points, {levels_season:,} levels, PPL: {avg_season_rounded_down:.1f}",
+            f"{display_name} Stats | Today: {points_today:,} pts, {deaths_today:,} deaths | "
+            f"Season: {points_season:,} pts, {deaths_season:,} deaths | Last Passed: Level {last_passed_level:,}",
             category="mystats"
         )
 
