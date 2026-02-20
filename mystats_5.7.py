@@ -121,6 +121,12 @@ def apply_ui_styles(style):
     style.map("Green.TButton", foreground=[("active", "#198754")])
     style.configure("Red.TButton", foreground="#842029")
     style.map("Red.TButton", foreground=[("active", "#dc3545")])
+    style.configure("SessionActive.TButton", foreground="#ffffff", background="#146c43")
+    style.map("SessionActive.TButton", foreground=[("active", "#ffffff")], background=[("active", "#198754")])
+    style.configure("SessionInactive.TButton", foreground="#ffffff", background="#842029")
+    style.map("SessionInactive.TButton", foreground=[("active", "#ffffff")], background=[("active", "#dc3545")])
+    style.configure("SessionDelete.TButton", foreground="#ffffff", background="#6c757d")
+    style.map("SessionDelete.TButton", foreground=[("active", "#ffffff")], background=[("active", "#5c636a")])
     style.configure("Success.Small.TLabel", font=("Segoe UI", 9, "bold"), foreground="#198754")
     style.configure("Danger.Small.TLabel", font=("Segoe UI", 9, "bold"), foreground="#dc3545")
 
@@ -1399,7 +1405,10 @@ def open_mycycle_leaderboard_window(parent_window, initial_session_id=None):
     nav_frame.pack(side="right")
 
     columns = ("rank", "user", "cycles", "progress", "placements_line1", "placements_line2", "cycle_races", "last_cycle")
-    tree = ttk.Treeview(popup, columns=columns, show="headings", height=22)
+    leaderboard_tree_style = "MyCycleLeaderboard.Treeview"
+    app_style.configure(leaderboard_tree_style, rowheight=30)
+    app_style.configure(f"{leaderboard_tree_style}.Heading", padding=(8, 14))
+    tree = ttk.Treeview(popup, columns=columns, show="headings", height=22, style=leaderboard_tree_style)
     leaderboard_settings = get_mycycle_settings()
     show_second_placement_line = leaderboard_settings['max_place'] - leaderboard_settings['min_place'] + 1 > 10
 
@@ -2471,7 +2480,7 @@ def open_settings_window():
     general_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
     audio_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
     chat_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
-    tilt_tab_container = ttk.Frame(notebook, style="App.TFrame")
+    tilt_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
     season_quests_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
     rivals_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
     mycycle_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
@@ -2486,40 +2495,7 @@ def open_settings_window():
     notebook.add(mycycle_tab, text="MyCycle")
     notebook.add(appearance_tab, text="Appearance")
     notebook.add(overlay_tab, text="Overlay")
-    notebook.add(tilt_tab_container, text="Tilt")
-
-    tilt_canvas = tk.Canvas(tilt_tab_container, highlightthickness=0, bd=0)
-    tilt_scrollbar = ttk.Scrollbar(tilt_tab_container, orient="vertical", command=tilt_canvas.yview)
-    tilt_canvas.configure(yscrollcommand=tilt_scrollbar.set)
-    tilt_scrollbar.pack(side="right", fill="y")
-    tilt_canvas.pack(side="left", fill="both", expand=True)
-
-    tilt_tab = ttk.Frame(tilt_canvas, style="App.TFrame", padding=10)
-    tilt_canvas_window = tilt_canvas.create_window((0, 0), window=tilt_tab, anchor="nw")
-
-    def _update_tilt_scroll_region(_event=None):
-        tilt_canvas.configure(scrollregion=tilt_canvas.bbox("all"))
-
-    def _resize_tilt_inner_frame(event):
-        tilt_canvas.itemconfigure(tilt_canvas_window, width=event.width)
-
-    tilt_tab.bind("<Configure>", _update_tilt_scroll_region)
-    tilt_canvas.bind("<Configure>", _resize_tilt_inner_frame)
-
-    def _on_tilt_mousewheel(event):
-        delta = event.delta
-        if delta == 0:
-            return
-        tilt_canvas.yview_scroll(int(-1 * (delta / 120)), "units")
-
-    def _bind_tilt_mousewheel(_event=None):
-        tilt_canvas.bind_all("<MouseWheel>", _on_tilt_mousewheel)
-
-    def _unbind_tilt_mousewheel(_event=None):
-        tilt_canvas.unbind_all("<MouseWheel>")
-
-    tilt_canvas.bind("<Enter>", _bind_tilt_mousewheel)
-    tilt_canvas.bind("<Leave>", _unbind_tilt_mousewheel)
+    notebook.add(tilt_tab, text="Tilt")
 
     # --- General tab ---
     ttk.Label(general_tab, text="Core app settings", style="Small.TLabel").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
@@ -2642,7 +2618,7 @@ def open_settings_window():
     delay_seconds_entry.insert(0, config.get_setting("announcedelayseconds") or "")
 
     # --- Tilt tab ---
-    ttk.Label(tilt_tab, text="Configure tilt chat alerts, !tiltdeath threshold, and tilt overlay behavior", style="Small.TLabel").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
+    ttk.Label(tilt_tab, text="Configure tilt chat alerts, !tiltsurvivors threshold, and tilt overlay behavior", style="Small.TLabel").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
 
     chat_tilt_results_var = tk.BooleanVar(value=is_chat_response_enabled("chat_tilt_results"))
     chat_narrative_alerts_var = tk.BooleanVar(value=is_chat_response_enabled("chat_narrative_alerts"))
@@ -2680,13 +2656,13 @@ def open_settings_window():
     max_names_combobox = ttk.Combobox(tilt_tab, textvariable=selected_max_names, values=max_name_values, width=5, state="readonly")
     max_names_combobox.grid(row=2, column=1, sticky="w", pady=(2, 4), padx=(8, 0))
 
-    tiltdeath_frame = ttk.LabelFrame(tilt_tab, text="Tilt Command Thresholds", style="Card.TLabelframe")
-    tiltdeath_frame.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(6, 8))
-    ttk.Label(tiltdeath_frame, text="!tiltdeath minimum levels participated", style="Small.TLabel").grid(row=0, column=0, sticky="w", padx=(10, 8), pady=(8, 4))
-    tiltdeath_min_levels_entry = ttk.Entry(tiltdeath_frame, width=12, justify='center')
-    tiltdeath_min_levels_entry.grid(row=0, column=1, sticky="w", padx=(0, 10), pady=(8, 4))
-    tiltdeath_min_levels_entry.insert(0, config.get_setting("tiltdeath_min_levels") or "20")
-    ttk.Label(tiltdeath_frame, text="Players below this threshold are excluded from !tiltdeath ranking.", style="Small.TLabel").grid(row=1, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 8))
+    tiltsurvivors_frame = ttk.LabelFrame(tilt_tab, text="Tilt Command Thresholds", style="Card.TLabelframe")
+    tiltsurvivors_frame.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(6, 8))
+    ttk.Label(tiltsurvivors_frame, text="!tiltsurvivors minimum levels participated", style="Small.TLabel").grid(row=0, column=0, sticky="w", padx=(10, 8), pady=(8, 4))
+    tiltsurvivors_min_levels_entry = ttk.Entry(tiltsurvivors_frame, width=12, justify='center')
+    tiltsurvivors_min_levels_entry.grid(row=0, column=1, sticky="w", padx=(0, 10), pady=(8, 4))
+    tiltsurvivors_min_levels_entry.insert(0, config.get_setting("tiltsurvivors_min_levels") or config.get_setting("tiltdeath_min_levels") or "20")
+    ttk.Label(tiltsurvivors_frame, text="Players below this threshold are excluded from !tiltsurvivors ranking.", style="Small.TLabel").grid(row=1, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 8))
 
     # --- Season Quests tab ---
     ttk.Label(season_quests_tab, text="Configure long-term season goals and chat announcements", style="Small.TLabel").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
@@ -2764,6 +2740,7 @@ def open_settings_window():
     rivals_pair_count_entry.insert(0, config.get_setting("rivals_pair_count") or "25")
 
     ttk.Button(rivals_tab, text="View Rivalries", command=lambda: open_rivalries_window(settings_window)).grid(row=5, column=0, sticky="w", pady=(8, 0))
+    ttk.Label(rivals_tab, text="Tip: use !h2h <user1> <user2> to compare two players head-to-head.", style="Small.TLabel").grid(row=6, column=0, columnspan=2, sticky="w", pady=(10, 0))
 
     # --- MyCycle tab ---
     ttk.Label(mycycle_tab, text="Track placement cycles (uses your configured min/max placements) and custom sessions", style="Small.TLabel").grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 8))
@@ -2873,12 +2850,12 @@ def open_settings_window():
                     render_manager_rows()
                     refresh_session_dropdown()
 
-                ttk.Button(row, text="X", width=3, command=delete_session, style="Red.TButton").pack(side="right", padx=(6, 0))
+                ttk.Button(row, text="X", width=3, command=delete_session, style="SessionDelete.TButton").pack(side="right", padx=(6, 0))
                 ttk.Button(
                     row,
                     text="Deactivate" if is_active else "Activate",
                     command=toggle_session,
-                    style="Red.TButton" if is_active else "Green.TButton"
+                    style="SessionInactive.TButton" if is_active else "SessionActive.TButton"
                 ).pack(side="right", padx=(6, 0))
                 ttk.Button(row, text="Leaderboard", command=open_session_leaderboard).pack(side="right")
 
@@ -2998,8 +2975,8 @@ def open_settings_window():
         narrative_alert_min_gap_entry.insert(0, "500")
         narrative_alert_max_items_entry.delete(0, tk.END)
         narrative_alert_max_items_entry.insert(0, "3")
-        tiltdeath_min_levels_entry.delete(0, tk.END)
-        tiltdeath_min_levels_entry.insert(0, "20")
+        tiltsurvivors_min_levels_entry.delete(0, tk.END)
+        tiltsurvivors_min_levels_entry.insert(0, "20")
         season_quests_enabled_var.set(True)
         rivals_enabled_var.set(True)
         selected_max_names.set("25")
@@ -3082,7 +3059,7 @@ def open_settings_window():
         config.set_setting("narrative_alert_cooldown_races", narrative_alert_cooldown_entry.get(), persistent=True)
         config.set_setting("narrative_alert_min_lead_change_points", narrative_alert_min_gap_entry.get(), persistent=True)
         config.set_setting("narrative_alert_max_items", narrative_alert_max_items_entry.get(), persistent=True)
-        config.set_setting("tiltdeath_min_levels", tiltdeath_min_levels_entry.get(), persistent=True)
+        config.set_setting("tiltsurvivors_min_levels", tiltsurvivors_min_levels_entry.get(), persistent=True)
         config.set_setting("season_quests_enabled", str(season_quests_enabled_var.get()), persistent=True)
         config.set_setting("season_quest_target_races", season_quest_races_entry.get(), persistent=True)
         config.set_setting("season_quest_target_points", season_quest_points_entry.get(), persistent=True)
@@ -3764,7 +3741,7 @@ class ConfigManager:
                                 'overlay_card_opacity', 'overlay_text_scale', 'overlay_show_medals',
                                 'overlay_compact_rows', 'overlay_server_port', 'tilt_lifetime_base_xp',
                                 'tilt_overlay_theme', 'tilt_scroll_step_px', 'tilt_scroll_interval_ms',
-                                'tilt_scroll_pause_ms', 'tiltdeath_min_levels'}
+                                'tilt_scroll_pause_ms', 'tiltsurvivors_min_levels', 'tiltdeath_min_levels'}
         self.transient_keys = set([])
         self.defaults = {
             'chat_br_results': 'True',
@@ -3822,6 +3799,7 @@ class ConfigManager:
             'tilt_scroll_step_px': '1',
             'tilt_scroll_interval_ms': '40',
             'tilt_scroll_pause_ms': '900',
+            'tiltsurvivors_min_levels': '20',
             'tiltdeath_min_levels': '20'
         }
         self.load_settings()
@@ -3880,7 +3858,7 @@ class ConfigManager:
                    "overlay_rotation_seconds", "overlay_refresh_seconds", "overlay_card_opacity",
                    "overlay_text_scale", "overlay_server_port", "tilt_lifetime_base_xp",
                    "tilt_scroll_step_px", "tilt_scroll_interval_ms", "tilt_scroll_pause_ms",
-                   "tiltdeath_min_levels"}:
+                   "tiltsurvivors_min_levels", "tiltdeath_min_levels"}:
             if isinstance(value, int) or (isinstance(value, str) and value.isdigit()):
                 if key == "overlay_server_port":
                     port = int(value)
@@ -5496,8 +5474,8 @@ class Bot(commands.Bot):
         await send_chat_message(ctx.channel, message, category="mystats")
 
 
-    @commands.command(name='tiltdeath')
-    async def tiltdeath_command(self, ctx):
+    @commands.command(name='tiltsurvivors')
+    async def tiltsurvivors_command(self, ctx):
         run_max_levels = defaultdict(int)
         player_run_levels = defaultdict(set)
 
@@ -5550,7 +5528,7 @@ class Bot(commands.Bot):
             player_totals[username]['deaths'] += died_this_run
             player_totals[username]['levels_participated'] += levels_participated
 
-        minimum_levels = max(1, get_int_setting('tiltdeath_min_levels', 20))
+        minimum_levels = max(1, get_int_setting('tiltsurvivors_min_levels', get_int_setting('tiltdeath_min_levels', 20)))
 
         qualified = []
         for username, totals in player_totals.items():
@@ -5565,20 +5543,20 @@ class Bot(commands.Bot):
         if not qualified:
             await send_chat_message(
                 ctx.channel,
-                f"No tilt death-rate data yet (minimum {minimum_levels} levels participated required).",
+                f"No tilt survivor-rate data yet (minimum {minimum_levels} levels participated required).",
                 category="mystats"
             )
             return
 
         ranked = sorted(qualified, key=lambda item: (item[2], item[1], item[0].lower()))[:10]
         message_items = [
-            f"({idx}) {username} {deaths} deaths, {death_rate:.1f}%"
+            f"({idx}) {username} {deaths} deaths, {100 - death_rate:.1f}% survive"
             for idx, (username, deaths, death_rate) in enumerate(ranked, start=1)
         ]
 
         await send_chat_message(
             ctx.channel,
-            f"Top 10 Lowest Tilt Death Rate (min {minimum_levels} levels): " + ", ".join(message_items) + ".",
+            f"Top 10 Best Tilt Survival Rate (min {minimum_levels} levels): " + ", ".join(message_items) + ".",
             category="mystats"
         )
 
