@@ -212,24 +212,13 @@ def parse_tilt_level_state(level_rows):
     if len(level_rows) < 2:
         return None
 
-    def normalize_header(value):
-        return ''.join(ch for ch in str(value).strip().lower() if ch.isalnum())
-
-    def parse_bool_value(value):
-        normalized = str(value).strip().lower()
-        if normalized in ('true', '1', 'yes', 'y'):
-            return True
-        if normalized in ('false', '0', 'no', 'n'):
-            return False
-        return None
-
-    headers = [normalize_header(h) for h in level_rows[0]]
+    headers = [h.strip().lower() for h in level_rows[0]]
     row = level_rows[1]
     index_by_header = {h: idx for idx, h in enumerate(headers)}
 
     def get_field(alias_list, fallback_index=None, default=''):
         for alias in alias_list:
-            idx = index_by_header.get(normalize_header(alias))
+            idx = index_by_header.get(alias)
             if idx is not None and idx < len(row):
                 return row[idx].strip()
         if fallback_index is not None and fallback_index < len(row):
@@ -246,21 +235,7 @@ def parse_tilt_level_state(level_rows):
     level_xp_raw = get_field(['points', 'levelexp', 'expertise'], fallback_index=3, default='0')
     total_xp_raw = get_field(['totalexp', 'totalexpertise'], fallback_index=4, default='0')
     live_raw = get_field(['live', 'islive'], fallback_index=5, default='')
-
-    level_passed_raw = get_field(['levelpassed', 'passed'], fallback_index=None, default='')
-    level_passed_value = parse_bool_value(level_passed_raw)
-    if level_passed_value is None:
-        # Tilt exports can vary between 6 and 7 columns and may omit headers.
-        # Search likely positional candidates, but only accept explicit boolean-like values.
-        for idx in (6, 5, len(row) - 1):
-            if 0 <= idx < len(row):
-                parsed_value = parse_bool_value(row[idx])
-                if parsed_value is not None:
-                    level_passed_value = parsed_value
-                    break
-
-    if level_passed_value is None:
-        level_passed_value = False
+    level_passed_raw = get_field(['levelpassed', 'passed'], fallback_index=6, default='false').lower()
 
     try:
         level_xp = int(float(level_xp_raw))
@@ -279,7 +254,7 @@ def parse_tilt_level_state(level_rows):
         'level_xp': level_xp,
         'total_xp': total_xp,
         'live': live_raw,
-        'level_passed': level_passed_value
+        'level_passed': level_passed_raw == 'true'
     }
 
 
