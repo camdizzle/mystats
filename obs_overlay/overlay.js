@@ -223,24 +223,11 @@ function startLeaderboardAutoScroll() {
 
     leaderboard.scrollTop += 1.4;
 
-    if (leaderboard.scrollTop >= currentMax - 1 && hasReachedEndOfStackedViews()) {
+    if (leaderboard.scrollTop >= currentMax - 1) {
       leaderboard.scrollTop = currentMax;
       showSplashView();
     }
   }, 32);
-}
-
-function hasReachedEndOfStackedViews() {
-  if (!leaderboard) return false;
-
-  const finalRow = leaderboard.querySelector('.leaderboard-row--final');
-  if (!finalRow) {
-    return false;
-  }
-
-  const listBounds = leaderboard.getBoundingClientRect();
-  const finalRowBounds = finalRow.getBoundingClientRect();
-  return finalRowBounds.bottom <= listBounds.bottom + 2;
 }
 
 function escapeHtml(value) {
@@ -295,12 +282,6 @@ function renderCombinedRows(views) {
 
   leaderboard.innerHTML = markup;
 
-  const renderedRows = Array.from(leaderboard.querySelectorAll('.leaderboard-row'));
-  renderedRows.forEach((row) => row.classList.remove('leaderboard-row--final'));
-  const finalRenderedRow = renderedRows[renderedRows.length - 1];
-  if (finalRenderedRow) {
-    finalRenderedRow.classList.add('leaderboard-row--final');
-  }
 
   sectionAnchors = Array.from(leaderboard.querySelectorAll('.leaderboard-section-title')).map((el) => ({
     title: el.dataset.sectionTitle || 'Top Results',
