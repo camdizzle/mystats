@@ -217,10 +217,13 @@ function startLeaderboardAutoScroll() {
     const now = Date.now();
     if (now < leaderboardScrollPauseUntil) return;
 
+    const lastTopTenRow = leaderboard.querySelector('.leaderboard-row:last-of-type');
+    const splashTriggerTop = lastTopTenRow?.offsetTop ?? currentMax;
+
     leaderboard.scrollTop += 1.4;
 
-    if (leaderboard.scrollTop >= currentMax - 1) {
-      leaderboard.scrollTop = currentMax;
+    if (leaderboard.scrollTop >= splashTriggerTop - 1) {
+      leaderboard.scrollTop = Math.min(splashTriggerTop, currentMax);
       showSplashView();
     }
   }, 32);
