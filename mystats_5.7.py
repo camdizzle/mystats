@@ -893,7 +893,7 @@ def _empty_placement_counts(min_place, max_place):
 
 def get_mycycle_settings():
     min_place = max(1, get_int_setting('mycycle_min_place', 1))
-    max_place = min(10, get_int_setting('mycycle_max_place', 10))
+    max_place = max(1, get_int_setting('mycycle_max_place', 10))
     if min_place > max_place:
         min_place, max_place = 1, 10
     return {
@@ -1114,33 +1114,43 @@ def update_mycycle_with_race_rows(racedata):
     return completion_events
 
 
-def get_mycycle_progress(username=None):
+def get_mycycle_progress(username=None, session_id=None):
     with MYCYCLE_LOCK:
         data = load_mycycle_data()
-        session_id = _resolve_session_id(data)
+        resolved_session_id = session_id if session_id in data.get('sessions', {}) else _resolve_session_id(data)
         save_mycycle_data(data)
 
-    session = data['sessions'].get(session_id, {})
+    session = data['sessions'].get(resolved_session_id, {})
     stats = session.get('stats', {})
     target_user = _resolve_user_in_session(stats, username) if username else None
     return session, stats, target_user
 
 
-def get_mycycle_leaderboard(limit=200):
-    session, stats, _ = get_mycycle_progress()
+def _format_mycycle_placement_marks(hits, placement_range):
+    marks = [f"{place}{'✅' if place in hits else '❌'}" for place in placement_range]
+    if len(marks) <= 10:
+        return " ".join(marks), ""
+
+    midpoint = math.ceil(len(marks) / 2)
+    return " ".join(marks[:midpoint]), " ".join(marks[midpoint:])
+
+
+def get_mycycle_leaderboard(limit=200, session_id=None):
+    session, stats, _ = get_mycycle_progress(session_id=session_id)
     leaderboard = []
     settings = get_mycycle_settings()
     placement_range = list(range(settings['min_place'], settings['max_place'] + 1))
     for username, row in stats.items():
         hits = set(row.get('current_hits', []))
-        hit_marks = [f"{place}{'✅' if place in hits else '❌'}" for place in placement_range]
+        marks_top, marks_bottom = _format_mycycle_placement_marks(hits, placement_range)
         leaderboard.append({
             'username': username,
             'display_name': row.get('display_name') or username,
             'cycles_completed': int(row.get('cycles_completed', 0)),
             'progress_hits': len(hits),
             'progress_total': settings['max_place'] - settings['min_place'] + 1,
-            'progress_marks': " ".join(hit_marks),
+            'progress_marks_top': marks_top,
+            'progress_marks_bottom': marks_bottom,
             'current_cycle_races': int(row.get('current_cycle_races', 0)),
             'last_cycle_races': int(row.get('last_cycle_races', 0)),
         })
@@ -1327,47 +1337,82 @@ def format_rotating_cyclestats_metric(metric_key, stats):
     return "Extra: n/a"
 
 
-def open_mycycle_leaderboard_window(parent_window):
-    session, leaderboard = get_mycycle_leaderboard(limit=500)
-    if not leaderboard:
-        messagebox.showinfo("MyCycle", "No cycle data yet for the selected session.")
+def open_mycycle_leaderboard_window(parent_window, initial_session_id=None):
+    active_sessions, default_session_id = get_mycycle_sessions(include_inactive=False)
+    if not active_sessions:
+        messagebox.showinfo("MyCycle", "No active MyCycle sessions found.")
         return
+
+    session_ids = [session['id'] for session in active_sessions]
+    primary_session_id = config.get_setting('mycycle_primary_session_id') or default_session_id
+    initial_id = initial_session_id if initial_session_id in session_ids else primary_session_id
+    current_index = session_ids.index(initial_id) if initial_id in session_ids else 0
 
     popup = tk.Toplevel(parent_window)
     popup.title("MyCycle Leaderboard")
     popup.transient(parent_window)
     popup.attributes('-topmost', True)
-    center_toplevel(popup, 1120, 540)
+    center_toplevel(popup, 1320, 600)
 
-    ttk.Label(popup, text=f"Session: {session.get('name', 'Unknown')}", style="Small.TLabel").pack(anchor="w", padx=12, pady=(10, 4))
-    columns = ("rank", "user", "cycles", "progress", "placements", "cycle_races", "last_cycle")
-    tree = ttk.Treeview(popup, columns=columns, show="headings", height=20)
-    for col, text in (("rank", "#"), ("user", "User"), ("cycles", "Cycles"), ("progress", "Current Progress"), ("placements", "Placements (Hit/Miss)"), ("cycle_races", "Races in Current Cycle"), ("last_cycle", "Races in Last Completed Cycle")):
+    top_bar = ttk.Frame(popup, style="App.TFrame")
+    top_bar.pack(fill="x", padx=12, pady=(8, 4))
+
+    session_label_var = tk.StringVar(value="")
+    ttk.Label(top_bar, textvariable=session_label_var, style="Small.TLabel").pack(side="left")
+
+    nav_frame = ttk.Frame(top_bar, style="App.TFrame")
+    nav_frame.pack(side="right")
+
+    columns = ("rank", "user", "cycles", "progress", "placements_line1", "placements_line2", "cycle_races", "last_cycle")
+    tree = ttk.Treeview(popup, columns=columns, show="headings", height=22)
+    for col, text in (("rank", "#"), ("user", "User"), ("cycles", "Cycles"), ("progress", "Current Progress"), ("placements_line1", "Placements (1/2)"), ("placements_line2", "Placements (2/2)"), ("cycle_races", "Races in Current Cycle"), ("last_cycle", "Races in Last Completed Cycle")):
         tree.heading(col, text=text)
 
     tree.column("rank", width=50, anchor="center")
     tree.column("user", width=170, anchor="w")
     tree.column("cycles", width=70, anchor="center")
     tree.column("progress", width=120, anchor="center")
-    tree.column("placements", width=260, anchor="w")
+    tree.column("placements_line1", width=330, anchor="w")
+    tree.column("placements_line2", width=330, anchor="w")
     tree.column("cycle_races", width=140, anchor="center")
     tree.column("last_cycle", width=180, anchor="center")
 
-    for idx, row in enumerate(leaderboard, start=1):
-        tree.insert("", "end", values=(
-            idx,
-            row['display_name'],
-            row['cycles_completed'],
-            f"{row['progress_hits']}/{row['progress_total']}",
-            row['progress_marks'],
-            row['current_cycle_races'],
-            row['last_cycle_races'],
-        ))
+    def render_session_by_index(index):
+        session_id = session_ids[index]
+        session, leaderboard = get_mycycle_leaderboard(limit=500, session_id=session_id)
+        session_label_var.set(f"Session {index + 1}/{len(session_ids)}: {session.get('name', 'Unknown')}")
+
+        tree.delete(*tree.get_children())
+        if not leaderboard:
+            tree.insert("", "end", values=("", "No race data for this session yet.", "", "", "", "", "", ""))
+            return
+
+        for idx, row in enumerate(leaderboard, start=1):
+            tree.insert("", "end", values=(
+                idx,
+                row['display_name'],
+                row['cycles_completed'],
+                f"{row['progress_hits']}/{row['progress_total']}",
+                row['progress_marks_top'],
+                row['progress_marks_bottom'],
+                row['current_cycle_races'],
+                row['last_cycle_races'],
+            ))
+
+    def shift_session(delta):
+        nonlocal current_index
+        current_index = (current_index + delta) % len(session_ids)
+        render_session_by_index(current_index)
+
+    ttk.Button(nav_frame, text="◀ Prev Session", command=lambda: shift_session(-1)).pack(side="left", padx=(0, 6))
+    ttk.Button(nav_frame, text="Next Session ▶", command=lambda: shift_session(1)).pack(side="left")
 
     scrollbar = ttk.Scrollbar(popup, orient="vertical", command=tree.yview)
     tree.configure(yscrollcommand=scrollbar.set)
     tree.pack(side="left", fill="both", expand=True, padx=(12, 0), pady=(0, 12))
     scrollbar.pack(side="right", fill="y", padx=(0, 12), pady=(0, 12))
+
+    render_session_by_index(current_index)
 
 
 async def send_chat_message(channel, message, category=None, apply_delay=False):
@@ -2712,7 +2757,7 @@ def open_settings_window():
     ttk.Button(rivals_tab, text="View Rivalries", command=lambda: open_rivalries_window(settings_window)).grid(row=5, column=0, sticky="w", pady=(8, 0))
 
     # --- MyCycle tab ---
-    ttk.Label(mycycle_tab, text="Track placement cycles (positions 1-10) and custom sessions", style="Small.TLabel").grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 8))
+    ttk.Label(mycycle_tab, text="Track placement cycles (uses your configured min/max placements) and custom sessions", style="Small.TLabel").grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 8))
 
     mycycle_enabled_var = tk.BooleanVar(value=is_chat_response_enabled("mycycle_enabled"))
     mycycle_announce_var = tk.BooleanVar(value=is_chat_response_enabled("mycycle_announcements_enabled"))
@@ -2757,33 +2802,62 @@ def open_settings_window():
         session_name = simpledialog.askstring("Create MyCycle Session", "Session name:", parent=settings_window)
         if not session_name or not session_name.strip():
             return
-        create_mycycle_session(session_name.strip(), created_by=config.get_setting("CHANNEL") or "streamer")
-        refresh_session_dropdown()
+        created_id = create_mycycle_session(session_name.strip(), created_by=config.get_setting("CHANNEL") or "streamer")
+        refresh_session_dropdown(select_id=created_id)
 
-    def toggle_selected_session():
-        selected_name = selected_session_name.get()
-        session_id = session_names.get(selected_name)
-        if not session_id:
-            return
+    def open_session_manager_window():
+        manager = tk.Toplevel(settings_window)
+        manager.title("Manage MyCycle Sessions")
+        manager.transient(settings_window)
+        manager.attributes('-topmost', True)
+        center_toplevel(manager, 760, 420)
 
-        with MYCYCLE_LOCK:
-            data = load_mycycle_data()
-            session = data.get('sessions', {}).get(session_id)
-            if not session:
-                return
-            if session.get('is_default'):
-                messagebox.showinfo("MyCycle", "Default season sessions cannot be toggled off.")
-                return
-            session['active'] = not session.get('active', True)
-            save_mycycle_data(data)
+        ttk.Label(manager, text="Toggle sessions active/inactive and open leaderboard by session.", style="Small.TLabel").pack(anchor="w", padx=12, pady=(10, 6))
+        rows_host = ttk.Frame(manager, style="App.TFrame")
+        rows_host.pack(fill="both", expand=True, padx=12, pady=(0, 12))
 
-        state_text = "active" if session.get('active', True) else "inactive"
-        messagebox.showinfo("MyCycle", f"Session '{selected_name}' is now {state_text}.")
+        def render_manager_rows():
+            for child in rows_host.winfo_children():
+                child.destroy()
 
+            sessions, _ = get_mycycle_sessions(include_inactive=True)
+            for row_index, session in enumerate(sessions):
+                row = ttk.Frame(rows_host, style="App.TFrame")
+                row.grid(row=row_index, column=0, sticky="ew", pady=3)
+                rows_host.grid_columnconfigure(0, weight=1)
+
+                state_text = "Active" if session.get('active', True) else "Inactive"
+                meta_text = f"{session.get('name', 'Unknown')} ({state_text})"
+                if session.get('is_default'):
+                    meta_text += " • default"
+                ttk.Label(row, text=meta_text).pack(side="left")
+
+                def toggle_session(sid=session.get('id')):
+                    with MYCYCLE_LOCK:
+                        data = load_mycycle_data()
+                        target = data.get('sessions', {}).get(sid)
+                        if not target:
+                            return
+                        if target.get('is_default'):
+                            messagebox.showinfo("MyCycle", "Default season sessions cannot be toggled off.", parent=manager)
+                            return
+                        target['active'] = not target.get('active', True)
+                        save_mycycle_data(data)
+                    render_manager_rows()
+                    refresh_session_dropdown(select_id=sid)
+
+                def open_session_leaderboard(sid=session.get('id')):
+                    open_mycycle_leaderboard_window(settings_window, initial_session_id=sid)
+
+                ttk.Button(row, text="Toggle Active", command=toggle_session).pack(side="right", padx=(6, 0))
+                ttk.Button(row, text="Leaderboard", command=open_session_leaderboard).pack(side="right")
+
+        render_manager_rows()
+
+    ttk.Button(mycycle_tab, text="Manage Sessions", command=open_session_manager_window).grid(row=6, column=3, sticky="w", padx=(8, 0), pady=(10, 2))
     ttk.Button(mycycle_tab, text="Create Session", command=create_cycle_session_prompt).grid(row=7, column=0, sticky="w", pady=(8, 0))
-    ttk.Button(mycycle_tab, text="Toggle Session Active", command=toggle_selected_session).grid(row=7, column=1, sticky="w", pady=(8, 0))
-    ttk.Button(mycycle_tab, text="View Leaderboard", command=lambda: open_mycycle_leaderboard_window(settings_window)).grid(row=7, column=2, sticky="w", pady=(8, 0))
-    ttk.Label(mycycle_tab, text="Tip: Streamers can create event-specific sessions and toggle them on/off at any time.", style="Small.TLabel").grid(row=8, column=0, columnspan=3, sticky="w", pady=(8, 0))
+    ttk.Button(mycycle_tab, text="View Leaderboard", command=lambda: open_mycycle_leaderboard_window(settings_window)).grid(row=7, column=1, sticky="w", pady=(8, 0))
+    ttk.Label(mycycle_tab, text="Tip: Primary session is shown first in leaderboard pagination across active sessions.", style="Small.TLabel").grid(row=8, column=0, columnspan=4, sticky="w", pady=(8, 0))
 
     # --- Appearance tab ---
     ttk.Label(appearance_tab, text="Theme and visual preferences", style="Small.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 8))
