@@ -111,7 +111,7 @@ h1 {
   display: none;
 }
 
-.splash-screen.is-visible {
+.splash-screen[visible='true'] {
   display: block;
 }
 
