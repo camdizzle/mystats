@@ -117,6 +117,12 @@ def apply_ui_styles(style):
     style.map("TButton", relief=[("pressed", "flat"), ("active", "flat")])
     style.configure("Primary.TButton", padding=(12, 7), relief="flat", borderwidth=0)
     style.map("Primary.TButton", relief=[("pressed", "flat"), ("active", "flat")])
+    style.configure("Green.TButton", foreground="#0f5132")
+    style.map("Green.TButton", foreground=[("active", "#198754")])
+    style.configure("Red.TButton", foreground="#842029")
+    style.map("Red.TButton", foreground=[("active", "#dc3545")])
+    style.configure("Success.Small.TLabel", font=("Segoe UI", 9, "bold"), foreground="#198754")
+    style.configure("Danger.Small.TLabel", font=("Segoe UI", 9, "bold"), foreground="#dc3545")
 
     # Improve field density/readability.
     style.configure("TEntry", padding=4)
@@ -959,7 +965,16 @@ def get_mycycle_sessions(include_inactive=True):
         default_id = ensure_default_mycycle_session(data)
         save_mycycle_data(data)
     sessions = list(data.get('sessions', {}).values())
-    sessions.sort(key=lambda s: (not s.get('is_default', False), s.get('name', '').lower()))
+
+    def _session_sort_key(session):
+        created_at = session.get('created_at') or ""
+        try:
+            created_dt = datetime.strptime(created_at, '%Y-%m-%d %H:%M:%S')
+        except (TypeError, ValueError):
+            created_dt = datetime.min
+        return created_dt
+
+    sessions.sort(key=_session_sort_key, reverse=True)
     if include_inactive:
         return sessions, default_id
     return [s for s in sessions if s.get('active', True)], default_id
@@ -984,6 +999,26 @@ def create_mycycle_session(session_name, created_by='streamer'):
         }
         save_mycycle_data(data)
     return session_id
+
+
+def delete_mycycle_session(session_id):
+    with MYCYCLE_LOCK:
+        data = load_mycycle_data()
+        target = data.get('sessions', {}).get(session_id)
+        if not target:
+            return False, "Session not found."
+        if target.get('is_default'):
+            return False, "Default season sessions cannot be deleted."
+
+        del data['sessions'][session_id]
+
+        primary_session_id = config.get_setting('mycycle_primary_session_id')
+        if primary_session_id == session_id:
+            fallback_id = ensure_default_mycycle_session(data)
+            config.set_setting('mycycle_primary_session_id', fallback_id, persistent=True)
+
+        save_mycycle_data(data)
+    return True, "Deleted"
 
 
 def _resolve_session_id(data):
@@ -1154,7 +1189,7 @@ def get_mycycle_leaderboard(limit=200, session_id=None):
             'current_cycle_races': int(row.get('current_cycle_races', 0)),
             'last_cycle_races': int(row.get('last_cycle_races', 0)),
         })
-    leaderboard.sort(key=lambda r: (r['cycles_completed'], r['progress_hits'], -r['current_cycle_races']), reverse=True)
+    leaderboard.sort(key=lambda r: (-r['cycles_completed'], -r['progress_hits'], r['current_cycle_races']))
     return session, leaderboard[:limit]
 
 
@@ -1365,7 +1400,10 @@ def open_mycycle_leaderboard_window(parent_window, initial_session_id=None):
 
     columns = ("rank", "user", "cycles", "progress", "placements_line1", "placements_line2", "cycle_races", "last_cycle")
     tree = ttk.Treeview(popup, columns=columns, show="headings", height=22)
-    for col, text in (("rank", "#"), ("user", "User"), ("cycles", "Cycles"), ("progress", "Current Progress"), ("placements_line1", "Placements (1/2)"), ("placements_line2", "Placements (2/2)"), ("cycle_races", "Races in Current Cycle"), ("last_cycle", "Races in Last Completed Cycle")):
+    leaderboard_settings = get_mycycle_settings()
+    show_second_placement_line = leaderboard_settings['max_place'] - leaderboard_settings['min_place'] + 1 > 10
+
+    for col, text in (("rank", "#"), ("user", "User"), ("cycles", "Cycles"), ("progress", "Current\nProgress"), ("placements_line1", "Placements\n(1/2)"), ("placements_line2", "Placements\n(2/2)" if show_second_placement_line else ""), ("cycle_races", "Races in\nCurrent Cycle"), ("last_cycle", "Races in Last\nCompleted Cycle")):
         tree.heading(col, text=text)
 
     tree.column("rank", width=50, anchor="center")
@@ -1373,7 +1411,7 @@ def open_mycycle_leaderboard_window(parent_window, initial_session_id=None):
     tree.column("cycles", width=70, anchor="center")
     tree.column("progress", width=120, anchor="center")
     tree.column("placements_line1", width=330, anchor="w")
-    tree.column("placements_line2", width=330, anchor="w")
+    tree.column("placements_line2", width=330 if show_second_placement_line else 0, anchor="w", stretch=show_second_placement_line)
     tree.column("cycle_races", width=140, anchor="center")
     tree.column("last_cycle", width=180, anchor="center")
 
@@ -1394,7 +1432,7 @@ def open_mycycle_leaderboard_window(parent_window, initial_session_id=None):
                 row['cycles_completed'],
                 f"{row['progress_hits']}/{row['progress_total']}",
                 row['progress_marks_top'],
-                row['progress_marks_bottom'],
+                row['progress_marks_bottom'] if show_second_placement_line else "",
                 row['current_cycle_races'],
                 row['last_cycle_races'],
             ))
@@ -2443,12 +2481,12 @@ def open_settings_window():
     notebook.add(general_tab, text="General")
     notebook.add(audio_tab, text="Audio")
     notebook.add(chat_tab, text="Chat")
-    notebook.add(tilt_tab_container, text="Tilt")
     notebook.add(season_quests_tab, text="Season Quests")
     notebook.add(rivals_tab, text="Rivals")
     notebook.add(mycycle_tab, text="MyCycle")
     notebook.add(appearance_tab, text="Appearance")
     notebook.add(overlay_tab, text="Overlay")
+    notebook.add(tilt_tab_container, text="Tilt")
 
     tilt_canvas = tk.Canvas(tilt_tab_container, highlightthickness=0, bd=0)
     tilt_scrollbar = ttk.Scrollbar(tilt_tab_container, orient="vertical", command=tilt_canvas.yview)
@@ -2650,35 +2688,6 @@ def open_settings_window():
     tiltdeath_min_levels_entry.insert(0, config.get_setting("tiltdeath_min_levels") or "20")
     ttk.Label(tiltdeath_frame, text="Players below this threshold are excluded from !tiltdeath ranking.", style="Small.TLabel").grid(row=1, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 8))
 
-    tilt_overlay_frame = ttk.LabelFrame(tilt_tab, text="Tilt Overlay", style="Card.TLabelframe")
-    tilt_overlay_frame.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(0, 0))
-
-    ttk.Label(tilt_overlay_frame, text="Starting Lifetime XP", style="Small.TLabel").grid(row=0, column=0, sticky="w", padx=(10, 8), pady=(8, 4))
-    tilt_lifetime_base_entry = ttk.Entry(tilt_overlay_frame, width=12, justify='center')
-    tilt_lifetime_base_entry.grid(row=0, column=1, sticky="w", padx=(0, 10), pady=(8, 4))
-    tilt_lifetime_base_entry.insert(0, config.get_setting("tilt_lifetime_base_xp") or "0")
-
-    ttk.Label(tilt_overlay_frame, text="Tilt Theme", style="Small.TLabel").grid(row=1, column=0, sticky="w", padx=(10, 8), pady=4)
-    tilt_overlay_theme_var = tk.StringVar(value=(config.get_setting("tilt_overlay_theme") or config.get_setting("overlay_theme") or "midnight"))
-    ttk.Combobox(tilt_overlay_frame, textvariable=tilt_overlay_theme_var, values=["midnight", "ocean", "sunset", "forest", "mono"], width=18, state="readonly").grid(row=1, column=1, sticky="w", padx=(0, 10), pady=4)
-
-    ttk.Label(tilt_overlay_frame, text="Scroll Step (px)", style="Small.TLabel").grid(row=2, column=0, sticky="w", padx=(10, 8), pady=4)
-    tilt_scroll_step_entry = ttk.Entry(tilt_overlay_frame, width=12, justify='center')
-    tilt_scroll_step_entry.grid(row=2, column=1, sticky="w", padx=(0, 10), pady=4)
-    tilt_scroll_step_entry.insert(0, config.get_setting("tilt_scroll_step_px") or "1")
-
-    ttk.Label(tilt_overlay_frame, text="Scroll Tick (ms)", style="Small.TLabel").grid(row=3, column=0, sticky="w", padx=(10, 8), pady=4)
-    tilt_scroll_interval_entry = ttk.Entry(tilt_overlay_frame, width=12, justify='center')
-    tilt_scroll_interval_entry.grid(row=3, column=1, sticky="w", padx=(0, 10), pady=4)
-    tilt_scroll_interval_entry.insert(0, config.get_setting("tilt_scroll_interval_ms") or "40")
-
-    ttk.Label(tilt_overlay_frame, text="Edge Pause (ms)", style="Small.TLabel").grid(row=4, column=0, sticky="w", padx=(10, 8), pady=(4, 8))
-    tilt_scroll_pause_entry = ttk.Entry(tilt_overlay_frame, width=12, justify='center')
-    tilt_scroll_pause_entry.grid(row=4, column=1, sticky="w", padx=(0, 10), pady=(4, 8))
-    tilt_scroll_pause_entry.insert(0, config.get_setting("tilt_scroll_pause_ms") or "900")
-
-    ttk.Label(tilt_overlay_frame, text="Tip: Starting Lifetime XP lets you align totals with existing channel progress.", style="Small.TLabel").grid(row=5, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 8))
-
     # --- Season Quests tab ---
     ttk.Label(season_quests_tab, text="Configure long-term season goals and chat announcements", style="Small.TLabel").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
 
@@ -2812,7 +2821,7 @@ def open_settings_window():
         manager.attributes('-topmost', True)
         center_toplevel(manager, 760, 420)
 
-        ttk.Label(manager, text="Toggle sessions active/inactive and open leaderboard by session.", style="Small.TLabel").pack(anchor="w", padx=12, pady=(10, 6))
+        ttk.Label(manager, text="Manage active state, view leaderboard, or delete sessions.", style="Small.TLabel").pack(anchor="w", padx=12, pady=(10, 6))
         rows_host = ttk.Frame(manager, style="App.TFrame")
         rows_host.pack(fill="both", expand=True, padx=12, pady=(0, 12))
 
@@ -2826,11 +2835,18 @@ def open_settings_window():
                 row.grid(row=row_index, column=0, sticky="ew", pady=3)
                 rows_host.grid_columnconfigure(0, weight=1)
 
-                state_text = "Active" if session.get('active', True) else "Inactive"
-                meta_text = f"{session.get('name', 'Unknown')} ({state_text})"
+                is_active = session.get('active', True)
+                state_text = "Active" if is_active else "Inactive"
+                session_name = session.get('name', 'Unknown')
                 if session.get('is_default'):
-                    meta_text += " • default"
-                ttk.Label(row, text=meta_text).pack(side="left")
+                    session_name += " • default"
+
+                ttk.Label(row, text=session_name).pack(side="left")
+                ttk.Label(
+                    row,
+                    text=state_text,
+                    style="Success.Small.TLabel" if is_active else "Danger.Small.TLabel"
+                ).pack(side="left", padx=(8, 0))
 
                 def toggle_session(sid=session.get('id')):
                     with MYCYCLE_LOCK:
@@ -2849,7 +2865,21 @@ def open_settings_window():
                 def open_session_leaderboard(sid=session.get('id')):
                     open_mycycle_leaderboard_window(settings_window, initial_session_id=sid)
 
-                ttk.Button(row, text="Toggle Active", command=toggle_session).pack(side="right", padx=(6, 0))
+                def delete_session(sid=session.get('id')):
+                    ok, msg = delete_mycycle_session(sid)
+                    if not ok:
+                        messagebox.showinfo("MyCycle", msg, parent=manager)
+                        return
+                    render_manager_rows()
+                    refresh_session_dropdown()
+
+                ttk.Button(row, text="X", width=3, command=delete_session, style="Red.TButton").pack(side="right", padx=(6, 0))
+                ttk.Button(
+                    row,
+                    text="Deactivate" if is_active else "Activate",
+                    command=toggle_session,
+                    style="Red.TButton" if is_active else "Green.TButton"
+                ).pack(side="right", padx=(6, 0))
                 ttk.Button(row, text="Leaderboard", command=open_session_leaderboard).pack(side="right")
 
         render_manager_rows()
@@ -2918,7 +2948,36 @@ def open_settings_window():
     overlay_compact_rows_var = tk.BooleanVar(value=str(config.get_setting("overlay_compact_rows") or "False") == "True")
     ttk.Checkbutton(overlay_tab, text="Show top-3 medal emotes", variable=overlay_show_medals_var).grid(row=7, column=0, sticky="w", pady=(6, 2), columnspan=2)
     ttk.Checkbutton(overlay_tab, text="Compact row spacing", variable=overlay_compact_rows_var).grid(row=8, column=0, sticky="w", pady=(0, 2), columnspan=2)
-    ttk.Label(overlay_tab, text="Restart MyStats after changing port. Visual changes apply on next refresh.", style="Small.TLabel").grid(row=9, column=0, columnspan=2, sticky="w", pady=(8, 0))
+
+    tilt_overlay_frame = ttk.LabelFrame(overlay_tab, text="Tilt Overlay", style="Card.TLabelframe")
+    tilt_overlay_frame.grid(row=9, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+
+    ttk.Label(tilt_overlay_frame, text="Starting Lifetime XP", style="Small.TLabel").grid(row=0, column=0, sticky="w", padx=(10, 8), pady=(8, 4))
+    tilt_lifetime_base_entry = ttk.Entry(tilt_overlay_frame, width=12, justify='center')
+    tilt_lifetime_base_entry.grid(row=0, column=1, sticky="w", padx=(0, 10), pady=(8, 4))
+    tilt_lifetime_base_entry.insert(0, config.get_setting("tilt_lifetime_base_xp") or "0")
+
+    ttk.Label(tilt_overlay_frame, text="Tilt Theme", style="Small.TLabel").grid(row=1, column=0, sticky="w", padx=(10, 8), pady=4)
+    tilt_overlay_theme_var = tk.StringVar(value=(config.get_setting("tilt_overlay_theme") or config.get_setting("overlay_theme") or "midnight"))
+    ttk.Combobox(tilt_overlay_frame, textvariable=tilt_overlay_theme_var, values=["midnight", "ocean", "sunset", "forest", "mono"], width=18, state="readonly").grid(row=1, column=1, sticky="w", padx=(0, 10), pady=4)
+
+    ttk.Label(tilt_overlay_frame, text="Scroll Step (px)", style="Small.TLabel").grid(row=2, column=0, sticky="w", padx=(10, 8), pady=4)
+    tilt_scroll_step_entry = ttk.Entry(tilt_overlay_frame, width=12, justify='center')
+    tilt_scroll_step_entry.grid(row=2, column=1, sticky="w", padx=(0, 10), pady=4)
+    tilt_scroll_step_entry.insert(0, config.get_setting("tilt_scroll_step_px") or "1")
+
+    ttk.Label(tilt_overlay_frame, text="Scroll Tick (ms)", style="Small.TLabel").grid(row=3, column=0, sticky="w", padx=(10, 8), pady=4)
+    tilt_scroll_interval_entry = ttk.Entry(tilt_overlay_frame, width=12, justify='center')
+    tilt_scroll_interval_entry.grid(row=3, column=1, sticky="w", padx=(0, 10), pady=4)
+    tilt_scroll_interval_entry.insert(0, config.get_setting("tilt_scroll_interval_ms") or "40")
+
+    ttk.Label(tilt_overlay_frame, text="Edge Pause (ms)", style="Small.TLabel").grid(row=4, column=0, sticky="w", padx=(10, 8), pady=(4, 8))
+    tilt_scroll_pause_entry = ttk.Entry(tilt_overlay_frame, width=12, justify='center')
+    tilt_scroll_pause_entry.grid(row=4, column=1, sticky="w", padx=(0, 10), pady=(4, 8))
+    tilt_scroll_pause_entry.insert(0, config.get_setting("tilt_scroll_pause_ms") or "900")
+
+    ttk.Label(tilt_overlay_frame, text="Tip: Starting Lifetime XP lets you align totals with existing channel progress.", style="Small.TLabel").grid(row=5, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 8))
+    ttk.Label(overlay_tab, text="Restart MyStats after changing port. Visual changes apply on next refresh.", style="Small.TLabel").grid(row=10, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
 
     def reset_settings_defaults():
