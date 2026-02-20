@@ -112,15 +112,19 @@ function showLeaderboardView() {
   if (splashScreen) {
     splashScreen.classList.remove('is-visible');
     splashScreen.setAttribute('aria-hidden', 'true');
+    splashScreen.setAttribute('visible', 'false');
   }
 }
 
 function showSplashView() {
+  if (!hasReachedEndOfStackedViews()) return;
+
   stopLeaderboardAutoScroll();
   if (boardShell) boardShell.classList.add('is-hidden');
   if (splashScreen) {
     splashScreen.classList.add('is-visible');
     splashScreen.setAttribute('aria-hidden', 'false');
+    splashScreen.setAttribute('visible', 'true');
   }
 
   clearCycleRestartTimer();
