@@ -2273,6 +2273,7 @@ def open_settings_window():
     general_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
     audio_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
     chat_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
+    tilt_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
     season_quests_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
     rivals_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
     mycycle_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
@@ -2282,6 +2283,7 @@ def open_settings_window():
     notebook.add(general_tab, text="General")
     notebook.add(audio_tab, text="Audio")
     notebook.add(chat_tab, text="Chat")
+    notebook.add(tilt_tab, text="Tilt")
     notebook.add(season_quests_tab, text="Season Quests")
     notebook.add(rivals_tab, text="Rivals")
     notebook.add(mycycle_tab, text="MyCycle")
@@ -2392,49 +2394,14 @@ def open_settings_window():
 
     chat_br_results_var = tk.BooleanVar(value=is_chat_response_enabled("chat_br_results"))
     chat_race_results_var = tk.BooleanVar(value=is_chat_response_enabled("chat_race_results"))
-    chat_tilt_results_var = tk.BooleanVar(value=is_chat_response_enabled("chat_tilt_results"))
     chat_all_commands_var = tk.BooleanVar(value=is_chat_response_enabled("chat_all_commands"))
-    chat_narrative_alerts_var = tk.BooleanVar(value=is_chat_response_enabled("chat_narrative_alerts"))
-    narrative_alert_grinder_var = tk.BooleanVar(value=is_chat_response_enabled("narrative_alert_grinder_enabled"))
-    narrative_alert_winmilestone_var = tk.BooleanVar(value=is_chat_response_enabled("narrative_alert_winmilestone_enabled"))
-    narrative_alert_leadchange_var = tk.BooleanVar(value=is_chat_response_enabled("narrative_alert_leadchange_enabled"))
 
     ttk.Checkbutton(chat_tab, text="BR Results", variable=chat_br_results_var).grid(row=1, column=0, sticky="w", pady=2)
     ttk.Checkbutton(chat_tab, text="Race Results", variable=chat_race_results_var).grid(row=2, column=0, sticky="w", pady=2)
-    ttk.Checkbutton(chat_tab, text="Tilt Results", variable=chat_tilt_results_var).grid(row=3, column=0, sticky="w", pady=2)
-    ttk.Checkbutton(chat_tab, text="All !commands", variable=chat_all_commands_var).grid(row=4, column=0, sticky="w", pady=2)
-    ttk.Checkbutton(chat_tab, text="Narrative Alerts", variable=chat_narrative_alerts_var).grid(row=5, column=0, sticky="w", pady=(2, 6))
-
-    narrative_alert_frame = ttk.LabelFrame(chat_tab, text="Narrative Alert Frequency", style="Card.TLabelframe")
-    narrative_alert_frame.grid(row=6, column=0, columnspan=2, sticky="ew", pady=(2, 8))
-
-    ttk.Checkbutton(narrative_alert_frame, text="Grinder milestones", variable=narrative_alert_grinder_var).grid(row=0, column=0, sticky="w", padx=10, pady=(8, 4))
-    ttk.Checkbutton(narrative_alert_frame, text="Win milestones", variable=narrative_alert_winmilestone_var).grid(row=1, column=0, sticky="w", padx=10, pady=2)
-    ttk.Checkbutton(narrative_alert_frame, text="Lead changes", variable=narrative_alert_leadchange_var).grid(row=2, column=0, sticky="w", padx=10, pady=(2, 8))
-
-    ttk.Label(narrative_alert_frame, text="Cooldown (races)", style="Small.TLabel").grid(row=0, column=1, sticky="w", padx=(12, 8), pady=(8, 2))
-    narrative_alert_cooldown_entry = ttk.Entry(narrative_alert_frame, width=8, justify='center')
-    narrative_alert_cooldown_entry.grid(row=0, column=2, sticky="w", padx=(0, 10), pady=(8, 2))
-    narrative_alert_cooldown_entry.insert(0, config.get_setting("narrative_alert_cooldown_races") or "3")
-
-    ttk.Label(narrative_alert_frame, text="Min lead gap", style="Small.TLabel").grid(row=1, column=1, sticky="w", padx=(12, 8), pady=2)
-    narrative_alert_min_gap_entry = ttk.Entry(narrative_alert_frame, width=8, justify='center')
-    narrative_alert_min_gap_entry.grid(row=1, column=2, sticky="w", padx=(0, 10), pady=2)
-    narrative_alert_min_gap_entry.insert(0, config.get_setting("narrative_alert_min_lead_change_points") or "500")
-
-    ttk.Label(narrative_alert_frame, text="Max items per alert", style="Small.TLabel").grid(row=2, column=1, sticky="w", padx=(12, 8), pady=(2, 8))
-    narrative_alert_max_items_entry = ttk.Entry(narrative_alert_frame, width=8, justify='center')
-    narrative_alert_max_items_entry.grid(row=2, column=2, sticky="w", padx=(0, 10), pady=(2, 8))
-    narrative_alert_max_items_entry.insert(0, config.get_setting("narrative_alert_max_items") or "3")
-
-    ttk.Label(chat_tab, text="Max names announced (Race/Tilt)").grid(row=7, column=0, sticky="w", pady=(4, 4))
-    max_name_values = [str(i) for i in range(3, 26)]
-    selected_max_names = tk.StringVar(value=str(get_chat_max_names()))
-    max_names_combobox = ttk.Combobox(chat_tab, textvariable=selected_max_names, values=max_name_values, width=5, state="readonly")
-    max_names_combobox.grid(row=7, column=1, sticky="w", pady=(4, 4), padx=(8, 0))
+    ttk.Checkbutton(chat_tab, text="All !commands", variable=chat_all_commands_var).grid(row=3, column=0, sticky="w", pady=2)
 
     message_delay_frame = ttk.LabelFrame(chat_tab, text="Message Delay", style="Card.TLabelframe")
-    message_delay_frame.grid(row=8, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+    message_delay_frame.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(10, 0))
 
     announce_delay_var = tk.BooleanVar(value=config.get_setting("announcedelay") == "True")
     ttk.Checkbutton(message_delay_frame, text="Enable Delay", variable=announce_delay_var).grid(row=0, column=0, sticky="w", padx=10, pady=(8, 6))
@@ -2442,6 +2409,82 @@ def open_settings_window():
     delay_seconds_entry = ttk.Entry(message_delay_frame, width=12, justify='center')
     delay_seconds_entry.grid(row=1, column=1, sticky="w", padx=(8, 10), pady=(0, 8))
     delay_seconds_entry.insert(0, config.get_setting("announcedelayseconds") or "")
+
+    # --- Tilt tab ---
+    ttk.Label(tilt_tab, text="Configure tilt chat alerts, !tiltdeath threshold, and tilt overlay behavior", style="Small.TLabel").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
+
+    chat_tilt_results_var = tk.BooleanVar(value=is_chat_response_enabled("chat_tilt_results"))
+    chat_narrative_alerts_var = tk.BooleanVar(value=is_chat_response_enabled("chat_narrative_alerts"))
+    narrative_alert_grinder_var = tk.BooleanVar(value=is_chat_response_enabled("narrative_alert_grinder_enabled"))
+    narrative_alert_winmilestone_var = tk.BooleanVar(value=is_chat_response_enabled("narrative_alert_winmilestone_enabled"))
+    narrative_alert_leadchange_var = tk.BooleanVar(value=is_chat_response_enabled("narrative_alert_leadchange_enabled"))
+
+    tilt_alerts_frame = ttk.LabelFrame(tilt_tab, text="Tilt Chat Alerts", style="Card.TLabelframe")
+    tilt_alerts_frame.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+
+    ttk.Checkbutton(tilt_alerts_frame, text="Tilt Results", variable=chat_tilt_results_var).grid(row=0, column=0, sticky="w", padx=10, pady=(8, 4))
+    ttk.Checkbutton(tilt_alerts_frame, text="Narrative Alerts", variable=chat_narrative_alerts_var).grid(row=1, column=0, sticky="w", padx=10, pady=(0, 4))
+    ttk.Checkbutton(tilt_alerts_frame, text="Grinder milestones", variable=narrative_alert_grinder_var).grid(row=2, column=0, sticky="w", padx=10, pady=2)
+    ttk.Checkbutton(tilt_alerts_frame, text="Win milestones", variable=narrative_alert_winmilestone_var).grid(row=3, column=0, sticky="w", padx=10, pady=2)
+    ttk.Checkbutton(tilt_alerts_frame, text="Lead changes", variable=narrative_alert_leadchange_var).grid(row=4, column=0, sticky="w", padx=10, pady=(2, 8))
+
+    ttk.Label(tilt_alerts_frame, text="Cooldown (races)", style="Small.TLabel").grid(row=2, column=1, sticky="w", padx=(12, 8), pady=(2, 2))
+    narrative_alert_cooldown_entry = ttk.Entry(tilt_alerts_frame, width=8, justify='center')
+    narrative_alert_cooldown_entry.grid(row=2, column=2, sticky="w", padx=(0, 10), pady=(2, 2))
+    narrative_alert_cooldown_entry.insert(0, config.get_setting("narrative_alert_cooldown_races") or "3")
+
+    ttk.Label(tilt_alerts_frame, text="Min lead gap", style="Small.TLabel").grid(row=3, column=1, sticky="w", padx=(12, 8), pady=2)
+    narrative_alert_min_gap_entry = ttk.Entry(tilt_alerts_frame, width=8, justify='center')
+    narrative_alert_min_gap_entry.grid(row=3, column=2, sticky="w", padx=(0, 10), pady=2)
+    narrative_alert_min_gap_entry.insert(0, config.get_setting("narrative_alert_min_lead_change_points") or "500")
+
+    ttk.Label(tilt_alerts_frame, text="Max items per alert", style="Small.TLabel").grid(row=4, column=1, sticky="w", padx=(12, 8), pady=(2, 8))
+    narrative_alert_max_items_entry = ttk.Entry(tilt_alerts_frame, width=8, justify='center')
+    narrative_alert_max_items_entry.grid(row=4, column=2, sticky="w", padx=(0, 10), pady=(2, 8))
+    narrative_alert_max_items_entry.insert(0, config.get_setting("narrative_alert_max_items") or "3")
+
+    ttk.Label(tilt_tab, text="Max names announced (Race/Tilt)").grid(row=2, column=0, sticky="w", pady=(2, 4))
+    max_name_values = [str(i) for i in range(3, 26)]
+    selected_max_names = tk.StringVar(value=str(get_chat_max_names()))
+    max_names_combobox = ttk.Combobox(tilt_tab, textvariable=selected_max_names, values=max_name_values, width=5, state="readonly")
+    max_names_combobox.grid(row=2, column=1, sticky="w", pady=(2, 4), padx=(8, 0))
+
+    tiltdeath_frame = ttk.LabelFrame(tilt_tab, text="Tilt Command Thresholds", style="Card.TLabelframe")
+    tiltdeath_frame.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(6, 8))
+    ttk.Label(tiltdeath_frame, text="!tiltdeath minimum levels participated", style="Small.TLabel").grid(row=0, column=0, sticky="w", padx=(10, 8), pady=(8, 4))
+    tiltdeath_min_levels_entry = ttk.Entry(tiltdeath_frame, width=12, justify='center')
+    tiltdeath_min_levels_entry.grid(row=0, column=1, sticky="w", padx=(0, 10), pady=(8, 4))
+    tiltdeath_min_levels_entry.insert(0, config.get_setting("tiltdeath_min_levels") or "20")
+    ttk.Label(tiltdeath_frame, text="Players below this threshold are excluded from !tiltdeath ranking.", style="Small.TLabel").grid(row=1, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 8))
+
+    tilt_overlay_frame = ttk.LabelFrame(tilt_tab, text="Tilt Overlay", style="Card.TLabelframe")
+    tilt_overlay_frame.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(0, 0))
+
+    ttk.Label(tilt_overlay_frame, text="Starting Lifetime XP", style="Small.TLabel").grid(row=0, column=0, sticky="w", padx=(10, 8), pady=(8, 4))
+    tilt_lifetime_base_entry = ttk.Entry(tilt_overlay_frame, width=12, justify='center')
+    tilt_lifetime_base_entry.grid(row=0, column=1, sticky="w", padx=(0, 10), pady=(8, 4))
+    tilt_lifetime_base_entry.insert(0, config.get_setting("tilt_lifetime_base_xp") or "0")
+
+    ttk.Label(tilt_overlay_frame, text="Tilt Theme", style="Small.TLabel").grid(row=1, column=0, sticky="w", padx=(10, 8), pady=4)
+    tilt_overlay_theme_var = tk.StringVar(value=(config.get_setting("tilt_overlay_theme") or config.get_setting("overlay_theme") or "midnight"))
+    ttk.Combobox(tilt_overlay_frame, textvariable=tilt_overlay_theme_var, values=["midnight", "ocean", "sunset", "forest", "mono"], width=18, state="readonly").grid(row=1, column=1, sticky="w", padx=(0, 10), pady=4)
+
+    ttk.Label(tilt_overlay_frame, text="Scroll Step (px)", style="Small.TLabel").grid(row=2, column=0, sticky="w", padx=(10, 8), pady=4)
+    tilt_scroll_step_entry = ttk.Entry(tilt_overlay_frame, width=12, justify='center')
+    tilt_scroll_step_entry.grid(row=2, column=1, sticky="w", padx=(0, 10), pady=4)
+    tilt_scroll_step_entry.insert(0, config.get_setting("tilt_scroll_step_px") or "1")
+
+    ttk.Label(tilt_overlay_frame, text="Scroll Tick (ms)", style="Small.TLabel").grid(row=3, column=0, sticky="w", padx=(10, 8), pady=4)
+    tilt_scroll_interval_entry = ttk.Entry(tilt_overlay_frame, width=12, justify='center')
+    tilt_scroll_interval_entry.grid(row=3, column=1, sticky="w", padx=(0, 10), pady=4)
+    tilt_scroll_interval_entry.insert(0, config.get_setting("tilt_scroll_interval_ms") or "40")
+
+    ttk.Label(tilt_overlay_frame, text="Edge Pause (ms)", style="Small.TLabel").grid(row=4, column=0, sticky="w", padx=(10, 8), pady=(4, 8))
+    tilt_scroll_pause_entry = ttk.Entry(tilt_overlay_frame, width=12, justify='center')
+    tilt_scroll_pause_entry.grid(row=4, column=1, sticky="w", padx=(0, 10), pady=(4, 8))
+    tilt_scroll_pause_entry.insert(0, config.get_setting("tilt_scroll_pause_ms") or "900")
+
+    ttk.Label(tilt_overlay_frame, text="Tip: Starting Lifetime XP lets you align totals with existing channel progress.", style="Small.TLabel").grid(row=5, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 8))
 
     # --- Season Quests tab ---
     ttk.Label(season_quests_tab, text="Configure long-term season goals and chat announcements", style="Small.TLabel").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
@@ -2638,35 +2681,6 @@ def open_settings_window():
     ttk.Label(overlay_tab, text="Restart MyStats after changing port. Visual changes apply on next refresh.", style="Small.TLabel").grid(row=9, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
 
-    tilt_overlay_frame = ttk.LabelFrame(overlay_tab, text="Tilt Overlay", style="Card.TLabelframe")
-    tilt_overlay_frame.grid(row=10, column=0, columnspan=2, sticky="ew", pady=(10, 0))
-
-    ttk.Label(tilt_overlay_frame, text="Starting Lifetime XP", style="Small.TLabel").grid(row=0, column=0, sticky="w", padx=(10, 8), pady=(8, 4))
-    tilt_lifetime_base_entry = ttk.Entry(tilt_overlay_frame, width=12, justify='center')
-    tilt_lifetime_base_entry.grid(row=0, column=1, sticky="w", padx=(0, 10), pady=(8, 4))
-    tilt_lifetime_base_entry.insert(0, config.get_setting("tilt_lifetime_base_xp") or "0")
-
-    ttk.Label(tilt_overlay_frame, text="Tilt Theme", style="Small.TLabel").grid(row=1, column=0, sticky="w", padx=(10, 8), pady=4)
-    tilt_overlay_theme_var = tk.StringVar(value=(config.get_setting("tilt_overlay_theme") or config.get_setting("overlay_theme") or "midnight"))
-    ttk.Combobox(tilt_overlay_frame, textvariable=tilt_overlay_theme_var, values=["midnight", "ocean", "sunset", "forest", "mono"], width=18, state="readonly").grid(row=1, column=1, sticky="w", padx=(0, 10), pady=4)
-
-    ttk.Label(tilt_overlay_frame, text="Scroll Step (px)", style="Small.TLabel").grid(row=2, column=0, sticky="w", padx=(10, 8), pady=4)
-    tilt_scroll_step_entry = ttk.Entry(tilt_overlay_frame, width=12, justify='center')
-    tilt_scroll_step_entry.grid(row=2, column=1, sticky="w", padx=(0, 10), pady=4)
-    tilt_scroll_step_entry.insert(0, config.get_setting("tilt_scroll_step_px") or "1")
-
-    ttk.Label(tilt_overlay_frame, text="Scroll Tick (ms)", style="Small.TLabel").grid(row=3, column=0, sticky="w", padx=(10, 8), pady=4)
-    tilt_scroll_interval_entry = ttk.Entry(tilt_overlay_frame, width=12, justify='center')
-    tilt_scroll_interval_entry.grid(row=3, column=1, sticky="w", padx=(0, 10), pady=4)
-    tilt_scroll_interval_entry.insert(0, config.get_setting("tilt_scroll_interval_ms") or "40")
-
-    ttk.Label(tilt_overlay_frame, text="Edge Pause (ms)", style="Small.TLabel").grid(row=4, column=0, sticky="w", padx=(10, 8), pady=(4, 8))
-    tilt_scroll_pause_entry = ttk.Entry(tilt_overlay_frame, width=12, justify='center')
-    tilt_scroll_pause_entry.grid(row=4, column=1, sticky="w", padx=(0, 10), pady=(4, 8))
-    tilt_scroll_pause_entry.insert(0, config.get_setting("tilt_scroll_pause_ms") or "900")
-
-    ttk.Label(tilt_overlay_frame, text="Tip: Starting Lifetime XP lets you align totals with existing channel progress.", style="Small.TLabel").grid(row=5, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 8))
-
     def reset_settings_defaults():
         chunk_alert_var.set(True)
         announce_delay_var.set(False)
@@ -2685,6 +2699,8 @@ def open_settings_window():
         narrative_alert_min_gap_entry.insert(0, "500")
         narrative_alert_max_items_entry.delete(0, tk.END)
         narrative_alert_max_items_entry.insert(0, "3")
+        tiltdeath_min_levels_entry.delete(0, tk.END)
+        tiltdeath_min_levels_entry.insert(0, "20")
         season_quests_enabled_var.set(True)
         rivals_enabled_var.set(True)
         selected_max_names.set("25")
@@ -2761,6 +2777,7 @@ def open_settings_window():
         config.set_setting("narrative_alert_cooldown_races", narrative_alert_cooldown_entry.get(), persistent=True)
         config.set_setting("narrative_alert_min_lead_change_points", narrative_alert_min_gap_entry.get(), persistent=True)
         config.set_setting("narrative_alert_max_items", narrative_alert_max_items_entry.get(), persistent=True)
+        config.set_setting("tiltdeath_min_levels", tiltdeath_min_levels_entry.get(), persistent=True)
         config.set_setting("season_quests_enabled", str(season_quests_enabled_var.get()), persistent=True)
         config.set_setting("season_quest_target_races", season_quest_races_entry.get(), persistent=True)
         config.set_setting("season_quest_target_points", season_quest_points_entry.get(), persistent=True)
@@ -3436,7 +3453,7 @@ class ConfigManager:
                                 'overlay_card_opacity', 'overlay_text_scale', 'overlay_show_medals',
                                 'overlay_compact_rows', 'overlay_server_port', 'tilt_lifetime_base_xp',
                                 'tilt_overlay_theme', 'tilt_scroll_step_px', 'tilt_scroll_interval_ms',
-                                'tilt_scroll_pause_ms'}
+                                'tilt_scroll_pause_ms', 'tiltdeath_min_levels'}
         self.transient_keys = set([])
         self.defaults = {
             'chat_br_results': 'True',
@@ -3487,7 +3504,8 @@ class ConfigManager:
             'tilt_overlay_theme': 'midnight',
             'tilt_scroll_step_px': '1',
             'tilt_scroll_interval_ms': '40',
-            'tilt_scroll_pause_ms': '900'
+            'tilt_scroll_pause_ms': '900',
+            'tiltdeath_min_levels': '20'
         }
         self.load_settings()
 
@@ -3543,7 +3561,8 @@ class ConfigManager:
                    "mycycle_min_place", "mycycle_max_place",
                    "overlay_rotation_seconds", "overlay_refresh_seconds", "overlay_card_opacity",
                    "overlay_text_scale", "overlay_server_port", "tilt_lifetime_base_xp",
-                   "tilt_scroll_step_px", "tilt_scroll_interval_ms", "tilt_scroll_pause_ms"}:
+                   "tilt_scroll_step_px", "tilt_scroll_interval_ms", "tilt_scroll_pause_ms",
+                   "tiltdeath_min_levels"}:
             if isinstance(value, int) or (isinstance(value, str) and value.isdigit()):
                 if key == "overlay_server_port":
                     port = int(value)
@@ -5210,11 +5229,13 @@ class Bot(commands.Bot):
             player_totals[username]['deaths'] += died_this_run
             player_totals[username]['levels_participated'] += levels_participated
 
+        minimum_levels = max(1, get_int_setting('tiltdeath_min_levels', 20))
+
         qualified = []
         for username, totals in player_totals.items():
             levels_participated = totals['levels_participated']
             deaths = totals['deaths']
-            if levels_participated < 20:
+            if levels_participated < minimum_levels:
                 continue
 
             death_rate = (deaths / levels_participated) * 100
@@ -5223,7 +5244,7 @@ class Bot(commands.Bot):
         if not qualified:
             await send_chat_message(
                 ctx.channel,
-                "No tilt death-rate data yet (minimum 20 levels participated required).",
+                f"No tilt death-rate data yet (minimum {minimum_levels} levels participated required).",
                 category="mystats"
             )
             return
@@ -5236,7 +5257,7 @@ class Bot(commands.Bot):
 
         await send_chat_message(
             ctx.channel,
-            "Top 10 Lowest Tilt Death Rate (min 20 levels): " + ", ".join(message_items) + ".",
+            f"Top 10 Lowest Tilt Death Rate (min {minimum_levels} levels): " + ", ".join(message_items) + ".",
             category="mystats"
         )
 
