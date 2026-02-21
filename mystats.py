@@ -68,6 +68,7 @@ mycycle_session_label = None
 mycycle_session_position_label = None
 mycycle_prev_button = None
 mycycle_next_button = None
+mycycle_export_button = None
 mycycle_home_session_ids = []
 mycycle_home_session_index = 0
 
@@ -3348,7 +3349,7 @@ def build_stats_sidebar(parent):
 def build_main_content(parent):
     global chatbot_label, login_button, text_area
     global season_quest_tree, rivals_tree, mycycle_tree, mycycle_session_label
-    global mycycle_session_position_label, mycycle_prev_button, mycycle_next_button
+    global mycycle_session_position_label, mycycle_prev_button, mycycle_next_button, mycycle_export_button
 
     top_frame1 = ttk.Frame(parent, style="App.TFrame")
     top_frame1.grid(row=0, column=1, sticky='ew', padx=(5, 0))
@@ -3472,7 +3473,9 @@ def build_main_content(parent):
     mycycle_session_position_label = ttk.Label(nav_frame, text="0/0", style="Small.TLabel")
     mycycle_session_position_label.pack(side="left", padx=(0, 4))
     mycycle_next_button = ttk.Button(nav_frame, text="▶", width=3, style="Primary.TButton")
-    mycycle_next_button.pack(side="left")
+    mycycle_next_button.pack(side="left", padx=(0, 8))
+    mycycle_export_button = ttk.Button(nav_frame, text="Export CSV", style="Primary.TButton")
+    mycycle_export_button.pack(side="left")
 
     mycycle_columns = ("rank", "user", "cycles", "progress", "placements_line1", "placements_line2", "cycle_races", "last_cycle")
     mycycle_style = "MyCycleHome.Treeview"
@@ -3510,6 +3513,68 @@ def shift_home_mycycle_session(delta):
     refresh_main_leaderboards()
 
 
+def export_home_mycycle_leaderboard_csv():
+    if not mycycle_home_session_ids:
+        messagebox.showinfo("MyCycle", "No active MyCycle sessions found.")
+        return
+
+    session_id = mycycle_home_session_ids[mycycle_home_session_index]
+    session, leaderboard = get_mycycle_leaderboard(limit=5000, session_id=session_id)
+    session_name = session.get('name', 'session')
+    safe_session_name = ''.join(ch if ch.isalnum() or ch in (' ', '-', '_') else '_' for ch in session_name).strip() or "session"
+    default_filename = f"mycycle_leaderboard_{safe_session_name}.csv"
+
+    file_path = filedialog.asksaveasfilename(
+        title="Export MyCycle Leaderboard CSV",
+        defaultextension=".csv",
+        initialfile=default_filename,
+        filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
+    )
+    if not file_path:
+        return
+
+    leaderboard_settings = get_mycycle_settings()
+    include_second_line = leaderboard_settings['max_place'] - leaderboard_settings['min_place'] + 1 > 10
+
+    try:
+        with open(file_path, "w", newline="", encoding="utf-8") as csv_file:
+            writer = csv.writer(csv_file)
+            writer.writerow([
+                "rank",
+                "username",
+                "display_name",
+                "cycles_completed",
+                "progress_hits",
+                "progress_total",
+                "progress_marks_line_1",
+                "progress_marks_line_2" if include_second_line else "progress_marks_line_2_disabled",
+                "current_cycle_races",
+                "last_cycle_races",
+                "session_name",
+                "session_id",
+            ])
+
+            for rank, row in enumerate(leaderboard, start=1):
+                writer.writerow([
+                    rank,
+                    row.get('username', ''),
+                    row.get('display_name', ''),
+                    row.get('cycles_completed', 0),
+                    row.get('progress_hits', 0),
+                    row.get('progress_total', 0),
+                    row.get('progress_marks_top', ''),
+                    row.get('progress_marks_bottom', '') if include_second_line else '',
+                    row.get('current_cycle_races', 0),
+                    row.get('last_cycle_races', 0),
+                    session_name,
+                    session.get('id', ''),
+                ])
+
+        messagebox.showinfo("MyCycle", f"Exported {len(leaderboard)} rows to:\n{file_path}")
+    except Exception as error:
+        messagebox.showerror("MyCycle", f"Failed to export CSV:\n{error}")
+
+
 def _render_home_mycycle_leaderboard():
     global mycycle_home_session_ids, mycycle_home_session_index
 
@@ -3529,6 +3594,8 @@ def _render_home_mycycle_leaderboard():
             mycycle_prev_button.state(["disabled"])
         if mycycle_next_button and mycycle_next_button.winfo_exists():
             mycycle_next_button.state(["disabled"])
+        if mycycle_export_button and mycycle_export_button.winfo_exists():
+            mycycle_export_button.state(["disabled"])
         return
 
     current_primary = config.get_setting('mycycle_primary_session_id') or default_session_id
@@ -3551,6 +3618,8 @@ def _render_home_mycycle_leaderboard():
         mycycle_prev_button.state(toggle_state)
     if mycycle_next_button and mycycle_next_button.winfo_exists():
         mycycle_next_button.state(toggle_state)
+    if mycycle_export_button and mycycle_export_button.winfo_exists():
+        mycycle_export_button.state(["!disabled"])
 
     leaderboard_settings = get_mycycle_settings()
     show_second_placement_line = leaderboard_settings['max_place'] - leaderboard_settings['min_place'] + 1 > 10
@@ -3646,6 +3715,8 @@ def initialize_main_window():
         mycycle_prev_button.configure(command=lambda: shift_home_mycycle_session(-1))
     if mycycle_next_button and mycycle_next_button.winfo_exists():
         mycycle_next_button.configure(command=lambda: shift_home_mycycle_session(1))
+    if mycycle_export_button and mycycle_export_button.winfo_exists():
+        mycycle_export_button.configure(command=export_home_mycycle_leaderboard_csv)
 
     root_window.update_idletasks()
     root_window.grid_columnconfigure(1, weight=1)
