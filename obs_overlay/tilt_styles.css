@@ -22,7 +22,8 @@ body {
 
 .card {
   width: var(--overlay-frame-width);
-  height: var(--overlay-frame-height);
+  height: auto;
+  max-height: var(--overlay-frame-height);
   margin: var(--overlay-frame-gap) auto;
   padding: 12px;
   border-radius: 16px;

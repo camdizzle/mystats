@@ -284,7 +284,14 @@ function renderCurrentRun(run = {}) {
 
 function renderLastRun(lastRun = {}) {
   const summary = $('last-run-summary');
+  const section = $('last-run-section');
   const hasRun = !!(lastRun && lastRun.run_id);
+
+  if (section) {
+    section.hidden = !hasRun;
+    section.style.display = hasRun ? '' : 'none';
+  }
+
   if (!hasRun) {
     summary.textContent = 'No completed tilt run yet.';
     return;
