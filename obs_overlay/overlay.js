@@ -20,6 +20,7 @@ const defaultSettings = {
   textScale: 100,
   showMedals: true,
   compactRows: false,
+  horizontalLayout: false,
 };
 
 const themes = {
@@ -144,6 +145,7 @@ function showLeaderboardView() {
 }
 
 function showSplashView(force = false) {
+  if (settings.horizontalLayout) return;
   if (!force && !hasReachedEndOfStackedViews()) return;
 
   stopLeaderboardAutoScroll();
@@ -159,6 +161,7 @@ function showSplashView(force = false) {
     showLeaderboardView();
     if (leaderboard) {
       leaderboard.scrollTop = 0;
+      leaderboard.scrollLeft = 0;
       updateBoardTitleFromScroll();
     }
     startLeaderboardAutoScroll();
@@ -200,6 +203,7 @@ function renderTop3Rows(rows = [], title = '🔥 Latest Race Podium 🔥') {
 }
 
 function showTop3ForTenSeconds(top3View) {
+  if (settings.horizontalLayout) return;
   const finishedRows = (top3View?.rows || []).filter((row) => row?.finished !== false);
   if (!finishedRows.length || top3IsShowing) return;
 
@@ -227,9 +231,13 @@ function startLeaderboardAutoScroll() {
   showLeaderboardView();
 
   if (!leaderboard) return;
-  const maxScrollTop = leaderboard.scrollHeight - leaderboard.clientHeight;
-  if (maxScrollTop <= 2) {
+  const maxScroll = settings.horizontalLayout
+    ? leaderboard.scrollWidth - leaderboard.clientWidth
+    : leaderboard.scrollHeight - leaderboard.clientHeight;
+
+  if (maxScroll <= 2) {
     leaderboard.scrollTop = 0;
+    leaderboard.scrollLeft = 0;
 
     leaderboardScrollRetryTimer = setTimeout(() => {
       startLeaderboardAutoScroll();
@@ -238,18 +246,33 @@ function startLeaderboardAutoScroll() {
   }
 
   leaderboard.scrollTop = 0;
+  leaderboard.scrollLeft = 0;
   leaderboardScrollPauseUntil = Date.now() + 1200;
 
   leaderboardScrollTimer = setInterval(() => {
-    const currentMax = leaderboard.scrollHeight - leaderboard.clientHeight;
+    const currentMax = settings.horizontalLayout
+      ? leaderboard.scrollWidth - leaderboard.clientWidth
+      : leaderboard.scrollHeight - leaderboard.clientHeight;
+
     if (currentMax <= 2) {
       stopLeaderboardAutoScroll();
       leaderboard.scrollTop = 0;
+      leaderboard.scrollLeft = 0;
       return;
     }
 
     const now = Date.now();
     if (now < leaderboardScrollPauseUntil) return;
+
+    if (settings.horizontalLayout) {
+      leaderboard.scrollLeft += 1.4;
+      if (leaderboard.scrollLeft >= currentMax - 1) {
+        leaderboard.scrollLeft = currentMax;
+        leaderboardScrollPauseUntil = Date.now() + 850;
+        leaderboard.scrollLeft = 0;
+      }
+      return;
+    }
 
     leaderboard.scrollTop += 1.4;
 
@@ -268,6 +291,7 @@ function startLeaderboardAutoScroll() {
 
 function hasReachedEndOfStackedViews() {
   if (!leaderboard) return false;
+  if (settings.horizontalLayout) return false;
 
   if (!hasScrolledIntoFinalSection()) return false;
 
@@ -288,6 +312,12 @@ function hasScrolledIntoFinalSection() {
   const lastTitle = titles[titles.length - 1];
   if (!lastTitle) return true;
 
+  if (settings.horizontalLayout) {
+    const liveOffsetLeft = lastTitle.offsetLeft;
+    const viewportRight = leaderboard.scrollLeft + leaderboard.clientWidth;
+    return viewportRight >= liveOffsetLeft + 20;
+  }
+
   const liveOffsetTop = lastTitle.offsetTop;
   const viewportBottom = leaderboard.scrollTop + leaderboard.clientHeight;
   return viewportBottom >= liveOffsetTop + 20;
@@ -297,7 +327,13 @@ function syncEndSpacerHeight() {
   if (!leaderboard) return;
   const endSpacer = leaderboard.querySelector('.leaderboard-end-spacer');
   if (!endSpacer) return;
+  if (settings.horizontalLayout) {
+    endSpacer.style.width = `${leaderboard.clientWidth}px`;
+    endSpacer.style.height = '1px';
+    return;
+  }
   endSpacer.style.height = `${leaderboard.clientHeight}px`;
+  endSpacer.style.width = '1px';
 }
 
 function escapeHtml(value) {
@@ -334,12 +370,13 @@ function renderCombinedRows(views) {
   leaderboard.classList.remove('is-top3-mode');
   sectionAnchors = [];
   const previousScrollTop = leaderboard.scrollTop;
+  const previousScrollLeft = leaderboard.scrollLeft;
   const renderableViews = getRenderableViews(views);
 
   if (!renderableViews.length) {
     leaderboard.innerHTML = '<li>No race data yet.</li>';
     stopLeaderboardAutoScroll();
-    showSplashView(true);
+    if (!settings.horizontalLayout) showSplashView(true);
     return;
   }
 
@@ -364,8 +401,12 @@ function renderCombinedRows(views) {
   syncEndSpacerHeight();
 
   const maxScrollTop = Math.max(0, leaderboard.scrollHeight - leaderboard.clientHeight);
+  const maxScrollLeft = Math.max(0, leaderboard.scrollWidth - leaderboard.clientWidth);
   const scrollerIsActive = Boolean(leaderboardScrollTimer || leaderboardScrollRetryTimer);
-  if (!scrollerIsActive && previousScrollTop > 0 && maxScrollTop > 0) {
+  if (!scrollerIsActive && settings.horizontalLayout && previousScrollLeft > 0 && maxScrollLeft > 0) {
+    leaderboard.scrollLeft = Math.min(previousScrollLeft, maxScrollLeft);
+  }
+  if (!scrollerIsActive && !settings.horizontalLayout && previousScrollTop > 0 && maxScrollTop > 0) {
     leaderboard.scrollTop = Math.min(previousScrollTop, maxScrollTop);
   }
 
@@ -379,6 +420,7 @@ function renderCombinedRows(views) {
   sectionAnchors = Array.from(leaderboard.querySelectorAll('.leaderboard-section-title')).map((el) => ({
     title: el.dataset.sectionTitle || 'Top Results',
     offsetTop: el.offsetTop,
+    offsetLeft: el.offsetLeft,
   }));
 
   updateBoardTitleFromScroll();
@@ -410,6 +452,7 @@ function applyTheme() {
   rootStyle.setProperty('--text-scale', String(settings.textScale / 100));
   document.body.classList.toggle('theme-violethearts', settings.theme === 'violethearts');
   document.body.classList.toggle('compact-rows', settings.compactRows);
+  document.body.classList.toggle('horizontal-layout', settings.horizontalLayout);
 }
 
 function applyServerSettings(raw = {}) {
@@ -421,6 +464,7 @@ function applyServerSettings(raw = {}) {
     textScale: clampNumber(raw.text_scale, 90, 125, defaultSettings.textScale),
     showMedals: String(raw.show_medals).toLowerCase() !== 'false',
     compactRows: String(raw.compact_rows).toLowerCase() === 'true',
+    horizontalLayout: String(raw.horizontal_layout).toLowerCase() === 'true',
   };
 
   const rotationChanged = next.rotationSeconds !== settings.rotationSeconds;
@@ -428,6 +472,7 @@ function applyServerSettings(raw = {}) {
 
   settings = next;
   applyTheme();
+  renderPillPage();
   if (rotationChanged) {
     startPillRotationTimer();
   }
@@ -442,7 +487,7 @@ function syncViews(views = []) {
   }
 
   const renderableViews = getRenderableViews(currentViews);
-  const nextRenderKey = `${settings.showMedals}::${getViewsRenderKey(renderableViews)}`;
+  const nextRenderKey = `${settings.showMedals}::${settings.horizontalLayout}::${getViewsRenderKey(renderableViews)}`;
 
   if (nextRenderKey === lastRenderedViewsKey) {
     updateBoardTitleFromScroll();
@@ -503,6 +548,7 @@ window.addEventListener('resize', () => {
   sectionAnchors = Array.from(leaderboard?.querySelectorAll('.leaderboard-section-title') || []).map((el) => ({
     title: el.dataset.sectionTitle || 'Top Results',
     offsetTop: el.offsetTop,
+    offsetLeft: el.offsetLeft,
   }));
   ensureLeaderboardAutoScroll();
   updateBoardTitleFromScroll();
