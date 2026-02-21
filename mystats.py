@@ -65,6 +65,11 @@ season_quest_tree = None
 rivals_tree = None
 mycycle_tree = None
 mycycle_session_label = None
+mycycle_session_position_label = None
+mycycle_prev_button = None
+mycycle_next_button = None
+mycycle_home_session_ids = []
+mycycle_home_session_index = 0
 
 logging.basicConfig(
     level=logging.INFO,
@@ -3333,6 +3338,7 @@ def build_stats_sidebar(parent):
 def build_main_content(parent):
     global chatbot_label, login_button, text_area
     global season_quest_tree, rivals_tree, mycycle_tree, mycycle_session_label
+    global mycycle_session_position_label, mycycle_prev_button, mycycle_next_button
 
     top_frame1 = ttk.Frame(parent, style="App.TFrame")
     top_frame1.grid(row=0, column=1, sticky='ew', padx=(5, 0))
@@ -3378,20 +3384,39 @@ def build_main_content(parent):
         text="Season Quest leaderboard (top 100)",
         style="Small.TLabel"
     ).pack(anchor="w", padx=8, pady=(8, 4))
-    season_quest_columns = ("rank", "user", "completed", "points", "races", "tilt_points")
-    season_quest_tree = ttk.Treeview(season_quests_tab, columns=season_quest_columns, show="headings", height=20)
+    season_quest_columns = (
+        "rank", "user", "completed", "points", "races", "race_hs", "br_hs", "tilt_levels", "tilt_tops", "tilt_points"
+    )
+    season_quest_style = "SeasonQuest.Treeview"
+    app_style.configure(season_quest_style, rowheight=30)
+    app_style.configure(f"{season_quest_style}.Heading", padding=(8, 12))
+    season_quest_tree = ttk.Treeview(
+        season_quests_tab,
+        columns=season_quest_columns,
+        show="headings",
+        height=20,
+        style=season_quest_style,
+    )
     season_quest_tree.heading("rank", text="#")
     season_quest_tree.heading("user", text="Player")
-    season_quest_tree.heading("completed", text="Completed")
-    season_quest_tree.heading("points", text="Points")
-    season_quest_tree.heading("races", text="Races")
-    season_quest_tree.heading("tilt_points", text="Tilt Pts")
+    season_quest_tree.heading("completed", text="Completed\nQuests")
+    season_quest_tree.heading("points", text="Season\nPoints")
+    season_quest_tree.heading("races", text="Season\nRaces")
+    season_quest_tree.heading("race_hs", text="Race\nHS")
+    season_quest_tree.heading("br_hs", text="BR\nHS")
+    season_quest_tree.heading("tilt_levels", text="Tilt\nLevels")
+    season_quest_tree.heading("tilt_tops", text="Top\nTiltees")
+    season_quest_tree.heading("tilt_points", text="Tilt\nPoints")
     season_quest_tree.column("rank", width=45, anchor="center")
-    season_quest_tree.column("user", width=190, anchor="w")
-    season_quest_tree.column("completed", width=110, anchor="center")
-    season_quest_tree.column("points", width=120, anchor="e")
-    season_quest_tree.column("races", width=95, anchor="e")
-    season_quest_tree.column("tilt_points", width=105, anchor="e")
+    season_quest_tree.column("user", width=150, anchor="w")
+    season_quest_tree.column("completed", width=95, anchor="center")
+    season_quest_tree.column("points", width=90, anchor="e")
+    season_quest_tree.column("races", width=82, anchor="e")
+    season_quest_tree.column("race_hs", width=75, anchor="e")
+    season_quest_tree.column("br_hs", width=75, anchor="e")
+    season_quest_tree.column("tilt_levels", width=80, anchor="e")
+    season_quest_tree.column("tilt_tops", width=90, anchor="e")
+    season_quest_tree.column("tilt_points", width=90, anchor="e")
     season_quest_scrollbar = ttk.Scrollbar(season_quests_tab, orient="vertical", command=season_quest_tree.yview)
     season_quest_tree.configure(yscrollcommand=season_quest_scrollbar.set)
     season_quest_tree.pack(side="left", fill="both", expand=True, padx=(8, 0), pady=(0, 8))
@@ -3423,24 +3448,118 @@ def build_main_content(parent):
     rivals_scrollbar.pack(side="right", fill="y", padx=(0, 8), pady=(0, 8))
 
     # MyCycle leaderboard tab
-    mycycle_session_label = ttk.Label(mycycle_tab, text="MyCycle leaderboard", style="Small.TLabel")
-    mycycle_session_label.pack(anchor="w", padx=8, pady=(8, 4))
-    mycycle_columns = ("rank", "user", "cycles", "progress", "cycle_races")
-    mycycle_tree = ttk.Treeview(mycycle_tab, columns=mycycle_columns, show="headings", height=20)
-    mycycle_tree.heading("rank", text="#")
-    mycycle_tree.heading("user", text="Player")
-    mycycle_tree.heading("cycles", text="Cycles")
-    mycycle_tree.heading("progress", text="Progress")
-    mycycle_tree.heading("cycle_races", text="Current Cycle Races")
+    mycycle_top_bar = ttk.Frame(mycycle_tab, style="App.TFrame")
+    mycycle_top_bar.pack(fill="x", padx=8, pady=(8, 4))
+
+    mycycle_session_label = ttk.Label(mycycle_top_bar, text="MyCycle leaderboard", style="Small.TLabel")
+    mycycle_session_label.pack(side="left")
+
+    nav_frame = ttk.Frame(mycycle_top_bar, style="App.TFrame")
+    nav_frame.pack(side="right")
+
+    mycycle_prev_button = ttk.Button(nav_frame, text="◀", width=3, style="Primary.TButton")
+    mycycle_prev_button.pack(side="left", padx=(0, 4))
+    mycycle_session_position_label = ttk.Label(nav_frame, text="0/0", style="Small.TLabel")
+    mycycle_session_position_label.pack(side="left", padx=(0, 4))
+    mycycle_next_button = ttk.Button(nav_frame, text="▶", width=3, style="Primary.TButton")
+    mycycle_next_button.pack(side="left")
+
+    mycycle_columns = ("rank", "user", "cycles", "progress", "placements_line1", "placements_line2", "cycle_races", "last_cycle")
+    mycycle_style = "MyCycleHome.Treeview"
+    app_style.configure(mycycle_style, rowheight=30)
+    app_style.configure(f"{mycycle_style}.Heading", padding=(8, 12))
+    mycycle_tree = ttk.Treeview(mycycle_tab, columns=mycycle_columns, show="headings", height=20, style=mycycle_style)
+    leaderboard_settings = get_mycycle_settings()
+    show_second_placement_line = leaderboard_settings['max_place'] - leaderboard_settings['min_place'] + 1 > 10
+
+    for col, text in (("rank", "#"), ("user", "User"), ("cycles", "Cycles"), ("progress", "Current\nProgress"), ("placements_line1", "Placements\n(1/2)"), ("placements_line2", "Placements\n(2/2)" if show_second_placement_line else ""), ("cycle_races", "Races in\nCurrent Cycle"), ("last_cycle", "Races in Last\nCompleted Cycle")):
+        mycycle_tree.heading(col, text=text)
+
     mycycle_tree.column("rank", width=45, anchor="center")
-    mycycle_tree.column("user", width=220, anchor="w")
-    mycycle_tree.column("cycles", width=90, anchor="e")
-    mycycle_tree.column("progress", width=120, anchor="e")
-    mycycle_tree.column("cycle_races", width=160, anchor="e")
+    mycycle_tree.column("user", width=150, anchor="w")
+    mycycle_tree.column("cycles", width=65, anchor="center")
+    mycycle_tree.column("progress", width=90, anchor="center")
+    mycycle_tree.column("placements_line1", width=210, anchor="w")
+    mycycle_tree.column("placements_line2", width=210 if show_second_placement_line else 0, anchor="w", stretch=show_second_placement_line)
+    mycycle_tree.column("cycle_races", width=105, anchor="center")
+    mycycle_tree.column("last_cycle", width=110, anchor="center")
+
     mycycle_scrollbar = ttk.Scrollbar(mycycle_tab, orient="vertical", command=mycycle_tree.yview)
     mycycle_tree.configure(yscrollcommand=mycycle_scrollbar.set)
     mycycle_tree.pack(side="left", fill="both", expand=True, padx=(8, 0), pady=(0, 8))
     mycycle_scrollbar.pack(side="right", fill="y", padx=(0, 8), pady=(0, 8))
+
+
+def shift_home_mycycle_session(delta):
+    global mycycle_home_session_index
+
+    if not mycycle_home_session_ids:
+        return
+
+    mycycle_home_session_index = (mycycle_home_session_index + delta) % len(mycycle_home_session_ids)
+    refresh_main_leaderboards()
+
+
+def _render_home_mycycle_leaderboard():
+    global mycycle_home_session_ids, mycycle_home_session_index
+
+    if not mycycle_tree or not mycycle_tree.winfo_exists():
+        return
+
+    mycycle_tree.delete(*mycycle_tree.get_children())
+    active_sessions, default_session_id = get_mycycle_sessions(include_inactive=False)
+    mycycle_home_session_ids = [session['id'] for session in active_sessions]
+
+    if not mycycle_home_session_ids:
+        if mycycle_session_label and mycycle_session_label.winfo_exists():
+            mycycle_session_label.config(text="MyCycle leaderboard • No active session")
+        if mycycle_session_position_label and mycycle_session_position_label.winfo_exists():
+            mycycle_session_position_label.config(text="0/0")
+        if mycycle_prev_button and mycycle_prev_button.winfo_exists():
+            mycycle_prev_button.state(["disabled"])
+        if mycycle_next_button and mycycle_next_button.winfo_exists():
+            mycycle_next_button.state(["disabled"])
+        return
+
+    current_primary = config.get_setting('mycycle_primary_session_id') or default_session_id
+    if current_primary in mycycle_home_session_ids and mycycle_home_session_index >= len(mycycle_home_session_ids):
+        mycycle_home_session_index = mycycle_home_session_ids.index(current_primary)
+    elif mycycle_home_session_index >= len(mycycle_home_session_ids):
+        mycycle_home_session_index = 0
+
+    total_sessions = len(mycycle_home_session_ids)
+    session_id = mycycle_home_session_ids[mycycle_home_session_index]
+    session, leaderboard = get_mycycle_leaderboard(limit=250, session_id=session_id)
+
+    if mycycle_session_label and mycycle_session_label.winfo_exists():
+        mycycle_session_label.config(text=f"MyCycle leaderboard • Session: {session.get('name', 'Unknown')}")
+    if mycycle_session_position_label and mycycle_session_position_label.winfo_exists():
+        mycycle_session_position_label.config(text=f"{mycycle_home_session_index + 1}/{total_sessions}")
+
+    toggle_state = ["!disabled"] if total_sessions > 1 else ["disabled"]
+    if mycycle_prev_button and mycycle_prev_button.winfo_exists():
+        mycycle_prev_button.state(toggle_state)
+    if mycycle_next_button and mycycle_next_button.winfo_exists():
+        mycycle_next_button.state(toggle_state)
+
+    leaderboard_settings = get_mycycle_settings()
+    show_second_placement_line = leaderboard_settings['max_place'] - leaderboard_settings['min_place'] + 1 > 10
+
+    if not leaderboard:
+        mycycle_tree.insert("", "end", values=("", "No race data for this session yet.", "", "", "", "", "", ""))
+        return
+
+    for idx, row in enumerate(leaderboard, start=1):
+        mycycle_tree.insert("", "end", values=(
+            idx,
+            row.get('display_name') or row.get('username') or '-',
+            row.get('cycles_completed', 0),
+            f"{row.get('progress_hits', 0)}/{row.get('progress_total', 0)}",
+            row.get('progress_marks_top') or '-',
+            row.get('progress_marks_bottom') if show_second_placement_line else "",
+            row.get('current_cycle_races', 0),
+            row.get('last_cycle_races', 0),
+        ))
 
 
 def refresh_main_leaderboards():
@@ -3453,10 +3572,14 @@ def refresh_main_leaderboards():
             for idx, row in enumerate(get_quest_completion_leaderboard(limit=100), start=1):
                 season_quest_tree.insert("", "end", values=(
                     idx,
-                    row.get('display_name') or row.get('user') or '-',
-                    f"{row.get('completed', 0):,}/{row.get('target_count', 0):,}",
+                    row.get('display_name') or row.get('username') or '-',
+                    f"{row.get('completed', 0):,}/{row.get('active_quests', 0):,}",
                     f"{row.get('points', 0):,}",
                     f"{row.get('races', 0):,}",
+                    f"{row.get('race_hs', 0):,}",
+                    f"{row.get('br_hs', 0):,}",
+                    f"{row.get('tilt_levels', 0):,}",
+                    f"{row.get('tilt_top_tiltee', 0):,}",
                     f"{row.get('tilt_points', 0):,}",
                 ))
 
@@ -3473,22 +3596,7 @@ def refresh_main_leaderboards():
                 ))
 
         if mycycle_tree and mycycle_tree.winfo_exists():
-            mycycle_tree.delete(*mycycle_tree.get_children())
-            session, leaderboard = get_mycycle_leaderboard(limit=250)
-            if mycycle_session_label and mycycle_session_label.winfo_exists():
-                if session:
-                    mycycle_session_label.config(text=f"MyCycle leaderboard • Session: {session.get('name', 'Unknown')}")
-                else:
-                    mycycle_session_label.config(text="MyCycle leaderboard • No active session")
-
-            for idx, row in enumerate(leaderboard, start=1):
-                mycycle_tree.insert("", "end", values=(
-                    idx,
-                    row.get('display_name') or row.get('username') or '-',
-                    f"{row.get('cycles_completed', 0):,}",
-                    f"{row.get('progress_hits', 0):,}/{row.get('progress_total', 0):,}",
-                    f"{row.get('current_cycle_races', 0):,}",
-                ))
+            _render_home_mycycle_leaderboard()
     except Exception as error:
         print(f"Failed to refresh leaderboard tabs: {error}")
 
@@ -3523,6 +3631,11 @@ def initialize_main_window():
 
     build_stats_sidebar(root_window)
     build_main_content(root_window)
+
+    if mycycle_prev_button and mycycle_prev_button.winfo_exists():
+        mycycle_prev_button.configure(command=lambda: shift_home_mycycle_session(-1))
+    if mycycle_next_button and mycycle_next_button.winfo_exists():
+        mycycle_next_button.configure(command=lambda: shift_home_mycycle_session(1))
 
     root_window.update_idletasks()
     root_window.grid_columnconfigure(1, weight=1)
