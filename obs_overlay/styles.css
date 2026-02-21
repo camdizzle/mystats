@@ -44,17 +44,17 @@ h1 {
 }
 
 .header-stats {
+  width: 100%;
   margin-top: 10px;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 4px;
-  width: 100%;
 }
 
 .pill {
+  width: 100%;
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
-  width: 100%;
   text-align: center;
   padding: 7px 8px;
   border-radius: 16px;
@@ -262,15 +262,12 @@ body.top3-active #leaderboard,
 
 body.top3-active #leaderboard li.top3-card,
 #leaderboard.is-top3-mode li.top3-card {
-  display: grid;
-  grid-template-columns: minmax(120px, auto) minmax(0, 1fr);
-  grid-template-areas:
-    'rank name'
-    'rank points';
+  display: flex;
+  flex-direction: column;
   align-items: center;
-  column-gap: 12px;
-  row-gap: 6px;
-  text-align: left;
+  justify-content: center;
+  gap: 6px;
+  text-align: center;
   min-height: 0;
   flex: 1;
   padding: 10px 12px;
@@ -307,28 +304,21 @@ body.top3-active #leaderboard li.top3-card--3,
 
 body.top3-active .top3-rank,
 #leaderboard.is-top3-mode .top3-rank {
-  grid-area: rank;
   font-size: calc(1.7rem * var(--text-scale));
   font-weight: 900;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: #ffe8a8;
-  text-align: left;
+  text-align: center;
   line-height: 1;
-  display: grid;
-  align-content: center;
-  justify-content: start;
-  height: 100%;
 }
 
 body.top3-active .top3-name,
 #leaderboard.is-top3-mode .top3-name {
-  grid-area: name;
-  width: 100%;
   font-size: calc(2.2rem * var(--text-scale));
   font-weight: 800;
   line-height: 1;
-  text-align: left;
+  text-align: center;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -337,8 +327,6 @@ body.top3-active .top3-name,
 
 body.top3-active .top3-points,
 #leaderboard.is-top3-mode .top3-points {
-  grid-area: points;
-  justify-self: start;
   font-size: calc(1.35rem * var(--text-scale));
   font-weight: 700;
   line-height: 1;

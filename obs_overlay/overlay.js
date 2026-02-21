@@ -296,16 +296,6 @@ function getViewsRenderKey(views) {
 }
 
 
-function isPreviousRaceRecent(recentRace = {}) {
-  const raceTimestamp = recentRace?.race_timestamp;
-  if (!raceTimestamp) return false;
-
-  const parsed = new Date(raceTimestamp);
-  if (Number.isNaN(parsed.getTime())) return false;
-
-  return (Date.now() - parsed.getTime()) <= 10 * 60 * 1000;
-}
-
 function getRenderableViews(views = []) {
   if (!Array.isArray(views)) return [];
   return views.filter((view) => Array.isArray(view?.rows) && view.rows.length > 0);
@@ -445,8 +435,7 @@ async function refresh() {
     applyServerSettings(p.settings || {});
     updateHeaderStats(p.header_stats || {});
     const shouldShowPreviousRace = Array.isArray(p.top10_previous_race)
-      && p.top10_previous_race.length
-      && isPreviousRaceRecent(p.recent_race_top3);
+      && p.top10_previous_race.length;
 
     const normalizedViews = Array.isArray(p.views)
       ? p.views
