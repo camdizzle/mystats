@@ -46,11 +46,17 @@ import atexit
 import socket
 import importlib.util
 import logging
+import subprocess
 
 try:
     import ttkbootstrap as ttkbootstrap_module
 except ImportError:
     ttkbootstrap_module = None
+
+try:
+    import webview as pywebview_module
+except Exception:
+    pywebview_module = None
 
 # Global Variables
 version = '6.0.1'
@@ -71,6 +77,10 @@ mycycle_next_button = None
 mycycle_export_button = None
 mycycle_home_session_ids = []
 mycycle_home_session_index = 0
+modern_dashboard_status_label = None
+modern_dashboard_container = None
+modern_dashboard_controller = None
+root = None
 
 logging.basicConfig(
     level=logging.INFO,
@@ -1209,16 +1219,22 @@ def get_mycycle_leaderboard(limit=200, session_id=None):
     settings = get_mycycle_settings()
     placement_range = list(range(settings['min_place'], settings['max_place'] + 1))
     for username, row in stats.items():
-        hits = set(row.get('current_hits', []))
+        hits = {int(p) for p in row.get('current_hits', []) if isinstance(p, int) or str(p).isdigit()}
+        missing_places = [place for place in placement_range if place not in hits]
         marks_top, marks_bottom = _format_mycycle_placement_marks(hits, placement_range)
+        progress_total = settings['max_place'] - settings['min_place'] + 1
+        progress_hits = len(hits)
         leaderboard.append({
             'username': username,
             'display_name': row.get('display_name') or username,
             'cycles_completed': int(row.get('cycles_completed', 0)),
-            'progress_hits': len(hits),
-            'progress_total': settings['max_place'] - settings['min_place'] + 1,
+            'progress_hits': progress_hits,
+            'progress_total': progress_total,
+            'progress_percent': round((progress_hits / progress_total) * 100, 1) if progress_total > 0 else 0.0,
             'progress_marks_top': marks_top,
             'progress_marks_bottom': marks_bottom,
+            'placement_hits': sorted(hits),
+            'missing_places': missing_places,
             'current_cycle_races': int(row.get('current_cycle_races', 0)),
             'last_cycle_races': int(row.get('last_cycle_races', 0)),
         })
@@ -1622,6 +1638,30 @@ def _resolve_overlay_dir():
 
 
 OVERLAY_DIR = _resolve_overlay_dir()
+
+
+def _dashboard_dir_candidates():
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        os.path.join(script_dir, "modern_dashboard"),
+        os.path.join(os.getcwd(), "modern_dashboard"),
+    ]
+
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.insert(0, os.path.join(meipass, "modern_dashboard"))
+
+    return candidates
+
+
+def _resolve_dashboard_dir():
+    for candidate in _dashboard_dir_candidates():
+        if os.path.isdir(candidate):
+            return candidate
+    return _dashboard_dir_candidates()[0]
+
+
+DASHBOARD_DIR = _resolve_dashboard_dir()
 
 # Twitch App Credentials
 CLIENT_ID = 'icdintxz5c3h9twd6v3rntautv2o9g'
@@ -2089,6 +2129,48 @@ def overlay_top3():
 @app.route('/api/overlay/tilt')
 def overlay_tilt_payload():
     return jsonify(_build_tilt_overlay_payload())
+
+
+def _build_main_dashboard_payload():
+    mycycle_session_ids, _ = _get_mycycle_home_session_ids()
+    active_session_id = mycycle_session_ids[0] if mycycle_session_ids else None
+    mycycle_session, mycycle_rows = get_mycycle_leaderboard(limit=250, session_id=active_session_id)
+
+    return {
+        'updated_at': datetime.now().isoformat(timespec='seconds'),
+        'season_quests': get_quest_completion_leaderboard(limit=100),
+        'rivals': get_global_rivalries(limit=200),
+        'mycycle': {
+            'session': mycycle_session or {},
+            'rows': mycycle_rows,
+            'settings': get_mycycle_settings(),
+        },
+    }
+
+
+@app.route('/dashboard')
+def dashboard_page():
+    for candidate in _dashboard_dir_candidates():
+        index_file = os.path.join(candidate, 'index.html')
+        if os.path.isfile(index_file):
+            return send_from_directory(candidate, 'index.html')
+
+    return (f"Dashboard files not found. Checked: {', '.join(_dashboard_dir_candidates())}", 404)
+
+
+@app.route('/dashboard/<path:filename>')
+def dashboard_assets(filename):
+    for candidate in _dashboard_dir_candidates():
+        asset_file = os.path.join(candidate, filename)
+        if os.path.isfile(asset_file):
+            return send_from_directory(candidate, filename)
+
+    return (f"Dashboard asset not found: {filename}", 404)
+
+
+@app.route('/api/dashboard/main')
+def dashboard_main_payload():
+    return jsonify(_build_main_dashboard_payload())
 
 
 # Path to the token file
@@ -3024,12 +3106,14 @@ def open_settings_window():
     overlay_show_medals_var = tk.BooleanVar(value=str(config.get_setting("overlay_show_medals") or "True") == "True")
     overlay_compact_rows_var = tk.BooleanVar(value=str(config.get_setting("overlay_compact_rows") or "False") == "True")
     overlay_horizontal_layout_var = tk.BooleanVar(value=str(config.get_setting("overlay_horizontal_layout") or "False") == "True")
+    modern_dashboard_enabled_var = tk.BooleanVar(value=str(config.get_setting("modern_dashboard_enabled") or "True") == "True")
     ttk.Checkbutton(overlay_tab, text="Show top-3 medal emotes", variable=overlay_show_medals_var).grid(row=7, column=0, sticky="w", pady=(6, 2), columnspan=2)
     ttk.Checkbutton(overlay_tab, text="Compact row spacing", variable=overlay_compact_rows_var).grid(row=8, column=0, sticky="w", pady=(0, 2), columnspan=2)
     ttk.Checkbutton(overlay_tab, text="Horizontal ticker layout (1080x100)", variable=overlay_horizontal_layout_var).grid(row=9, column=0, sticky="w", pady=(0, 2), columnspan=2)
+    ttk.Checkbutton(overlay_tab, text="Enable modern dashboard window (pywebview)", variable=modern_dashboard_enabled_var).grid(row=10, column=0, sticky="w", pady=(4, 2), columnspan=2)
 
     tilt_overlay_frame = ttk.LabelFrame(overlay_tab, text="Tilt Overlay", style="Card.TLabelframe")
-    tilt_overlay_frame.grid(row=10, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+    tilt_overlay_frame.grid(row=11, column=0, columnspan=2, sticky="ew", pady=(10, 0))
 
     ttk.Label(tilt_overlay_frame, text="Starting Lifetime XP", style="Small.TLabel").grid(row=0, column=0, sticky="w", padx=(10, 8), pady=(8, 4))
     tilt_lifetime_base_entry = ttk.Entry(tilt_overlay_frame, width=12, justify='center')
@@ -3056,7 +3140,7 @@ def open_settings_window():
     tilt_scroll_pause_entry.insert(0, config.get_setting("tilt_scroll_pause_ms") or "900")
 
     ttk.Label(tilt_overlay_frame, text="Tip: Starting Lifetime XP lets you align totals with existing channel progress.", style="Small.TLabel").grid(row=5, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 8))
-    ttk.Label(overlay_tab, text="Restart MyStats after changing port. Visual changes apply on next refresh.", style="Small.TLabel").grid(row=11, column=0, columnspan=2, sticky="w", pady=(8, 0))
+    ttk.Label(overlay_tab, text="Restart MyStats after changing port. Visual changes apply on next refresh.", style="Small.TLabel").grid(row=12, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
 
     def reset_settings_defaults():
@@ -3137,6 +3221,7 @@ def open_settings_window():
         overlay_show_medals_var.set(True)
         overlay_compact_rows_var.set(False)
         overlay_horizontal_layout_var.set(False)
+        modern_dashboard_enabled_var.set(True)
         tilt_lifetime_base_entry.delete(0, tk.END)
         tilt_lifetime_base_entry.insert(0, "0")
         tilt_overlay_theme_var.set("midnight")
@@ -3210,6 +3295,7 @@ def open_settings_window():
         config.set_setting("overlay_show_medals", str(overlay_show_medals_var.get()), persistent=True)
         config.set_setting("overlay_compact_rows", str(overlay_compact_rows_var.get()), persistent=True)
         config.set_setting("overlay_horizontal_layout", str(overlay_horizontal_layout_var.get()), persistent=True)
+        config.set_setting("modern_dashboard_enabled", str(modern_dashboard_enabled_var.get()), persistent=True)
         config.set_setting("tilt_lifetime_base_xp", tilt_lifetime_base_entry.get(), persistent=True)
         config.set_setting("tilt_overlay_theme", tilt_overlay_theme_var.get(), persistent=True)
         config.set_setting("tilt_scroll_step_px", tilt_scroll_step_entry.get(), persistent=True)
@@ -3273,6 +3359,9 @@ def on_close():
     # Schedule bot shutdown in the bot's event loop (when available)
     if bot is not None and getattr(bot, "loop", None) is not None:
         asyncio.run_coroutine_threadsafe(bot.shutdown(), bot.loop)
+
+    if modern_dashboard_controller is not None:
+        modern_dashboard_controller.shutdown()
 
     # Destroy the Tkinter windows after a delay
     def close_windows():
@@ -3346,10 +3435,73 @@ def build_stats_sidebar(parent):
     url_label.bind("<Button-1>", open_url)
 
 
+def is_modern_dashboard_enabled():
+    setting_value = config.get_setting('modern_dashboard_enabled')
+    if setting_value is None:
+        return True
+    return str(setting_value).strip().lower() == 'true'
+
+
+class ModernDashboardController:
+    def __init__(self, parent_frame, status_label):
+        self.parent_frame = parent_frame
+        self.status_label = status_label
+        self.browser_url = f"http://127.0.0.1:{_load_overlay_server_port()}/dashboard"
+        self.viewer_process = None
+
+    def _set_status(self, message):
+        if self.status_label and self.status_label.winfo_exists():
+            self.status_label.config(text=message)
+
+    def _is_viewer_running(self):
+        return self.viewer_process is not None and self.viewer_process.poll() is None
+
+    def start(self):
+        if not is_modern_dashboard_enabled():
+            self._set_status('Modern dashboard disabled in settings.')
+            return
+
+        if pywebview_module is None:
+            self._set_status('Modern dashboard unavailable: install pywebview.')
+            return
+
+        if self._is_viewer_running():
+            self._set_status('Modern dashboard window already open.')
+            return
+
+        script = (
+            "import sys\n"
+            "import webview\n"
+            "url = sys.argv[1]\n"
+            "webview.create_window('MyStats Modern Dashboard', url, width=1320, height=860, resizable=True)\n"
+            "webview.start(gui='tkinter')\n"
+        )
+
+        try:
+            self.viewer_process = subprocess.Popen([sys.executable, '-c', script, self.browser_url])
+            self._set_status('Modern dashboard opened in pywebview window.')
+        except Exception as error:
+            self.viewer_process = None
+            self._set_status(f'Modern dashboard failed to open: {error}')
+
+    def shutdown(self):
+        if not self._is_viewer_running():
+            return
+        try:
+            self.viewer_process.terminate()
+            self.viewer_process.wait(timeout=2)
+        except Exception:
+            try:
+                self.viewer_process.kill()
+            except Exception:
+                pass
+        finally:
+            self.viewer_process = None
 def build_main_content(parent):
     global chatbot_label, login_button, text_area
     global season_quest_tree, rivals_tree, mycycle_tree, mycycle_session_label
     global mycycle_session_position_label, mycycle_prev_button, mycycle_next_button, mycycle_export_button
+    global modern_dashboard_status_label, modern_dashboard_container, modern_dashboard_controller
 
     top_frame1 = ttk.Frame(parent, style="App.TFrame")
     top_frame1.grid(row=0, column=1, sticky='ew', padx=(5, 0))
@@ -3374,11 +3526,13 @@ def build_main_content(parent):
     season_quests_tab = ttk.Frame(notebook, style="App.TFrame")
     rivals_tab = ttk.Frame(notebook, style="App.TFrame")
     mycycle_tab = ttk.Frame(notebook, style="App.TFrame")
+    modern_dashboard_tab = ttk.Frame(notebook, style="App.TFrame")
 
     notebook.add(console_tab, text="Console")
     notebook.add(season_quests_tab, text="Season Quests")
     notebook.add(rivals_tab, text="Rivals")
     notebook.add(mycycle_tab, text="MyCycle")
+    notebook.add(modern_dashboard_tab, text="Dashboards (Modern)")
 
     console_tab.grid_rowconfigure(0, weight=1)
     console_tab.grid_columnconfigure(0, weight=1)
@@ -3502,6 +3656,35 @@ def build_main_content(parent):
     mycycle_tree.pack(side="left", fill="both", expand=True, padx=(8, 0), pady=(0, 8))
     mycycle_scrollbar.pack(side="right", fill="y", padx=(0, 8), pady=(0, 8))
 
+    ttk.Label(
+        modern_dashboard_tab,
+        text="Modern dashboard (pywebview) for Season Quests, Rivals, and MyCycle",
+        style="Small.TLabel"
+    ).pack(anchor="w", padx=8, pady=(8, 4))
+
+    modern_dashboard_status_label = ttk.Label(
+        modern_dashboard_tab,
+        text="Opening modern dashboard...",
+        style="Small.TLabel"
+    )
+    modern_dashboard_status_label.pack(anchor="w", padx=8, pady=(0, 6))
+
+    modern_dashboard_container = ttk.Frame(modern_dashboard_tab, style="App.TFrame")
+    modern_dashboard_container.pack(fill="both", expand=True)
+
+    modern_dashboard_controller = ModernDashboardController(modern_dashboard_container, modern_dashboard_status_label)
+
+    ttk.Button(
+        modern_dashboard_tab,
+        text="Open Modern Dashboard Window",
+        command=modern_dashboard_controller.start,
+        style="Primary.TButton"
+    ).pack(anchor="w", padx=8, pady=(0, 8))
+
+    parent.after(300, modern_dashboard_controller.start)
+
+    refresh_main_leaderboards()
+
 
 def shift_home_mycycle_session(delta):
     global mycycle_home_session_index
@@ -3510,6 +3693,7 @@ def shift_home_mycycle_session(delta):
         return
 
     mycycle_home_session_index = (mycycle_home_session_index + delta) % len(mycycle_home_session_ids)
+
     refresh_main_leaderboards()
 
 
@@ -3683,7 +3867,7 @@ def refresh_main_leaderboards():
 
 
 def initialize_main_window():
-    global app_style
+    global app_style, root
 
     root_window, app_style = create_root_window()
     apply_ui_styles(app_style)
@@ -3707,6 +3891,8 @@ def initialize_main_window():
 
     root_window.grid_rowconfigure(1, weight=1)
     root_window.grid_columnconfigure(1, weight=1)
+
+    root = root_window
 
     build_stats_sidebar(root_window)
     build_main_content(root_window)
@@ -4186,7 +4372,8 @@ class ConfigManager:
                                 'overlay_card_opacity', 'overlay_text_scale', 'overlay_show_medals',
                                 'overlay_compact_rows', 'overlay_horizontal_layout', 'overlay_server_port', 'tilt_lifetime_base_xp',
                                 'tilt_overlay_theme', 'tilt_scroll_step_px', 'tilt_scroll_interval_ms',
-                                'tilt_scroll_pause_ms', 'tiltsurvivors_min_levels', 'tiltdeath_min_levels'}
+                                'tilt_scroll_pause_ms', 'tiltsurvivors_min_levels', 'tiltdeath_min_levels',
+                                'modern_dashboard_enabled'}
         self.transient_keys = set([])
         self.defaults = {
             'chat_br_results': 'True',
@@ -4253,7 +4440,8 @@ class ConfigManager:
             'tilt_scroll_interval_ms': '40',
             'tilt_scroll_pause_ms': '900',
             'tiltsurvivors_min_levels': '20',
-            'tiltdeath_min_levels': '20'
+            'tiltdeath_min_levels': '20',
+            'modern_dashboard_enabled': 'True'
         }
         self.load_settings()
 
