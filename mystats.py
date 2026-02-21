@@ -1732,6 +1732,7 @@ def _build_overlay_settings_payload():
         'text_scale': _safe_int(config.get_setting('overlay_text_scale') or 100) or 100,
         'show_medals': str(config.get_setting('overlay_show_medals') or 'True'),
         'compact_rows': str(config.get_setting('overlay_compact_rows') or 'False'),
+        'horizontal_layout': str(config.get_setting('overlay_horizontal_layout') or 'False'),
         'tilt_theme': (config.get_setting('tilt_overlay_theme') or config.get_setting('overlay_theme') or 'midnight').strip().lower(),
         'tilt_scroll_step_px': _safe_int(config.get_setting('tilt_scroll_step_px') or 1) or 1,
         'tilt_scroll_interval_ms': _safe_int(config.get_setting('tilt_scroll_interval_ms') or 40) or 40,
@@ -2979,11 +2980,13 @@ def open_settings_window():
 
     overlay_show_medals_var = tk.BooleanVar(value=str(config.get_setting("overlay_show_medals") or "True") == "True")
     overlay_compact_rows_var = tk.BooleanVar(value=str(config.get_setting("overlay_compact_rows") or "False") == "True")
+    overlay_horizontal_layout_var = tk.BooleanVar(value=str(config.get_setting("overlay_horizontal_layout") or "False") == "True")
     ttk.Checkbutton(overlay_tab, text="Show top-3 medal emotes", variable=overlay_show_medals_var).grid(row=7, column=0, sticky="w", pady=(6, 2), columnspan=2)
     ttk.Checkbutton(overlay_tab, text="Compact row spacing", variable=overlay_compact_rows_var).grid(row=8, column=0, sticky="w", pady=(0, 2), columnspan=2)
+    ttk.Checkbutton(overlay_tab, text="Horizontal ticker layout (1080x100)", variable=overlay_horizontal_layout_var).grid(row=9, column=0, sticky="w", pady=(0, 2), columnspan=2)
 
     tilt_overlay_frame = ttk.LabelFrame(overlay_tab, text="Tilt Overlay", style="Card.TLabelframe")
-    tilt_overlay_frame.grid(row=9, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+    tilt_overlay_frame.grid(row=10, column=0, columnspan=2, sticky="ew", pady=(10, 0))
 
     ttk.Label(tilt_overlay_frame, text="Starting Lifetime XP", style="Small.TLabel").grid(row=0, column=0, sticky="w", padx=(10, 8), pady=(8, 4))
     tilt_lifetime_base_entry = ttk.Entry(tilt_overlay_frame, width=12, justify='center')
@@ -3010,7 +3013,7 @@ def open_settings_window():
     tilt_scroll_pause_entry.insert(0, config.get_setting("tilt_scroll_pause_ms") or "900")
 
     ttk.Label(tilt_overlay_frame, text="Tip: Starting Lifetime XP lets you align totals with existing channel progress.", style="Small.TLabel").grid(row=5, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 8))
-    ttk.Label(overlay_tab, text="Restart MyStats after changing port. Visual changes apply on next refresh.", style="Small.TLabel").grid(row=10, column=0, columnspan=2, sticky="w", pady=(8, 0))
+    ttk.Label(overlay_tab, text="Restart MyStats after changing port. Visual changes apply on next refresh.", style="Small.TLabel").grid(row=11, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
 
     def reset_settings_defaults():
@@ -3080,6 +3083,7 @@ def open_settings_window():
         overlay_text_scale_entry.insert(0, "100")
         overlay_show_medals_var.set(True)
         overlay_compact_rows_var.set(False)
+        overlay_horizontal_layout_var.set(False)
         tilt_lifetime_base_entry.delete(0, tk.END)
         tilt_lifetime_base_entry.insert(0, "0")
         tilt_overlay_theme_var.set("midnight")
@@ -3145,6 +3149,7 @@ def open_settings_window():
         config.set_setting("overlay_text_scale", overlay_text_scale_entry.get(), persistent=True)
         config.set_setting("overlay_show_medals", str(overlay_show_medals_var.get()), persistent=True)
         config.set_setting("overlay_compact_rows", str(overlay_compact_rows_var.get()), persistent=True)
+        config.set_setting("overlay_horizontal_layout", str(overlay_horizontal_layout_var.get()), persistent=True)
         config.set_setting("tilt_lifetime_base_xp", tilt_lifetime_base_entry.get(), persistent=True)
         config.set_setting("tilt_overlay_theme", tilt_overlay_theme_var.get(), persistent=True)
         config.set_setting("tilt_scroll_step_px", tilt_scroll_step_entry.get(), persistent=True)
@@ -3937,7 +3942,7 @@ class ConfigManager:
                                 'mycycle_cyclestats_rotation_index',
                                 'overlay_rotation_seconds', 'overlay_refresh_seconds', 'overlay_theme',
                                 'overlay_card_opacity', 'overlay_text_scale', 'overlay_show_medals',
-                                'overlay_compact_rows', 'overlay_server_port', 'tilt_lifetime_base_xp',
+                                'overlay_compact_rows', 'overlay_horizontal_layout', 'overlay_server_port', 'tilt_lifetime_base_xp',
                                 'tilt_overlay_theme', 'tilt_scroll_step_px', 'tilt_scroll_interval_ms',
                                 'tilt_scroll_pause_ms', 'tiltsurvivors_min_levels', 'tiltdeath_min_levels'}
         self.transient_keys = set([])
@@ -3992,6 +3997,7 @@ class ConfigManager:
             'overlay_text_scale': '100',
             'overlay_show_medals': 'True',
             'overlay_compact_rows': 'False',
+            'overlay_horizontal_layout': 'False',
             'tilt_lifetime_base_xp': '0',
             'tilt_overlay_theme': 'midnight',
             'tilt_scroll_step_px': '1',
