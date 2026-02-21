@@ -79,6 +79,7 @@ mycycle_home_session_index = 0
 modern_dashboard_status_label = None
 modern_dashboard_container = None
 modern_dashboard_controller = None
+root = None
 
 logging.basicConfig(
     level=logging.INFO,
@@ -3883,7 +3884,7 @@ def refresh_main_leaderboards():
 
 
 def initialize_main_window():
-    global app_style
+    global app_style, root
 
     root_window, app_style = create_root_window()
     apply_ui_styles(app_style)
@@ -3907,6 +3908,8 @@ def initialize_main_window():
 
     root_window.grid_rowconfigure(1, weight=1)
     root_window.grid_columnconfigure(1, weight=1)
+
+    root = root_window
 
     build_stats_sidebar(root_window)
     build_main_content(root_window)
