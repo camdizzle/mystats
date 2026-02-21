@@ -1,5 +1,7 @@
 const el = (id) => document.getElementById(id);
 
+let activeView = 'mycycle';
+
 function fmt(n) {
   const x = Number(n || 0);
   return Number.isFinite(x) ? x.toLocaleString() : '0';
@@ -113,12 +115,114 @@ function renderMyCycleRows(data) {
   }).join('');
 }
 
+function renderSeasonKpis(rows = []) {
+  const host = el('season-kpis');
+  if (!host) return;
+
+  const racers = rows.length;
+  const completedAll = rows.filter((row) => Number(row.active_quests || 0) > 0 && Number(row.completed || 0) >= Number(row.active_quests || 0)).length;
+  const totalCompleted = rows.reduce((acc, row) => acc + Number(row.completed || 0), 0);
+
+  host.innerHTML = [
+    { label: 'Tracked Racers', value: fmt(racers) },
+    { label: 'All Quests Complete', value: fmt(completedAll) },
+    { label: 'Total Quest Clears', value: fmt(totalCompleted) },
+  ].map((kpi) => (
+    `<div class="kpi"><div class="kpi-label">${escapeHtml(kpi.label)}</div><div class="kpi-value">${escapeHtml(kpi.value)}</div></div>`
+  )).join('');
+}
+
+function renderSeasonTargets(data) {
+  const host = el('season-quest-targets');
+  if (!host) return;
+
+  const seasonPayload = data?.season_quests;
+  const targets = (!Array.isArray(seasonPayload) && seasonPayload?.targets) || data?.season_quest_targets || {};
+  const questCards = [
+    ['Season Races', targets.races],
+    ['Season Points', targets.points],
+    ['Race HS', targets.race_hs],
+    ['BR HS', targets.br_hs],
+    ['Tilt Levels', targets.tilt_levels],
+    ['Top Tiltees', targets.tilt_tops],
+    ['Tilt Points', targets.tilt_points],
+  ];
+
+  host.innerHTML = questCards.map(([label, value]) => {
+    const enabled = Number(value || 0) > 0;
+    return `<div class="quest-target ${enabled ? '' : 'quest-target--disabled'}"><span>${escapeHtml(label)}</span><strong>${enabled ? escapeHtml(fmt(value)) : 'Disabled'}</strong></div>`;
+  }).join('');
+}
+
+function renderSeasonQuestRows(data) {
+  const rowsHost = el('season-quests');
+  if (!rowsHost) return;
+
+  const seasonPayload = data?.season_quests;
+  const rows = Array.isArray(seasonPayload)
+    ? seasonPayload
+    : (Array.isArray(seasonPayload?.rows) ? seasonPayload.rows : []);
+  renderSeasonKpis(rows);
+  renderSeasonTargets(data);
+
+  if (!rows.length) {
+    rowsHost.innerHTML = '<div class="empty">No season quest data yet.</div>';
+    return;
+  }
+
+  rowsHost.innerHTML = rows.map((row, idx) => {
+    const completed = Number(row.completed || 0);
+    const activeQuests = Math.max(1, Number(row.active_quests || 0));
+    const percent = Math.max(0, Math.min(100, (completed / activeQuests) * 100));
+    const completedText = `${completed}/${Number(row.active_quests || 0)}`;
+
+    return `
+      <div class="row">
+        <div class="row-head">
+          <span class="rank">#${idx + 1}</span>
+          <span class="name">${escapeHtml(row.display_name || row.username || '-')}</span>
+          <span class="stat">${escapeHtml(`${completedText} complete`)}</span>
+        </div>
+        <div class="progress-bar"><div class="progress-fill" style="width:${percent}%"></div></div>
+        <div class="quest-metrics">
+          <span>Points: ${escapeHtml(fmt(row.points))}</span>
+          <span>Races: ${escapeHtml(fmt(row.races))}</span>
+          <span>Race HS: ${escapeHtml(fmt(row.race_hs))}</span>
+          <span>BR HS: ${escapeHtml(fmt(row.br_hs))}</span>
+          <span>Tilt Levels: ${escapeHtml(fmt(row.tilt_levels))}</span>
+          <span>Top Tiltees: ${escapeHtml(fmt(row.tilt_top_tiltee))}</span>
+          <span>Tilt Points: ${escapeHtml(fmt(row.tilt_points))}</span>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function setActiveView(viewName) {
+  activeView = viewName;
+  document.querySelectorAll('.dashboard-nav-btn[data-view]').forEach((btn) => {
+    const isActive = btn.dataset.view === activeView;
+    btn.classList.toggle('dashboard-nav-btn--active', isActive);
+  });
+
+  document.querySelectorAll('[data-panel]').forEach((panel) => {
+    panel.classList.toggle('is-hidden', panel.dataset.panel !== activeView);
+  });
+}
+
+function wireViewTabs() {
+  document.querySelectorAll('.dashboard-nav-btn[data-view]').forEach((btn) => {
+    btn.addEventListener('click', () => setActiveView(btn.dataset.view));
+  });
+}
+
 async function refresh() {
   try {
     const resp = await fetch('/api/dashboard/main', { cache: 'no-store' });
     const data = await resp.json();
     el('updated-at').textContent = data.updated_at ? `Updated ${data.updated_at}` : 'Updated now';
     renderMyCycleRows(data);
+    renderSeasonQuestRows(data);
   } catch (error) {
     console.error('dashboard refresh failed', error);
     const node = el('mycycle');
@@ -127,4 +231,5 @@ async function refresh() {
 }
 
 refresh();
+wireViewTabs();
 setInterval(refresh, 15000);

@@ -16,13 +16,13 @@
       <span id="updated-at">Refreshing…</span>
     </header>
 
-    <section class="dashboard-nav">
-      <button class="dashboard-nav-btn dashboard-nav-btn--active" type="button">MyCycle</button>
-      <button class="dashboard-nav-btn" type="button" disabled>Season Quests (next)</button>
+    <section class="dashboard-nav" role="tablist" aria-label="Dashboard views">
+      <button class="dashboard-nav-btn dashboard-nav-btn--active" data-view="mycycle" type="button">MyCycle</button>
+      <button class="dashboard-nav-btn" data-view="season-quests" type="button">Season Quests</button>
       <button class="dashboard-nav-btn" type="button" disabled>Rivals (next)</button>
     </section>
 
-    <section class="mycycle-shell">
+    <section class="mycycle-shell" data-panel="mycycle">
       <article class="summary-panel">
         <div id="mycycle-meta" class="meta"></div>
         <div id="summary-kpis" class="kpis"></div>
@@ -39,6 +39,22 @@
           <span id="range-pill" class="range-pill"></span>
         </div>
         <div id="mycycle" class="rows"></div>
+      </article>
+    </section>
+
+    <section class="season-shell is-hidden" data-panel="season-quests">
+      <article class="summary-panel">
+        <div class="meta">Season Quests overview</div>
+        <div id="season-kpis" class="kpis"></div>
+        <div id="season-quest-targets" class="quest-targets"></div>
+      </article>
+
+      <article class="leaderboard-panel">
+        <div class="panel-title-row">
+          <h2>Season Quest Leaderboard</h2>
+          <span id="season-range-pill" class="range-pill">Top 100</span>
+        </div>
+        <div id="season-quests" class="rows"></div>
       </article>
     </section>
 
