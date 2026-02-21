@@ -2145,7 +2145,10 @@ def _build_main_dashboard_payload():
 
     return {
         'updated_at': datetime.now().isoformat(timespec='seconds'),
-        'season_quests': get_quest_completion_leaderboard(limit=100),
+        'season_quests': {
+            'rows': get_quest_completion_leaderboard(limit=100),
+            'targets': get_season_quest_targets(),
+        },
         'rivals': get_global_rivalries(limit=200),
         'mycycle': {
             'session': mycycle_session or {},
