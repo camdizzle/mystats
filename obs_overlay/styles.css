@@ -185,6 +185,9 @@ body.top3-active .header-stats {
   background: rgba(3, 10, 28, 0.92);
   border: 1px solid rgba(127, 216, 255, 0.2);
   text-align: center;
+  line-height: 1.2;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 #leaderboard li.leaderboard-row {
@@ -257,7 +260,7 @@ body.top3-active #leaderboard li.leaderboard-section-title,
   position: static;
   padding: 4px 8px;
   font-size: calc(0.96rem * var(--text-scale));
-  line-height: 1;
+  line-height: 1.2;
 }
 
 body.top3-active #leaderboard,
@@ -547,10 +550,12 @@ body.horizontal-layout #leaderboard::-webkit-scrollbar {
 body.horizontal-layout #leaderboard li.leaderboard-section-title {
   position: static;
   top: auto;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
   margin: 0;
   font-size: calc(0.5rem * var(--text-scale));
   padding: 3.5px 5px;
+  line-height: 1.15;
 }
 
 body.horizontal-layout #leaderboard li.leaderboard-row {
