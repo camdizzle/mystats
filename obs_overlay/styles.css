@@ -52,6 +52,10 @@ h1 {
   gap: 4px;
 }
 
+body.top3-active .header-stats {
+  display: none;
+}
+
 .pill {
   width: 100%;
   display: grid;
