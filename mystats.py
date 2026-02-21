@@ -47,31 +47,13 @@ import socket
 import importlib.util
 import importlib
 import logging
+import shutil
 import subprocess
 
 try:
     import ttkbootstrap as ttkbootstrap_module
 except ImportError:
     ttkbootstrap_module = None
-
-pywebview_module = None
-pywebview_import_error = None
-
-
-def load_pywebview_module():
-    """Attempt to import pywebview and cache the result for dashboard launches."""
-    global pywebview_module, pywebview_import_error
-    if pywebview_module is not None:
-        return pywebview_module
-
-    try:
-        pywebview_module = importlib.import_module('webview')
-        pywebview_import_error = None
-    except Exception as import_error:
-        pywebview_module = None
-        pywebview_import_error = import_error
-
-    return pywebview_module
 
 # Global Variables
 version = '6.0.1'
@@ -3125,7 +3107,7 @@ def open_settings_window():
     ttk.Checkbutton(overlay_tab, text="Show top-3 medal emotes", variable=overlay_show_medals_var).grid(row=7, column=0, sticky="w", pady=(6, 2), columnspan=2)
     ttk.Checkbutton(overlay_tab, text="Compact row spacing", variable=overlay_compact_rows_var).grid(row=8, column=0, sticky="w", pady=(0, 2), columnspan=2)
     ttk.Checkbutton(overlay_tab, text="Horizontal ticker layout (1080x100)", variable=overlay_horizontal_layout_var).grid(row=9, column=0, sticky="w", pady=(0, 2), columnspan=2)
-    ttk.Checkbutton(overlay_tab, text="Enable modern dashboard window (pywebview)", variable=modern_dashboard_enabled_var).grid(row=10, column=0, sticky="w", pady=(4, 2), columnspan=2)
+    ttk.Checkbutton(overlay_tab, text="Enable modern dashboard window", variable=modern_dashboard_enabled_var).grid(row=10, column=0, sticky="w", pady=(4, 2), columnspan=2)
 
     tilt_overlay_frame = ttk.LabelFrame(overlay_tab, text="Tilt Overlay", style="Card.TLabelframe")
     tilt_overlay_frame.grid(row=11, column=0, columnspan=2, sticky="ew", pady=(10, 0))
@@ -3471,34 +3453,59 @@ class ModernDashboardController:
     def _is_viewer_running(self):
         return self.viewer_process is not None and self.viewer_process.poll() is None
 
+    def _find_modern_browser_runtime(self):
+        if sys.platform.startswith('win'):
+            candidates = ['msedge', 'chrome', 'brave', 'chromium']
+        elif sys.platform == 'darwin':
+            candidates = ['Microsoft Edge', 'Google Chrome', 'Brave Browser', 'Chromium']
+        else:
+            candidates = ['microsoft-edge', 'google-chrome', 'brave-browser', 'chromium', 'chromium-browser']
+
+        for candidate in candidates:
+            path = shutil.which(candidate)
+            if path:
+                return path
+
+        return None
+
+    def _open_in_external_browser_runtime(self):
+        runtime = self._find_modern_browser_runtime()
+        if not runtime:
+            return False
+
+        args = [runtime, f'--app={self.browser_url}', '--new-window']
+        try:
+            self.viewer_process = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            runtime_name = os.path.basename(runtime)
+            self._set_status(f'Modern dashboard opened in {runtime_name} app window.')
+            return True
+        except Exception:
+            return False
+
+    def _open_in_default_browser(self):
+        try:
+            webbrowser.open(self.browser_url)
+            self._set_status('Modern dashboard opened in your default browser tab.')
+            return True
+        except Exception:
+            return False
+
     def start(self):
         if not is_modern_dashboard_enabled():
             self._set_status('Modern dashboard disabled in settings.')
-            return
-
-        if load_pywebview_module() is None:
-            details = '' if pywebview_import_error is None else f' ({pywebview_import_error})'
-            self._set_status(f'Modern dashboard unavailable: install pywebview in this Python environment{details}.')
             return
 
         if self._is_viewer_running():
             self._set_status('Modern dashboard window already open.')
             return
 
-        script = (
-            "import sys\n"
-            "import webview\n"
-            "url = sys.argv[1]\n"
-            "webview.create_window('MyStats Modern Dashboard', url, width=1320, height=860, resizable=True)\n"
-            "webview.start(gui='tkinter')\n"
-        )
+        if self._open_in_external_browser_runtime():
+            return
 
-        try:
-            self.viewer_process = subprocess.Popen([sys.executable, '-c', script, self.browser_url])
-            self._set_status('Modern dashboard opened in pywebview window.')
-        except Exception as error:
-            self.viewer_process = None
-            self._set_status(f'Modern dashboard failed to open: {error}')
+        if self._open_in_default_browser():
+            return
+
+        self._set_status('Modern dashboard unavailable: install Edge, Chrome, Brave, or Chromium.')
 
     def shutdown(self):
         if not self._is_viewer_running():
@@ -3674,7 +3681,7 @@ def build_main_content(parent):
 
     ttk.Label(
         modern_dashboard_tab,
-        text="Modern dashboard (pywebview) for Season Quests, Rivals, and MyCycle",
+        text="Modern dashboard window for Season Quests, Rivals, and MyCycle",
         style="Small.TLabel"
     ).pack(anchor="w", padx=8, pady=(8, 4))
 
