@@ -17,6 +17,7 @@ const themes = {
   sunset: { text: '#fff0fa', accent: '#ffc575', panelBase: '38,10,31', panel2Base: '81,20,63' },
   forest: { text: '#e9ffed', accent: '#7afec3', panelBase: '9,25,19', panel2Base: '17,64,47' },
   mono: { text: '#f4f6ff', accent: '#d2dcff', panelBase: '17,20,33', panel2Base: '40,46,72' },
+  violethearts: { text: '#fff3ff', accent: '#9fd6ff', panelBase: '43,14,58', panel2Base: '121,41,148' },
 };
 
 let refreshTimer = null;
