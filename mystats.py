@@ -185,6 +185,70 @@ def get_chat_max_names():
     return min(25, max(3, value))
 
 
+def get_api_season_number(default='67'):
+    """Map the stored app season to the PixelByPixel API season parameter."""
+    raw_season = str(config.get_setting('season') or '').strip()
+    season_digits = ''.join(ch for ch in raw_season if ch.isdigit())
+    return season_digits or default
+
+
+def fetch_pixelbypixel_leaderboard(statistic_name):
+    season_number = get_api_season_number()
+    api_url = (
+        "https://pixelbypixel.studio/api/leaderboards"
+        f"?offset=0&statisticName={statistic_name}&seasonNumber={season_number}"
+    )
+    response = requests.get(api_url, timeout=15)
+    response.raise_for_status()
+
+    data = response.json()
+    leaderboard_data = data.get("Leaderboard", []) if isinstance(data, dict) else []
+    if not isinstance(leaderboard_data, list):
+        return []
+    return leaderboard_data
+
+
+def refresh_tilt_lifetime_xp_from_leaderboard():
+    """Populate Starting Lifetime XP from TiltedExpertise for the configured channel."""
+    channel_name = (config.get_setting('CHANNEL') or '').strip().lower().lstrip('@')
+    if not channel_name:
+        return
+
+    try:
+        leaderboard_data = fetch_pixelbypixel_leaderboard("TiltedExpertise")
+    except requests.RequestException as exc:
+        print(f"Could not refresh TiltedExpertise value: {exc}")
+        return
+
+    def normalize_name(value):
+        return str(value or '').strip().lower().lstrip('@')
+
+    for record in leaderboard_data:
+        if not isinstance(record, dict):
+            continue
+
+        identity_candidates = [
+            record.get('DisplayName'),
+            record.get('UserName'),
+            record.get('Username'),
+            record.get('ChannelName'),
+            record.get('TwitchName'),
+        ]
+        if channel_name not in {normalize_name(candidate) for candidate in identity_candidates if candidate}:
+            continue
+
+        stat_value = record.get('StatValue', 0)
+        try:
+            parsed_stat_value = str(max(0, int(float(stat_value))))
+        except (TypeError, ValueError):
+            return
+
+        if config.get_setting('tilt_lifetime_base_xp') != parsed_stat_value:
+            config.set_setting('tilt_lifetime_base_xp', parsed_stat_value, persistent=True)
+            print(f"Tilt Starting Lifetime XP auto-set from API: {parsed_stat_value}")
+        return
+
+
 def get_tilt_output_directory():
     output_directory = os.path.join(os.path.expanduser("~\\AppData\\Local\\MyStats\\"), "TiltedOutputFiles")
     os.makedirs(output_directory, exist_ok=True)
@@ -5203,6 +5267,7 @@ def startup(text_widget):
     config.set_setting('data_sync', 'yes', persistent=False)
     create_results_files()
     ver_season_only()
+    refresh_tilt_lifetime_xp_from_leaderboard()
     load_additional_settings()
     write_overlays()
     update_config_labels()
@@ -5340,38 +5405,55 @@ class Bot(commands.Bot):
                                    ' | Races Today: ' + format(int(config.get_setting('totalcounttoday')), ',') +
                                    ' | https://mystats.camwow.tv')
 
+    async def send_pixelbypixel_top10(self, ctx, statistic_name, sort_by_stat=False):
+        try:
+            leaderboard_data = fetch_pixelbypixel_leaderboard(statistic_name)
+        except requests.RequestException as exc:
+            print(f"Failed to fetch data: {exc}")
+            await ctx.channel.send("Failed to pull leaderboard, please try again")
+            return
+
+        if sort_by_stat:
+            def get_stat_sort_value(record):
+                try:
+                    return int(float(record.get("StatValue", 0)))
+                except (AttributeError, TypeError, ValueError):
+                    return 0
+
+            leaderboard_data = sorted(
+                leaderboard_data,
+                key=get_stat_sort_value,
+                reverse=True
+            )
+
+        top_10_records = leaderboard_data[:10]
+        if not top_10_records:
+            await ctx.channel.send("No leaderboard data available right now.")
+            return
+
+        leaderboard_message = ""
+        emotes = {1: " 🥇", 2: " 🥈", 3: " 🥉"}
+        for rank, record in enumerate(top_10_records, start=1):
+            emote = emotes.get(rank, "")
+            display_name = record.get("DisplayName") or record.get("UserName") or "Unknown"
+            try:
+                stat_value = format(int(float(record.get("StatValue", 0))), ",")
+            except (TypeError, ValueError):
+                stat_value = "0"
+            leaderboard_message += f"{emote} {rank}. {display_name} - {stat_value}\n"
+
+        await ctx.channel.send(
+            leaderboard_message + " | View the full leaderboard at: https://pixelbypixel.studio/hub"
+        )
+
     @commands.command(name='mostop10')
     async def mostop10(self, ctx):
-        api_url = (
-            "https://pixelbypixel.studio/api/leaderboards"
-            f"?offset=0&statisticName=Season_XP&seasonNumber={config.get_setting('season')}"
-        )
-        response = requests.get(api_url)
+        await self.send_pixelbypixel_top10(ctx, statistic_name="Season_XP", sort_by_stat=False)
 
-        if response.status_code == 200:
-            # The response now has {"Version": ..., "Leaderboard": [...]}.
-            data = response.json()
-
-            # Grab the Leaderboard array from the dictionary
-            leaderboard_data = data["Leaderboard"]  # This is now a list
-
-            # Slice the top 10
-            top_10_records = leaderboard_data[:10]
-
-            leaderboard_message = ""
-            emotes = {1: " 🥇", 2: " 🥈", 3: " 🥉"}
-            for rank, record in enumerate(top_10_records, start=1):
-                emote = emotes.get(rank, "")
-                stat_value = format(record["StatValue"], ",")
-                display_name = record["DisplayName"]
-                leaderboard_message += f"{emote} {rank}. {display_name} - {stat_value}\n"
-
-            await ctx.channel.send(
-                leaderboard_message + " | View the full leaderboard at: https://pixelbypixel.studio/hub"
-            )
-        else:
-            print(f"Failed to fetch data: {response.status_code}")
-            await ctx.channel.send("Failed to pull leaderboard, please try again")
+    @commands.command(name='top10xp')
+    async def top10xp(self, ctx):
+        refresh_tilt_lifetime_xp_from_leaderboard()
+        await self.send_pixelbypixel_top10(ctx, statistic_name="TiltedExpertise", sort_by_stat=True)
 
 
     # @commands.command(name='myenergy')
