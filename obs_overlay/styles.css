@@ -65,7 +65,7 @@ body.top3-active .header-stats {
   border-radius: 16px;
   background: rgba(127, 216, 255, 0.14);
   border: 1px solid rgba(127, 216, 255, 0.35);
-  font-size: calc(0.98rem * var(--text-scale));
+  font-size: calc(1.04rem * var(--text-scale));
   font-weight: 700;
   line-height: 1.15;
   gap: 3px;
@@ -73,7 +73,7 @@ body.top3-active .header-stats {
 
 .pill-title {
   display: block;
-  font-size: calc(1.12rem * var(--text-scale));
+  font-size: calc(1.18rem * var(--text-scale));
   font-weight: 700;
   color: var(--muted);
   text-transform: uppercase;
@@ -83,7 +83,7 @@ body.top3-active .header-stats {
 
 .pill-value {
   display: block;
-  font-size: calc(1.38rem * var(--text-scale));
+  font-size: calc(1.46rem * var(--text-scale));
   font-weight: 800;
   color: var(--text);
   line-height: 1;
@@ -505,7 +505,7 @@ body.horizontal-layout .pill {
 body.horizontal-layout .pill-title {
   display: block;
   margin: 0;
-  font-size: calc(0.28rem * var(--text-scale));
+  font-size: calc(0.34rem * var(--text-scale));
   letter-spacing: 0.02em;
   line-height: 1.05;
   white-space: normal;
@@ -515,7 +515,7 @@ body.horizontal-layout .pill-title {
 body.horizontal-layout .pill-value {
   display: block;
   margin: 0;
-  font-size: calc(0.45rem * var(--text-scale));
+  font-size: calc(0.55rem * var(--text-scale));
   line-height: 1;
 }
 
