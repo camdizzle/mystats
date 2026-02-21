@@ -1862,6 +1862,7 @@ def _overlay_recent_race_payload(race_file):
                     'placement': placement,
                     'name': (row[2] or '').strip() or (row[1] or '').strip(),
                     'points': _safe_int(row[3]),
+                    'finished': not (len(row) >= 8 and str(row[7]).strip().lower() == 'true'),
                 })
     except Exception:
         return {'rows': [], 'top3_rows': [], 'race_key': None, 'race_type': None, 'race_timestamp': None, 'is_recent': False}
@@ -1872,7 +1873,7 @@ def _overlay_recent_race_payload(race_file):
     latest_group = race_groups[-1]
     latest_rows = sorted(latest_group['rows'], key=lambda r: r['placement'])
     top10_rows = latest_rows[:10]
-    top3_rows = latest_rows[:3]
+    top3_rows = [row for row in latest_rows if row.get('finished', True)][:3]
 
     race_time = latest_group['parsed_ts']
     is_recent = False

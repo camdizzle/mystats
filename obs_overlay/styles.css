@@ -252,25 +252,38 @@ body.top3-active #leaderboard li.leaderboard-section-title,
 
 body.top3-active #leaderboard,
 #leaderboard.is-top3-mode {
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
-  gap: 8px;
-  align-content: center;
+  gap: 10px;
+  align-items: stretch;
   padding: 4px 2px;
 }
 
 body.top3-active #leaderboard li.top3-card,
 #leaderboard.is-top3-mode li.top3-card {
   display: grid;
-  grid-template-columns: minmax(106px, auto) 1fr auto;
+  grid-template-columns: minmax(120px, auto) minmax(0, 1fr);
+  grid-template-areas:
+    'rank name'
+    'rank points';
   align-items: center;
-  column-gap: 10px;
+  column-gap: 12px;
+  row-gap: 6px;
   text-align: left;
-  padding: 8px 10px;
+  min-height: 0;
+  flex: 1;
+  padding: 10px 12px;
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 12px;
   background: linear-gradient(165deg, rgba(255,255,255,0.16), rgba(255,255,255,0.05));
   box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08), 0 14px 26px rgba(0, 0, 0, 0.34);
   animation: popIn 420ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+body.top3-active #leaderboard li.top3-card.is-hidden,
+#leaderboard.is-top3-mode li.top3-card.is-hidden {
+  display: none;
 }
 
 body.top3-active #leaderboard li.top3-card--1,
@@ -294,6 +307,7 @@ body.top3-active #leaderboard li.top3-card--3,
 
 body.top3-active .top3-rank,
 #leaderboard.is-top3-mode .top3-rank {
+  grid-area: rank;
   font-size: calc(1.7rem * var(--text-scale));
   font-weight: 900;
   letter-spacing: 0.04em;
@@ -301,15 +315,20 @@ body.top3-active .top3-rank,
   color: #ffe8a8;
   text-align: left;
   line-height: 1;
+  display: grid;
+  align-content: center;
+  justify-content: start;
+  height: 100%;
 }
 
 body.top3-active .top3-name,
 #leaderboard.is-top3-mode .top3-name {
+  grid-area: name;
   width: 100%;
-  font-size: calc(2.4rem * var(--text-scale));
+  font-size: calc(2.2rem * var(--text-scale));
   font-weight: 800;
-  line-height: 0.96;
-  text-align: center;
+  line-height: 1;
+  text-align: left;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -318,7 +337,9 @@ body.top3-active .top3-name,
 
 body.top3-active .top3-points,
 #leaderboard.is-top3-mode .top3-points {
-  font-size: calc(1.6rem * var(--text-scale));
+  grid-area: points;
+  justify-self: start;
+  font-size: calc(1.35rem * var(--text-scale));
   font-weight: 700;
   line-height: 1;
   white-space: nowrap;
@@ -384,8 +405,12 @@ body.compact-rows #leaderboard li.leaderboard-row {
 
   body.top3-active #leaderboard li.top3-card,
 #leaderboard.is-top3-mode li.top3-card {
-    grid-template-columns: minmax(86px, auto) 1fr auto;
+    grid-template-columns: minmax(88px, auto) minmax(0, 1fr);
+    grid-template-areas:
+      'rank name'
+      'rank points';
     column-gap: 7px;
+    row-gap: 4px;
     padding: 7px 8px;
   }
 
