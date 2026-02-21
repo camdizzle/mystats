@@ -234,6 +234,8 @@ function startLeaderboardAutoScroll() {
 function hasReachedEndOfStackedViews() {
   if (!leaderboard) return false;
 
+  if (!hasScrolledIntoFinalSection()) return false;
+
   const finalRow = leaderboard.querySelector('.leaderboard-row--final');
   if (!finalRow) return false;
 
@@ -244,6 +246,16 @@ function hasReachedEndOfStackedViews() {
   const listBounds = leaderboard.getBoundingClientRect();
   const finalRowBounds = finalRow.getBoundingClientRect();
   return finalRowBounds.bottom <= listBounds.bottom + 24;
+}
+
+function hasScrolledIntoFinalSection() {
+  if (!leaderboard) return false;
+  if (!sectionAnchors.length) return false;
+  if (sectionAnchors.length === 1) return true;
+
+  const finalSection = sectionAnchors[sectionAnchors.length - 1];
+  const viewportBottom = leaderboard.scrollTop + leaderboard.clientHeight;
+  return viewportBottom >= finalSection.offsetTop + 20;
 }
 
 function escapeHtml(value) {
