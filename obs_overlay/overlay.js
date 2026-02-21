@@ -225,7 +225,12 @@ function startLeaderboardAutoScroll() {
 
     if (leaderboard.scrollTop >= currentMax - 1) {
       leaderboard.scrollTop = currentMax;
-      showSplashView();
+
+      if (hasReachedEndOfStackedViews()) {
+        showSplashView();
+      } else {
+        leaderboardScrollPauseUntil = Date.now() + 800;
+      }
     }
   }, 32);
 }
@@ -253,9 +258,13 @@ function hasScrolledIntoFinalSection() {
   if (!sectionAnchors.length) return false;
   if (sectionAnchors.length === 1) return true;
 
-  const finalSection = sectionAnchors[sectionAnchors.length - 1];
+  const titles = leaderboard.querySelectorAll('.leaderboard-section-title');
+  const lastTitle = titles[titles.length - 1];
+  if (!lastTitle) return true;
+
+  const liveOffsetTop = lastTitle.offsetTop;
   const viewportBottom = leaderboard.scrollTop + leaderboard.clientHeight;
-  return viewportBottom >= finalSection.offsetTop + 20;
+  return viewportBottom >= liveOffsetTop + 20;
 }
 
 function escapeHtml(value) {
