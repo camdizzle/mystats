@@ -28,7 +28,7 @@ const themes = {
   sunset: { text: '#fff0fa', muted: '#ffb6d6', accent: '#ffc575', panelBase: '38,10,31', panel2Base: '81,20,63' },
   forest: { text: '#e9ffed', muted: '#9be6aa', accent: '#7afec3', panelBase: '9,25,19', panel2Base: '17,64,47' },
   mono: { text: '#f4f6ff', muted: '#c7cde4', accent: '#d2dcff', panelBase: '17,20,33', panel2Base: '40,46,72' },
-  violethearts: { text: '#fff3ff', muted: '#f0b8ff', accent: '#9fd6ff', panelBase: '43,14,58', panel2Base: '121,41,148' },
+  violethearts: { text: '#fff3ff', muted: '#f0b8ff', accent: '#9fd6ff', pointsAccent: '#ff4fd8', panelBase: '43,14,58', panel2Base: '121,41,148' },
 };
 
 let settings = { ...defaultSettings };
@@ -378,6 +378,7 @@ function applyTheme() {
   rootStyle.setProperty('--text', theme.text);
   rootStyle.setProperty('--muted', theme.muted);
   rootStyle.setProperty('--accent', theme.accent);
+  rootStyle.setProperty('--points-accent', theme.pointsAccent || theme.accent);
   rootStyle.setProperty('--panel', `rgba(${theme.panelBase}, ${settings.cardOpacity / 100})`);
   rootStyle.setProperty('--panel-2', `rgba(${theme.panel2Base}, ${Math.min(0.92, settings.cardOpacity / 100 + 0.08)})`);
   rootStyle.setProperty('--text-scale', String(settings.textScale / 100));
