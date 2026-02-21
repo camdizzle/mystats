@@ -45,6 +45,7 @@ from datetime import datetime, timedelta
 import atexit
 import socket
 import importlib.util
+import importlib
 import logging
 import subprocess
 
@@ -53,10 +54,24 @@ try:
 except ImportError:
     ttkbootstrap_module = None
 
-try:
-    import webview as pywebview_module
-except Exception:
-    pywebview_module = None
+pywebview_module = None
+pywebview_import_error = None
+
+
+def load_pywebview_module():
+    """Attempt to import pywebview and cache the result for dashboard launches."""
+    global pywebview_module, pywebview_import_error
+    if pywebview_module is not None:
+        return pywebview_module
+
+    try:
+        pywebview_module = importlib.import_module('webview')
+        pywebview_import_error = None
+    except Exception as import_error:
+        pywebview_module = None
+        pywebview_import_error = import_error
+
+    return pywebview_module
 
 # Global Variables
 version = '6.0.1'
@@ -3461,8 +3476,9 @@ class ModernDashboardController:
             self._set_status('Modern dashboard disabled in settings.')
             return
 
-        if pywebview_module is None:
-            self._set_status('Modern dashboard unavailable: install pywebview.')
+        if load_pywebview_module() is None:
+            details = '' if pywebview_import_error is None else f' ({pywebview_import_error})'
+            self._set_status(f'Modern dashboard unavailable: install pywebview in this Python environment{details}.')
             return
 
         if self._is_viewer_running():
