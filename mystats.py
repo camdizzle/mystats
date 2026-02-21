@@ -2682,6 +2682,10 @@ def open_settings_window():
     narrative_alert_grinder_var = tk.BooleanVar(value=is_chat_response_enabled("narrative_alert_grinder_enabled"))
     narrative_alert_winmilestone_var = tk.BooleanVar(value=is_chat_response_enabled("narrative_alert_winmilestone_enabled"))
     narrative_alert_leadchange_var = tk.BooleanVar(value=is_chat_response_enabled("narrative_alert_leadchange_enabled"))
+    race_narrative_alerts_var = tk.BooleanVar(value=is_chat_response_enabled("race_narrative_alerts_enabled"))
+    race_narrative_grinder_var = tk.BooleanVar(value=is_chat_response_enabled("race_narrative_grinder_enabled"))
+    race_narrative_winmilestone_var = tk.BooleanVar(value=is_chat_response_enabled("race_narrative_winmilestone_enabled"))
+    race_narrative_leadchange_var = tk.BooleanVar(value=is_chat_response_enabled("race_narrative_leadchange_enabled"))
 
     tilt_alerts_frame = ttk.LabelFrame(tilt_tab, text="Tilt Chat Alerts", style="Card.TLabelframe")
     tilt_alerts_frame.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 8))
@@ -2707,14 +2711,37 @@ def open_settings_window():
     narrative_alert_max_items_entry.grid(row=4, column=2, sticky="w", padx=(0, 10), pady=(2, 8))
     narrative_alert_max_items_entry.insert(0, config.get_setting("narrative_alert_max_items") or "3")
 
-    ttk.Label(tilt_tab, text="Max names announced (Race/Tilt)").grid(row=2, column=0, sticky="w", pady=(2, 4))
+    race_alerts_frame = ttk.LabelFrame(tilt_tab, text="Race Narrative Player Alerts", style="Card.TLabelframe")
+    race_alerts_frame.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+
+    ttk.Checkbutton(race_alerts_frame, text="Narrative Alerts", variable=race_narrative_alerts_var).grid(row=0, column=0, sticky="w", padx=10, pady=(8, 4))
+    ttk.Checkbutton(race_alerts_frame, text="Grinder milestones", variable=race_narrative_grinder_var).grid(row=1, column=0, sticky="w", padx=10, pady=2)
+    ttk.Checkbutton(race_alerts_frame, text="Win milestones", variable=race_narrative_winmilestone_var).grid(row=2, column=0, sticky="w", padx=10, pady=2)
+    ttk.Checkbutton(race_alerts_frame, text="Lead changes", variable=race_narrative_leadchange_var).grid(row=3, column=0, sticky="w", padx=10, pady=(2, 8))
+
+    ttk.Label(race_alerts_frame, text="Cooldown (races)", style="Small.TLabel").grid(row=1, column=1, sticky="w", padx=(12, 8), pady=(2, 2))
+    race_narrative_cooldown_entry = ttk.Entry(race_alerts_frame, width=8, justify='center')
+    race_narrative_cooldown_entry.grid(row=1, column=2, sticky="w", padx=(0, 10), pady=(2, 2))
+    race_narrative_cooldown_entry.insert(0, config.get_setting("race_narrative_alert_cooldown_races") or "3")
+
+    ttk.Label(race_alerts_frame, text="Min lead gap", style="Small.TLabel").grid(row=2, column=1, sticky="w", padx=(12, 8), pady=2)
+    race_narrative_min_gap_entry = ttk.Entry(race_alerts_frame, width=8, justify='center')
+    race_narrative_min_gap_entry.grid(row=2, column=2, sticky="w", padx=(0, 10), pady=2)
+    race_narrative_min_gap_entry.insert(0, config.get_setting("race_narrative_alert_min_lead_change_points") or "500")
+
+    ttk.Label(race_alerts_frame, text="Max items per alert", style="Small.TLabel").grid(row=3, column=1, sticky="w", padx=(12, 8), pady=(2, 8))
+    race_narrative_max_items_entry = ttk.Entry(race_alerts_frame, width=8, justify='center')
+    race_narrative_max_items_entry.grid(row=3, column=2, sticky="w", padx=(0, 10), pady=(2, 8))
+    race_narrative_max_items_entry.insert(0, config.get_setting("race_narrative_alert_max_items") or "3")
+
+    ttk.Label(tilt_tab, text="Max names announced (Race/Tilt)").grid(row=3, column=0, sticky="w", pady=(2, 4))
     max_name_values = [str(i) for i in range(3, 26)]
     selected_max_names = tk.StringVar(value=str(get_chat_max_names()))
     max_names_combobox = ttk.Combobox(tilt_tab, textvariable=selected_max_names, values=max_name_values, width=5, state="readonly")
-    max_names_combobox.grid(row=2, column=1, sticky="w", pady=(2, 4), padx=(8, 0))
+    max_names_combobox.grid(row=3, column=1, sticky="w", pady=(2, 4), padx=(8, 0))
 
     tiltsurvivors_frame = ttk.LabelFrame(tilt_tab, text="Tilt Command Thresholds", style="Card.TLabelframe")
-    tiltsurvivors_frame.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(6, 8))
+    tiltsurvivors_frame.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(6, 8))
     ttk.Label(tiltsurvivors_frame, text="!tiltsurvivors minimum levels participated", style="Small.TLabel").grid(row=0, column=0, sticky="w", padx=(10, 8), pady=(8, 4))
     tiltsurvivors_min_levels_entry = ttk.Entry(tiltsurvivors_frame, width=12, justify='center')
     tiltsurvivors_min_levels_entry.grid(row=0, column=1, sticky="w", padx=(0, 10), pady=(8, 4))
@@ -3034,6 +3061,16 @@ def open_settings_window():
         narrative_alert_min_gap_entry.insert(0, "500")
         narrative_alert_max_items_entry.delete(0, tk.END)
         narrative_alert_max_items_entry.insert(0, "3")
+        race_narrative_alerts_var.set(True)
+        race_narrative_grinder_var.set(True)
+        race_narrative_winmilestone_var.set(True)
+        race_narrative_leadchange_var.set(True)
+        race_narrative_cooldown_entry.delete(0, tk.END)
+        race_narrative_cooldown_entry.insert(0, "3")
+        race_narrative_min_gap_entry.delete(0, tk.END)
+        race_narrative_min_gap_entry.insert(0, "500")
+        race_narrative_max_items_entry.delete(0, tk.END)
+        race_narrative_max_items_entry.insert(0, "3")
         tiltsurvivors_min_levels_entry.delete(0, tk.END)
         tiltsurvivors_min_levels_entry.insert(0, "20")
         season_quests_enabled_var.set(True)
@@ -3119,6 +3156,13 @@ def open_settings_window():
         config.set_setting("narrative_alert_cooldown_races", narrative_alert_cooldown_entry.get(), persistent=True)
         config.set_setting("narrative_alert_min_lead_change_points", narrative_alert_min_gap_entry.get(), persistent=True)
         config.set_setting("narrative_alert_max_items", narrative_alert_max_items_entry.get(), persistent=True)
+        config.set_setting("race_narrative_alerts_enabled", str(race_narrative_alerts_var.get()), persistent=True)
+        config.set_setting("race_narrative_grinder_enabled", str(race_narrative_grinder_var.get()), persistent=True)
+        config.set_setting("race_narrative_winmilestone_enabled", str(race_narrative_winmilestone_var.get()), persistent=True)
+        config.set_setting("race_narrative_leadchange_enabled", str(race_narrative_leadchange_var.get()), persistent=True)
+        config.set_setting("race_narrative_alert_cooldown_races", race_narrative_cooldown_entry.get(), persistent=True)
+        config.set_setting("race_narrative_alert_min_lead_change_points", race_narrative_min_gap_entry.get(), persistent=True)
+        config.set_setting("race_narrative_alert_max_items", race_narrative_max_items_entry.get(), persistent=True)
         config.set_setting("tiltsurvivors_min_levels", tiltsurvivors_min_levels_entry.get(), persistent=True)
         config.set_setting("season_quests_enabled", str(season_quests_enabled_var.get()), persistent=True)
         config.set_setting("season_quest_target_races", season_quest_races_entry.get(), persistent=True)
@@ -3929,7 +3973,11 @@ class ConfigManager:
                                 'chat_mystats_command', 'chat_all_commands', 'chat_narrative_alerts',
                                 'narrative_alert_grinder_enabled', 'narrative_alert_winmilestone_enabled',
                                 'narrative_alert_leadchange_enabled', 'narrative_alert_cooldown_races',
-                                'narrative_alert_min_lead_change_points', 'narrative_alert_max_items', 'chat_max_names',
+                                'narrative_alert_min_lead_change_points', 'narrative_alert_max_items',
+                                'race_narrative_alerts_enabled', 'race_narrative_grinder_enabled',
+                                'race_narrative_winmilestone_enabled', 'race_narrative_leadchange_enabled',
+                                'race_narrative_alert_cooldown_races', 'race_narrative_alert_min_lead_change_points',
+                                'race_narrative_alert_max_items', 'chat_max_names',
                                 'season_quests_enabled', 'season_quest_target_races', 'season_quest_target_points',
                                 'season_quest_target_race_hs', 'season_quest_target_br_hs', 'season_quest_target_tilt_levels',
                                 'season_quest_target_tilt_tops', 'season_quest_target_tilt_points',
@@ -3959,6 +4007,13 @@ class ConfigManager:
             'narrative_alert_cooldown_races': '3',
             'narrative_alert_min_lead_change_points': '500',
             'narrative_alert_max_items': '3',
+            'race_narrative_alerts_enabled': 'True',
+            'race_narrative_grinder_enabled': 'True',
+            'race_narrative_winmilestone_enabled': 'True',
+            'race_narrative_leadchange_enabled': 'True',
+            'race_narrative_alert_cooldown_races': '3',
+            'race_narrative_alert_min_lead_change_points': '500',
+            'race_narrative_alert_max_items': '3',
             'chat_max_names': '25',
             'season_quests_enabled': 'True',
             'season_quest_target_races': '1000',
@@ -4058,6 +4113,7 @@ class ConfigManager:
                    "season_quest_target_tilt_levels", "season_quest_target_tilt_tops", "season_quest_target_tilt_points",
                    "rivals_min_races", "rivals_max_point_gap", "rivals_pair_count",
                    "narrative_alert_cooldown_races", "narrative_alert_min_lead_change_points", "narrative_alert_max_items",
+                   "race_narrative_alert_cooldown_races", "race_narrative_alert_min_lead_change_points", "race_narrative_alert_max_items",
                    "mycycle_min_place", "mycycle_max_place",
                    "overlay_rotation_seconds", "overlay_refresh_seconds", "overlay_card_opacity",
                    "overlay_text_scale", "overlay_server_port", "tilt_lifetime_base_xp",
@@ -5110,7 +5166,6 @@ class Bot(commands.Bot):
     @commands.command(name='rivals')
     async def rivals_command(self, ctx, username: str = None, compare_username: str = None):
         if not is_chat_response_enabled("rivals_enabled"):
-            await ctx.channel.send("Rivals are currently disabled.")
             return
 
         if username and compare_username:
@@ -5183,10 +5238,6 @@ class Bot(commands.Bot):
 
     @commands.command(name='h2h')
     async def head_to_head_command(self, ctx, user_a: str = None, user_b: str = None):
-        if not is_chat_response_enabled("rivals_enabled"):
-            await ctx.channel.send("Rivals are currently disabled.")
-            return
-
         if not user_a or not user_b:
             await ctx.channel.send("Usage: !h2h <user1> <user2>")
             return
@@ -5217,7 +5268,6 @@ class Bot(commands.Bot):
     @commands.command(name='mycycle')
     async def mycycle_command(self, ctx, username: str = None):
         if not is_chat_response_enabled('mycycle_enabled'):
-            await ctx.channel.send("MyCycle tracking is currently disabled.")
             return
 
         target_name = username or ctx.author.name
@@ -5251,7 +5301,6 @@ class Bot(commands.Bot):
     @commands.command(name='cyclestats')
     async def cyclestats_command(self, ctx, session_name: str = None):
         if not is_chat_response_enabled('mycycle_enabled'):
-            await ctx.channel.send("MyCycle tracking is currently disabled.")
             return
 
         stats = get_mycycle_cycle_stats(session_name)
@@ -5289,6 +5338,9 @@ class Bot(commands.Bot):
 
     @commands.command(name='myquests')
     async def myquests_command(self, ctx, username: str = None):
+        if not is_chat_response_enabled("season_quests_enabled"):
+            return
+
         lookup_name = username if username else ctx.author.name
         progress = get_user_quest_progress(lookup_name)
 
@@ -7372,30 +7424,30 @@ async def race(bot):
             messages = []
 
             narrative_messages = []
-            if not nowinner and is_chat_response_enabled("chat_narrative_alerts"):
+            if not nowinner and is_chat_response_enabled("race_narrative_alerts_enabled"):
                 winner_username = first_row[1]
                 winner_display_name = first_row[2] if first_row[1] != first_row[2].lower() else first_row[1]
 
-                if is_chat_response_enabled("narrative_alert_grinder_enabled"):
+                if is_chat_response_enabled("race_narrative_grinder_enabled"):
                     winner_race_count = race_counts.get(winner_username, 0)
                     if winner_race_count in (10, 25, 50, 75, 100):
                         narrative_messages.append(
                             f"🏁 Grinder: {winner_display_name} hit race #{winner_race_count} today"
                         )
 
-                if is_chat_response_enabled("narrative_alert_winmilestone_enabled"):
+                if is_chat_response_enabled("race_narrative_winmilestone_enabled"):
                     winner_win_count = wins_by_player.get(winner_username, 0)
                     if winner_win_count in (3, 5, 10, 15):
                         narrative_messages.append(
                             f"🏆 Win Milestone: {winner_display_name} reached win #{winner_win_count} today"
                         )
 
-                if is_chat_response_enabled("narrative_alert_leadchange_enabled") and points_by_player:
+                if is_chat_response_enabled("race_narrative_leadchange_enabled") and points_by_player:
                     sorted_points = sorted(points_by_player.items(), key=lambda item: item[1], reverse=True)
                     leader_username, leader_points = sorted_points[0]
                     second_place_points = sorted_points[1][1] if len(sorted_points) > 1 else 0
                     lead_gap = leader_points - second_place_points
-                    min_lead_gap = max(0, get_int_setting("narrative_alert_min_lead_change_points", 500))
+                    min_lead_gap = max(0, get_int_setting("race_narrative_alert_min_lead_change_points", 500))
                     tied_for_lead = len(sorted_points) > 1 and second_place_points == leader_points
                     if (not tied_for_lead and leader_username != current_daily_points_leader
                             and lead_gap >= min_lead_gap):
@@ -7409,8 +7461,8 @@ async def race(bot):
                         )
 
             if narrative_messages:
-                cooldown_races = max(0, get_int_setting("narrative_alert_cooldown_races", 3))
-                max_items = max(1, get_int_setting("narrative_alert_max_items", 3))
+                cooldown_races = max(0, get_int_setting("race_narrative_alert_cooldown_races", 3))
+                max_items = max(1, get_int_setting("race_narrative_alert_max_items", 3))
                 if cooldown_races == 0 or (t_count - last_narrative_alert_race_count) >= cooldown_races:
                     combined_narrative = "📣 Player Alerts: " + " | ".join(narrative_messages[:max_items]) + "."
                     messages.append(combined_narrative)
