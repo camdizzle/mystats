@@ -44,35 +44,12 @@ from dateutil import parser
 from datetime import datetime, timedelta
 import atexit
 import socket
-import importlib.util
-import importlib
 import logging
-import shutil
-import subprocess
 
 try:
     import ttkbootstrap as ttkbootstrap_module
 except ImportError:
     ttkbootstrap_module = None
-
-pywebview_module = None
-pywebview_import_error = None
-
-
-def load_pywebview_module():
-    """Attempt to import pywebview and cache the result for dashboard launches."""
-    global pywebview_module, pywebview_import_error
-    if pywebview_module is not None:
-        return pywebview_module
-
-    try:
-        pywebview_module = importlib.import_module('webview')
-        pywebview_import_error = None
-    except Exception as import_error:
-        pywebview_module = None
-        pywebview_import_error = import_error
-
-    return pywebview_module
 
 # Global Variables
 version = '6.0.1'
@@ -93,9 +70,6 @@ mycycle_next_button = None
 mycycle_export_button = None
 mycycle_home_session_ids = []
 mycycle_home_session_index = 0
-modern_dashboard_status_label = None
-modern_dashboard_container = None
-modern_dashboard_controller = None
 root = None
 
 logging.basicConfig(
@@ -1038,6 +1012,22 @@ def get_mycycle_sessions(include_inactive=True):
         return sessions, default_id
     return [s for s in sessions if s.get('active', True)], default_id
 
+
+
+
+def _get_mycycle_home_session_ids():
+    active_sessions, default_session_id = get_mycycle_sessions(include_inactive=False)
+    session_ids = [session['id'] for session in active_sessions]
+
+    if not session_ids:
+        return [], None
+
+    preferred_session_id = config.get_setting('mycycle_primary_session_id') or default_session_id
+    if preferred_session_id not in session_ids:
+        preferred_session_id = session_ids[0]
+
+    ordered_session_ids = [preferred_session_id] + [sid for sid in session_ids if sid != preferred_session_id]
+    return ordered_session_ids, preferred_session_id
 
 def create_mycycle_session(session_name, created_by='streamer'):
     with MYCYCLE_LOCK:
@@ -3122,11 +3112,9 @@ def open_settings_window():
     overlay_show_medals_var = tk.BooleanVar(value=str(config.get_setting("overlay_show_medals") or "True") == "True")
     overlay_compact_rows_var = tk.BooleanVar(value=str(config.get_setting("overlay_compact_rows") or "False") == "True")
     overlay_horizontal_layout_var = tk.BooleanVar(value=str(config.get_setting("overlay_horizontal_layout") or "False") == "True")
-    modern_dashboard_enabled_var = tk.BooleanVar(value=str(config.get_setting("modern_dashboard_enabled") or "True") == "True")
     ttk.Checkbutton(overlay_tab, text="Show top-3 medal emotes", variable=overlay_show_medals_var).grid(row=7, column=0, sticky="w", pady=(6, 2), columnspan=2)
     ttk.Checkbutton(overlay_tab, text="Compact row spacing", variable=overlay_compact_rows_var).grid(row=8, column=0, sticky="w", pady=(0, 2), columnspan=2)
     ttk.Checkbutton(overlay_tab, text="Horizontal ticker layout (1080x100)", variable=overlay_horizontal_layout_var).grid(row=9, column=0, sticky="w", pady=(0, 2), columnspan=2)
-    ttk.Checkbutton(overlay_tab, text="Enable modern dashboard window", variable=modern_dashboard_enabled_var).grid(row=10, column=0, sticky="w", pady=(4, 2), columnspan=2)
 
     tilt_overlay_frame = ttk.LabelFrame(overlay_tab, text="Tilt Overlay", style="Card.TLabelframe")
     tilt_overlay_frame.grid(row=11, column=0, columnspan=2, sticky="ew", pady=(10, 0))
@@ -3237,7 +3225,6 @@ def open_settings_window():
         overlay_show_medals_var.set(True)
         overlay_compact_rows_var.set(False)
         overlay_horizontal_layout_var.set(False)
-        modern_dashboard_enabled_var.set(True)
         tilt_lifetime_base_entry.delete(0, tk.END)
         tilt_lifetime_base_entry.insert(0, "0")
         tilt_overlay_theme_var.set("midnight")
@@ -3311,7 +3298,6 @@ def open_settings_window():
         config.set_setting("overlay_show_medals", str(overlay_show_medals_var.get()), persistent=True)
         config.set_setting("overlay_compact_rows", str(overlay_compact_rows_var.get()), persistent=True)
         config.set_setting("overlay_horizontal_layout", str(overlay_horizontal_layout_var.get()), persistent=True)
-        config.set_setting("modern_dashboard_enabled", str(modern_dashboard_enabled_var.get()), persistent=True)
         config.set_setting("tilt_lifetime_base_xp", tilt_lifetime_base_entry.get(), persistent=True)
         config.set_setting("tilt_overlay_theme", tilt_overlay_theme_var.get(), persistent=True)
         config.set_setting("tilt_scroll_step_px", tilt_scroll_step_entry.get(), persistent=True)
@@ -3376,9 +3362,6 @@ def on_close():
     if bot is not None and getattr(bot, "loop", None) is not None:
         asyncio.run_coroutine_threadsafe(bot.shutdown(), bot.loop)
 
-    if modern_dashboard_controller is not None:
-        modern_dashboard_controller.shutdown()
-
     # Destroy the Tkinter windows after a delay
     def close_windows():
         sys.stdout = sys.__stdout__  # Reset stdout
@@ -3392,6 +3375,11 @@ def on_close():
 
 def open_url(event):
     webbrowser.open("https://mystats.camwow.tv")
+
+
+def open_dashboard():
+    dashboard_url = f"http://127.0.0.1:{_load_overlay_server_port()}/dashboard"
+    webbrowser.open_new(dashboard_url)
 
 
 def build_stats_sidebar(parent):
@@ -3435,6 +3423,15 @@ def build_stats_sidebar(parent):
     )
     settings_button.grid(row=0, column=0, padx=5, pady=(0, 5))
 
+    dashboards_button = ttk.Button(
+        button_frame,
+        text="Dashboards",
+        command=open_dashboard,
+        width=button_width,
+        style="Primary.TButton"
+    )
+    dashboards_button.grid(row=1, column=0, padx=5, pady=(0, 5))
+
     events_button = ttk.Button(
         button_frame,
         text="Events",
@@ -3451,216 +3448,10 @@ def build_stats_sidebar(parent):
     url_label.bind("<Button-1>", open_url)
 
 
-def is_modern_dashboard_enabled():
-    setting_value = config.get_setting('modern_dashboard_enabled')
-    if setting_value is None:
-        return True
-    return str(setting_value).strip().lower() == 'true'
-
-
-class ModernDashboardController:
-    def __init__(self, parent_frame, status_label):
-        self.parent_frame = parent_frame
-        self.status_label = status_label
-        self.browser_url = f"http://127.0.0.1:{_load_overlay_server_port()}/dashboard"
-        self.viewer_process = None
-        self.webview_window = None
-        self.webview_thread = None
-        self.webview_hwnd = None
-        self.host_hwnd = None
-        self.running = False
-
-    def _set_status(self, message):
-        if self.status_label and self.status_label.winfo_exists():
-            self.status_label.config(text=message)
-
-    def _set_status_threadsafe(self, message):
-        if self.parent_frame and self.parent_frame.winfo_exists():
-            self.parent_frame.after(0, lambda: self._set_status(message))
-
-    def _is_viewer_running(self):
-        if self.running:
-            return True
-        return self.viewer_process is not None and self.viewer_process.poll() is None
-
-    def _find_modern_browser_runtime(self):
-        if sys.platform.startswith('win'):
-            candidates = ['msedge', 'chrome', 'brave', 'chromium']
-        elif sys.platform == 'darwin':
-            candidates = ['Microsoft Edge', 'Google Chrome', 'Brave Browser', 'Chromium']
-        else:
-            candidates = ['microsoft-edge', 'google-chrome', 'brave-browser', 'chromium', 'chromium-browser']
-
-        for candidate in candidates:
-            path = shutil.which(candidate)
-            if path:
-                return path
-
-        return None
-
-    def _open_in_external_browser_runtime(self):
-        runtime = self._find_modern_browser_runtime()
-        if not runtime:
-            return False
-
-        args = [runtime, f'--app={self.browser_url}', '--new-window']
-        try:
-            self.viewer_process = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            runtime_name = os.path.basename(runtime)
-            self._set_status(f'Modern dashboard opened in {runtime_name} app window.')
-            return True
-        except Exception:
-            return False
-
-    def _sync_embedded_size(self):
-        if not self.webview_hwnd or not self.parent_frame or not self.parent_frame.winfo_exists():
-            return
-
-        try:
-            import ctypes
-            width = max(200, self.parent_frame.winfo_width())
-            height = max(200, self.parent_frame.winfo_height())
-            ctypes.windll.user32.MoveWindow(int(self.webview_hwnd), 0, 0, int(width), int(height), True)
-        except Exception:
-            pass
-
-    def _on_parent_resize(self, _event=None):
-        self._sync_embedded_size()
-
-    def _attach_native_window_to_frame(self, window):
-        try:
-            import ctypes
-
-            if not self.parent_frame or not self.parent_frame.winfo_exists():
-                return False
-
-            self.parent_frame.update_idletasks()
-            host_hwnd = int(self.parent_frame.winfo_id())
-            native = getattr(window, 'native', None)
-
-            child_hwnd = None
-            if native is None:
-                return False
-
-            if hasattr(native, 'Handle'):
-                child_hwnd = int(native.Handle)
-            elif hasattr(native, 'handle'):
-                child_hwnd = int(native.handle)
-            elif isinstance(native, int):
-                child_hwnd = int(native)
-
-            if not child_hwnd:
-                return False
-
-            GWL_STYLE = -16
-            WS_CHILD = 0x40000000
-            WS_VISIBLE = 0x10000000
-            WS_POPUP = 0x80000000
-            SW_SHOW = 5
-
-            current_style = ctypes.windll.user32.GetWindowLongW(child_hwnd, GWL_STYLE)
-            new_style = (current_style | WS_CHILD | WS_VISIBLE) & ~WS_POPUP
-            ctypes.windll.user32.SetWindowLongW(child_hwnd, GWL_STYLE, new_style)
-            ctypes.windll.user32.SetParent(child_hwnd, host_hwnd)
-            ctypes.windll.user32.ShowWindow(child_hwnd, SW_SHOW)
-
-            self.host_hwnd = host_hwnd
-            self.webview_hwnd = child_hwnd
-            self.running = True
-
-            self._set_status_threadsafe('Modern dashboard embedded in the MyStats tab.')
-            if self.parent_frame and self.parent_frame.winfo_exists():
-                self.parent_frame.after(100, self._sync_embedded_size)
-                self.parent_frame.after(350, self._sync_embedded_size)
-                self.parent_frame.bind('<Configure>', self._on_parent_resize)
-            return True
-        except Exception as error:
-            self._set_status_threadsafe(f'Embedding failed ({error}). Opening external browser window...')
-            return False
-
-    def _launch_embedded_pywebview(self):
-        if load_pywebview_module() is None:
-            details = '' if pywebview_import_error is None else f' ({pywebview_import_error})'
-            self._set_status_threadsafe(f'Modern dashboard unavailable: install pywebview in this Python environment{details}.')
-            return
-
-        if not sys.platform.startswith('win'):
-            self._set_status_threadsafe('Embedded pywebview is only supported on Windows in MyStats. Opening external browser window...')
-            self.running = False
-            return
-
-        try:
-            self.webview_window = pywebview_module.create_window(
-                'MyStats Modern Dashboard',
-                self.browser_url,
-                width=1200,
-                height=800,
-                resizable=True,
-                hidden=False,
-            )
-
-            def on_shown():
-                attached = self._attach_native_window_to_frame(self.webview_window)
-                if not attached:
-                    self.running = False
-
-            self.webview_window.events.shown += on_shown
-            pywebview_module.start(debug=False)
-        except Exception as error:
-            self.running = False
-            self._set_status_threadsafe(f'Modern dashboard failed to launch pywebview: {error}')
-
-    def start(self):
-        if not is_modern_dashboard_enabled():
-            self._set_status('Modern dashboard disabled in settings.')
-            return
-
-        if self._is_viewer_running():
-            self._set_status('Modern dashboard window already open.')
-            return
-
-        if load_pywebview_module() is not None:
-            self.running = True
-            self.webview_thread = threading.Thread(target=self._launch_embedded_pywebview, daemon=True)
-            self.webview_thread.start()
-            self._set_status('Opening modern dashboard in embedded pywebview...')
-            return
-
-        if self._open_in_external_browser_runtime():
-            return
-
-        self._set_status('Modern dashboard unavailable: install pywebview or Edge/Chrome/Brave/Chromium.')
-
-    def shutdown(self):
-        self.running = False
-
-        if self.webview_window is not None:
-            try:
-                self.webview_window.destroy()
-            except Exception:
-                pass
-            finally:
-                self.webview_window = None
-
-        if not (self.viewer_process is not None and self.viewer_process.poll() is None):
-            return
-
-        try:
-            self.viewer_process.terminate()
-            self.viewer_process.wait(timeout=2)
-        except Exception:
-            try:
-                self.viewer_process.kill()
-            except Exception:
-                pass
-        finally:
-            self.viewer_process = None
-
 def build_main_content(parent):
     global chatbot_label, login_button, text_area
     global season_quest_tree, rivals_tree, mycycle_tree, mycycle_session_label
     global mycycle_session_position_label, mycycle_prev_button, mycycle_next_button, mycycle_export_button
-    global modern_dashboard_status_label, modern_dashboard_container, modern_dashboard_controller
 
     top_frame1 = ttk.Frame(parent, style="App.TFrame")
     top_frame1.grid(row=0, column=1, sticky='ew', padx=(5, 0))
@@ -3685,13 +3476,11 @@ def build_main_content(parent):
     season_quests_tab = ttk.Frame(notebook, style="App.TFrame")
     rivals_tab = ttk.Frame(notebook, style="App.TFrame")
     mycycle_tab = ttk.Frame(notebook, style="App.TFrame")
-    modern_dashboard_tab = ttk.Frame(notebook, style="App.TFrame")
 
     notebook.add(console_tab, text="Console")
     notebook.add(season_quests_tab, text="Season Quests")
     notebook.add(rivals_tab, text="Rivals")
     notebook.add(mycycle_tab, text="MyCycle")
-    notebook.add(modern_dashboard_tab, text="Dashboards (Modern)")
 
     console_tab.grid_rowconfigure(0, weight=1)
     console_tab.grid_columnconfigure(0, weight=1)
@@ -3815,32 +3604,6 @@ def build_main_content(parent):
     mycycle_tree.pack(side="left", fill="both", expand=True, padx=(8, 0), pady=(0, 8))
     mycycle_scrollbar.pack(side="right", fill="y", padx=(0, 8), pady=(0, 8))
 
-    ttk.Label(
-        modern_dashboard_tab,
-        text="Modern dashboard embedded view for Season Quests, Rivals, and MyCycle",
-        style="Small.TLabel"
-    ).pack(anchor="w", padx=8, pady=(8, 4))
-
-    modern_dashboard_status_label = ttk.Label(
-        modern_dashboard_tab,
-        text="Opening modern dashboard...",
-        style="Small.TLabel"
-    )
-    modern_dashboard_status_label.pack(anchor="w", padx=8, pady=(0, 6))
-
-    modern_dashboard_container = ttk.Frame(modern_dashboard_tab, style="App.TFrame")
-    modern_dashboard_container.pack(fill="both", expand=True)
-
-    modern_dashboard_controller = ModernDashboardController(modern_dashboard_container, modern_dashboard_status_label)
-
-    ttk.Button(
-        modern_dashboard_tab,
-        text="Open/Reload Modern Dashboard",
-        command=modern_dashboard_controller.start,
-        style="Primary.TButton"
-    ).pack(anchor="w", padx=8, pady=(0, 8))
-
-    parent.after(300, modern_dashboard_controller.start)
 
     refresh_main_leaderboards()
 
@@ -4484,6 +4247,7 @@ menu_bar.add_cascade(label="File", menu=file_menu)
 edit_menu = Menu(menu_bar, tearoff=0)
 edit_menu.add_command(label="Settings", command=open_settings)
 edit_menu.add_command(label="Events", command=open_events_window)
+edit_menu.add_command(label="Dashboards", command=open_dashboard)
 menu_bar.add_cascade(label="Edit", menu=edit_menu)
 
 # Create the Help menu
@@ -4531,8 +4295,7 @@ class ConfigManager:
                                 'overlay_card_opacity', 'overlay_text_scale', 'overlay_show_medals',
                                 'overlay_compact_rows', 'overlay_horizontal_layout', 'overlay_server_port', 'tilt_lifetime_base_xp',
                                 'tilt_overlay_theme', 'tilt_scroll_step_px', 'tilt_scroll_interval_ms',
-                                'tilt_scroll_pause_ms', 'tiltsurvivors_min_levels', 'tiltdeath_min_levels',
-                                'modern_dashboard_enabled'}
+                                'tilt_scroll_pause_ms', 'tiltsurvivors_min_levels', 'tiltdeath_min_levels'}
         self.transient_keys = set([])
         self.defaults = {
             'chat_br_results': 'True',
@@ -4599,8 +4362,7 @@ class ConfigManager:
             'tilt_scroll_interval_ms': '40',
             'tilt_scroll_pause_ms': '900',
             'tiltsurvivors_min_levels': '20',
-            'tiltdeath_min_levels': '20',
-            'modern_dashboard_enabled': 'True'
+            'tiltdeath_min_levels': '20'
         }
         self.load_settings()
 

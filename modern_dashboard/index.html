@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MyStats Modern Dashboard</title>
+  <title>MyStats Dashboard</title>
   <link rel="stylesheet" href="/dashboard/styles.css">
 </head>
 <body>
@@ -11,10 +11,16 @@
     <header class="topbar">
       <div>
         <h1>MyCycle Command Center</h1>
-        <p class="subhead">Live progress toward cycle completion</p>
+        <p class="subhead">Live progress toward cycle completion (browser + Flask)</p>
       </div>
       <span id="updated-at">Refreshing…</span>
     </header>
+
+    <section class="dashboard-nav">
+      <button class="dashboard-nav-btn dashboard-nav-btn--active" type="button">MyCycle</button>
+      <button class="dashboard-nav-btn" type="button" disabled>Season Quests (next)</button>
+      <button class="dashboard-nav-btn" type="button" disabled>Rivals (next)</button>
+    </section>
 
     <section class="mycycle-shell">
       <article class="summary-panel">
@@ -35,10 +41,6 @@
       </article>
     </section>
 
-    <section class="future-panels">
-      <article class="future-card">Season Quests dashboard card coming next</article>
-      <article class="future-card">Rivals dashboard card coming next</article>
-    </section>
   </main>
   <script src="/dashboard/dashboard.js"></script>
 </body>
