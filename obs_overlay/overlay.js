@@ -285,6 +285,7 @@ function renderCombinedRows(views) {
   showLeaderboardView();
   leaderboard.classList.remove('is-top3-mode');
   sectionAnchors = [];
+  const previousScrollTop = leaderboard.scrollTop;
 
   if (!Array.isArray(views) || !views.length) {
     leaderboard.innerHTML = '<li>No race data yet.</li>';
@@ -309,6 +310,11 @@ function renderCombinedRows(views) {
   }).join('');
 
   leaderboard.innerHTML = markup;
+
+  const maxScrollTop = Math.max(0, leaderboard.scrollHeight - leaderboard.clientHeight);
+  if (previousScrollTop > 0 && maxScrollTop > 0) {
+    leaderboard.scrollTop = Math.min(previousScrollTop, maxScrollTop);
+  }
 
   const renderedRows = Array.from(leaderboard.querySelectorAll('.leaderboard-row'));
   renderedRows.forEach((row) => row.classList.remove('leaderboard-row--final'));
