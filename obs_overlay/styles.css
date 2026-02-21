@@ -215,7 +215,7 @@ h1 {
 
 body.theme-violethearts #leaderboard li.leaderboard-row > span:last-child {
   background: transparent;
-  border-color: rgba(255, 79, 216, 0.45);
+  border: 0;
 }
 
 #leaderboard .leaderboard-gap {
