@@ -53,7 +53,7 @@ except ImportError:
     ttkbootstrap_module = None
 
 # Global Variables
-version = '6.0.0'
+version = '6.0.1'
 text_widget = None
 bot = None
 GLOBAL_SOCKET = None
@@ -160,11 +160,15 @@ def apply_theme(theme_name):
 
 
 def is_chat_response_enabled(setting_key):
-    setting_value = config.get_setting(setting_key)
+    cfg = globals().get("config")
+    if cfg is None:
+        return True
+
+    setting_value = cfg.get_setting(setting_key)
 
     # Backward compatibility for old setting name.
     if setting_value is None and setting_key == "chat_all_commands":
-        setting_value = config.get_setting("chat_mystats_command")
+        setting_value = cfg.get_setting("chat_mystats_command")
 
     if setting_value is None:
         return True
@@ -363,8 +367,12 @@ def write_tilt_output_files(values):
 
 
 def get_int_setting(setting_key, default=0):
+    cfg = globals().get("config")
+    if cfg is None:
+        return default
+
     try:
-        return int(config.get_setting(setting_key) or default)
+        return int(cfg.get_setting(setting_key) or default)
     except (TypeError, ValueError):
         return default
 
