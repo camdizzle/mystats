@@ -46,6 +46,7 @@ import atexit
 import socket
 import importlib.util
 import logging
+import subprocess
 
 try:
     import ttkbootstrap as ttkbootstrap_module
@@ -53,9 +54,9 @@ except ImportError:
     ttkbootstrap_module = None
 
 try:
-    from cefpython3 import cefpython as cef
-except ImportError:
-    cef = None
+    import webview as pywebview_module
+except Exception:
+    pywebview_module = None
 
 # Global Variables
 version = '6.0.1'
@@ -3109,7 +3110,7 @@ def open_settings_window():
     ttk.Checkbutton(overlay_tab, text="Show top-3 medal emotes", variable=overlay_show_medals_var).grid(row=7, column=0, sticky="w", pady=(6, 2), columnspan=2)
     ttk.Checkbutton(overlay_tab, text="Compact row spacing", variable=overlay_compact_rows_var).grid(row=8, column=0, sticky="w", pady=(0, 2), columnspan=2)
     ttk.Checkbutton(overlay_tab, text="Horizontal ticker layout (1080x100)", variable=overlay_horizontal_layout_var).grid(row=9, column=0, sticky="w", pady=(0, 2), columnspan=2)
-    ttk.Checkbutton(overlay_tab, text="Enable embedded modern dashboard (main app)", variable=modern_dashboard_enabled_var).grid(row=10, column=0, sticky="w", pady=(4, 2), columnspan=2)
+    ttk.Checkbutton(overlay_tab, text="Enable modern dashboard window (pywebview)", variable=modern_dashboard_enabled_var).grid(row=10, column=0, sticky="w", pady=(4, 2), columnspan=2)
 
     tilt_overlay_frame = ttk.LabelFrame(overlay_tab, text="Tilt Overlay", style="Card.TLabelframe")
     tilt_overlay_frame.grid(row=11, column=0, columnspan=2, sticky="ew", pady=(10, 0))
@@ -3445,83 +3446,57 @@ class ModernDashboardController:
     def __init__(self, parent_frame, status_label):
         self.parent_frame = parent_frame
         self.status_label = status_label
-        self.browser_frame = tk.Frame(parent_frame, bg='#121212')
-        self.browser_frame.pack(fill='both', expand=True, padx=8, pady=(0, 8))
-        self.browser = None
         self.browser_url = f"http://127.0.0.1:{_load_overlay_server_port()}/dashboard"
-        self._message_loop_active = False
+        self.viewer_process = None
 
     def _set_status(self, message):
         if self.status_label and self.status_label.winfo_exists():
             self.status_label.config(text=message)
+
+    def _is_viewer_running(self):
+        return self.viewer_process is not None and self.viewer_process.poll() is None
 
     def start(self):
         if not is_modern_dashboard_enabled():
             self._set_status('Modern dashboard disabled in settings.')
             return
 
-        if cef is None:
-            self._set_status('Modern dashboard unavailable: install cefpython3.')
+        if pywebview_module is None:
+            self._set_status('Modern dashboard unavailable: install pywebview.')
             return
 
-        if sys.platform == 'darwin':
-            self._set_status('Modern dashboard currently targets Windows/Linux builds.')
+        if self._is_viewer_running():
+            self._set_status('Modern dashboard window already open.')
             return
+
+        script = (
+            "import sys\n"
+            "import webview\n"
+            "url = sys.argv[1]\n"
+            "webview.create_window('MyStats Modern Dashboard', url, width=1320, height=860, resizable=True)\n"
+            "webview.start(gui='tkinter')\n"
+        )
 
         try:
-            settings = {'multi_threaded_message_loop': False}
-            cef.Initialize(settings=settings)
-            self.browser = cef.CreateBrowserSync(
-                window_info=self._create_window_info(),
-                url=self.browser_url,
-            )
-            self._set_status('Modern dashboard live (Chromium embedded).')
-            self._pump_message_loop()
+            self.viewer_process = subprocess.Popen([sys.executable, '-c', script, self.browser_url])
+            self._set_status('Modern dashboard opened in pywebview window.')
         except Exception as error:
-            self._set_status(f'Modern dashboard failed to initialize: {error}')
-
-    def _create_window_info(self):
-        window_info = cef.WindowInfo()
-        self.browser_frame.update_idletasks()
-        rect = [0, 0, max(200, self.browser_frame.winfo_width()), max(200, self.browser_frame.winfo_height())]
-
-        if sys.platform.startswith('win'):
-            window_info.SetAsChild(self.browser_frame.winfo_id(), rect)
-        else:
-            window_info.SetAsChild(self.browser_frame.winfo_id(), rect)
-        return window_info
-
-    def _pump_message_loop(self):
-        if self._message_loop_active:
-            return
-
-        self._message_loop_active = True
-
-        def _tick():
-            top_level = self.parent_frame.winfo_toplevel()
-            if not top_level or not top_level.winfo_exists():
-                return
-            try:
-                cef.MessageLoopWork()
-            except Exception:
-                return
-            top_level.after(10, _tick)
-
-        self.parent_frame.winfo_toplevel().after(10, _tick)
+            self.viewer_process = None
+            self._set_status(f'Modern dashboard failed to open: {error}')
 
     def shutdown(self):
-        if cef is None:
+        if not self._is_viewer_running():
             return
         try:
-            if self.browser:
-                self.browser.CloseBrowser(True)
-                self.browser = None
-            cef.Shutdown()
+            self.viewer_process.terminate()
+            self.viewer_process.wait(timeout=2)
         except Exception:
-            pass
-
-
-
+            try:
+                self.viewer_process.kill()
+            except Exception:
+                pass
+        finally:
+            self.viewer_process = None
 def build_main_content(parent):
     global chatbot_label, login_button, text_area
     global season_quest_tree, rivals_tree, mycycle_tree, mycycle_session_label
@@ -3683,13 +3658,13 @@ def build_main_content(parent):
 
     ttk.Label(
         modern_dashboard_tab,
-        text="Embedded Chromium dashboard for Season Quests, Rivals, and MyCycle",
+        text="Modern dashboard (pywebview) for Season Quests, Rivals, and MyCycle",
         style="Small.TLabel"
     ).pack(anchor="w", padx=8, pady=(8, 4))
 
     modern_dashboard_status_label = ttk.Label(
         modern_dashboard_tab,
-        text="Starting embedded dashboard...",
+        text="Opening modern dashboard...",
         style="Small.TLabel"
     )
     modern_dashboard_status_label.pack(anchor="w", padx=8, pady=(0, 6))
@@ -3698,6 +3673,14 @@ def build_main_content(parent):
     modern_dashboard_container.pack(fill="both", expand=True)
 
     modern_dashboard_controller = ModernDashboardController(modern_dashboard_container, modern_dashboard_status_label)
+
+    ttk.Button(
+        modern_dashboard_tab,
+        text="Open Modern Dashboard Window",
+        command=modern_dashboard_controller.start,
+        style="Primary.TButton"
+    ).pack(anchor="w", padx=8, pady=(0, 8))
+
     parent.after(300, modern_dashboard_controller.start)
 
     refresh_main_leaderboards()
