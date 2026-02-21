@@ -3497,15 +3497,16 @@ class ModernDashboardController:
         self._message_loop_active = True
 
         def _tick():
-            if not root or not root.winfo_exists():
+            top_level = self.parent_frame.winfo_toplevel()
+            if not top_level or not top_level.winfo_exists():
                 return
             try:
                 cef.MessageLoopWork()
             except Exception:
                 return
-            root.after(10, _tick)
+            top_level.after(10, _tick)
 
-        root.after(10, _tick)
+        self.parent_frame.winfo_toplevel().after(10, _tick)
 
     def shutdown(self):
         if cef is None:
@@ -3696,7 +3697,7 @@ def build_main_content(parent):
     modern_dashboard_container.pack(fill="both", expand=True)
 
     modern_dashboard_controller = ModernDashboardController(modern_dashboard_container, modern_dashboard_status_label)
-    root.after(300, modern_dashboard_controller.start)
+    parent.after(300, modern_dashboard_controller.start)
 
     refresh_main_leaderboards()
 
