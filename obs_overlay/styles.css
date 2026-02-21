@@ -446,9 +446,9 @@ html:has(body.horizontal-layout) {
 }
 
 body.horizontal-layout {
-  width: min(1920px, 100vw);
+  width: min(4000px, 100vw);
   min-width: 0;
-  max-width: 1920px;
+  max-width: 4000px;
   height: auto;
   min-height: 0;
   max-height: none;
@@ -456,18 +456,18 @@ body.horizontal-layout {
 }
 
 body.horizontal-layout .card {
-  width: 1920px;
-  min-width: 1920px;
-  max-width: 1920px;
+  width: 4000px;
+  min-width: 4000px;
+  max-width: 4000px;
   height: auto;
   min-height: 0;
   max-height: none;
   margin: 0;
-  padding: 5px 6px;
-  border-radius: 12px;
+  padding: 2.5px 3px;
+  border-radius: 6px;
   display: grid;
-  grid-template-columns: 320px minmax(0, 1fr);
-  gap: 4px;
+  grid-template-columns: 160px minmax(0, 1fr);
+  gap: 2px;
   align-items: stretch;
   overflow: hidden;
 }
@@ -480,7 +480,7 @@ body.horizontal-layout .splash-screen {
 body.horizontal-layout .header-stats {
   margin-top: 0;
   margin-bottom: 0;
-  gap: 2px;
+  gap: 1px;
   min-height: 0;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   grid-template-rows: minmax(0, 1fr);
@@ -491,9 +491,9 @@ body.horizontal-layout .header-stats {
 }
 
 body.horizontal-layout .pill {
-  padding: 3px 6px;
-  border-radius: 9px;
-  gap: 2px;
+  padding: 1.5px 3px;
+  border-radius: 4.5px;
+  gap: 1px;
   height: auto;
   display: flex;
   flex-direction: column;
@@ -505,7 +505,7 @@ body.horizontal-layout .pill {
 body.horizontal-layout .pill-title {
   display: block;
   margin: 0;
-  font-size: calc(0.56rem * var(--text-scale));
+  font-size: calc(0.28rem * var(--text-scale));
   letter-spacing: 0.02em;
   line-height: 1.05;
   white-space: normal;
@@ -515,14 +515,14 @@ body.horizontal-layout .pill-title {
 body.horizontal-layout .pill-value {
   display: block;
   margin: 0;
-  font-size: calc(0.9rem * var(--text-scale));
+  font-size: calc(0.45rem * var(--text-scale));
   line-height: 1;
 }
 
 body.horizontal-layout .board-shell {
   margin-top: 0;
-  padding: 3px 4px;
-  border-radius: 10px;
+  padding: 1.5px 2px;
+  border-radius: 5px;
   height: auto;
   min-height: 0;
   min-width: 0;
@@ -533,10 +533,10 @@ body.horizontal-layout #leaderboard {
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 7px;
+  gap: 3.5px;
   overflow-x: auto;
   overflow-y: hidden;
-  padding: 0 2px;
+  padding: 0 1px;
   scrollbar-width: none;
 }
 
@@ -549,41 +549,41 @@ body.horizontal-layout #leaderboard li.leaderboard-section-title {
   top: auto;
   white-space: nowrap;
   margin: 0;
-  font-size: calc(1rem * var(--text-scale));
-  padding: 7px 10px;
+  font-size: calc(0.5rem * var(--text-scale));
+  padding: 3.5px 5px;
 }
 
 body.horizontal-layout #leaderboard li.leaderboard-row {
   display: inline-grid;
-  grid-template-columns: 38px minmax(150px, auto) auto;
-  gap: 6px;
+  grid-template-columns: 19px minmax(75px, auto) auto;
+  gap: 3px;
   align-items: center;
   min-width: max-content;
   white-space: nowrap;
-  font-size: calc(0.94rem * var(--text-scale));
-  padding: 5px 8px;
-  border-radius: 10px;
+  font-size: calc(0.47rem * var(--text-scale));
+  padding: 2.5px 4px;
+  border-radius: 5px;
 }
 
 body.horizontal-layout #leaderboard li.leaderboard-row > span:first-child {
-  padding: 5px 0;
-  border-radius: 8px;
+  padding: 2.5px 0;
+  border-radius: 4px;
 }
 
 
 body.horizontal-layout #leaderboard li.leaderboard-row > span:last-child {
-  font-size: calc(1.2rem * var(--text-scale));
+  font-size: calc(0.6rem * var(--text-scale));
   font-weight: 800;
 }
 
 body.horizontal-layout #leaderboard .leaderboard-gap {
-  width: 10px;
+  width: 5px;
   height: 1px;
 }
 
 body.horizontal-layout #leaderboard .leaderboard-end-spacer {
-  width: 1920px;
-  min-width: 1920px;
+  width: 4000px;
+  min-width: 4000px;
   height: 1px;
   padding: 0;
   border: 0;
