@@ -30,7 +30,8 @@ body {
   opacity: .65;
 }
 
-.mycycle-shell { display: grid; grid-template-columns: 280px 1fr; gap: 10px; min-height: 76vh; }
+.mycycle-shell,
+.season-shell { display: grid; grid-template-columns: 280px 1fr; gap: 10px; min-height: 76vh; }
 .summary-panel, .leaderboard-panel {
   border-radius: 12px;
   border: 1px solid rgba(126, 169, 245, .25);
@@ -112,3 +113,36 @@ body {
 .subline { margin-top: 5px; color: #9bb1d6; font-size: .72rem; }
 
 .empty { opacity: .75; font-style: italic; }
+.is-hidden { display: none; }
+
+.quest-targets {
+  display: grid;
+  gap: 6px;
+}
+.quest-target {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid rgba(127,216,255,.25);
+  border-radius: 8px;
+  padding: 6px 8px;
+  background: rgba(17, 28, 55, .66);
+  font-size: .73rem;
+  color: #d4e6ff;
+}
+.quest-target strong {
+  color: #8be8ae;
+  font-size: .75rem;
+}
+.quest-target--disabled strong {
+  color: #9bb1d6;
+}
+
+.quest-metrics {
+  margin-top: 6px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 4px;
+  font-size: .71rem;
+  color: #b4c9ee;
+}
