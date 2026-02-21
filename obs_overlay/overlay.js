@@ -156,13 +156,15 @@ function updateBoardTitleFromScroll() {
 function renderTop3Rows(rows = [], title = '🔥 Latest Race Podium 🔥') {
   if (!leaderboard) return;
 
-  const safeRows = rows.slice(0, 3);
+  const safeRows = rows.filter((row) => row?.finished !== false).slice(0, 3);
   document.body.classList.add('top3-active');
   leaderboard.classList.add('is-top3-mode');
   leaderboard.scrollTop = 0;
 
   const titleMarkup = `<li class="leaderboard-section-title" data-section-title="${escapeHtml(title)}">${escapeHtml(title)}</li>`;
-  const cardsMarkup = safeRows.map((r, idx) => {
+  const cardsMarkup = [0, 1, 2].map((idx) => {
+    const r = safeRows[idx];
+    if (!r) return `<li class="top3-card top3-card--${idx + 1} is-hidden" aria-hidden="true"></li>`;
     const medal = ['🥇', '🥈', '🥉'][idx] || getPlacementEmote(r.placement);
     return `<li class="top3-card top3-card--${idx + 1}"><span class="top3-rank">${escapeHtml(medal)} #${escapeHtml(r.placement)}</span><span class="top3-name">${escapeHtml(r.name)}</span><span class="top3-points">${fmt(r.points)} pts</span></li>`;
   }).join('');
@@ -171,13 +173,14 @@ function renderTop3Rows(rows = [], title = '🔥 Latest Race Podium 🔥') {
 }
 
 function showTop3ForTenSeconds(top3View) {
-  if (!top3View?.rows?.length || top3IsShowing) return;
+  const finishedRows = (top3View?.rows || []).filter((row) => row?.finished !== false);
+  if (!finishedRows.length || top3IsShowing) return;
 
   top3IsShowing = true;
   const top3Title = top3View.title || '🔥 Latest Race Podium 🔥';
   stopLeaderboardAutoScroll();
   clearCycleRestartTimer();
-  renderTop3Rows(top3View.rows, top3Title);
+  renderTop3Rows(finishedRows, top3Title);
 
   if (top3ShowTimeout) clearTimeout(top3ShowTimeout);
   top3ShowTimeout = setTimeout(() => {
