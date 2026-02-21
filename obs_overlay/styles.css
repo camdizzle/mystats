@@ -466,8 +466,8 @@ body.horizontal-layout .card {
   padding: 5px 6px;
   border-radius: 12px;
   display: grid;
-  grid-template-columns: 340px minmax(0, 1fr);
-  gap: 6px;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: 4px;
   align-items: stretch;
   overflow: hidden;
 }
@@ -480,17 +480,19 @@ body.horizontal-layout .splash-screen {
 body.horizontal-layout .header-stats {
   margin-top: 0;
   margin-bottom: 0;
-  gap: 3px;
+  gap: 2px;
   min-height: 0;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   grid-template-rows: minmax(0, 1fr);
+  justify-content: start;
+  justify-items: start;
   align-content: center;
   align-items: stretch;
 }
 
 body.horizontal-layout .pill {
-  padding: 4px 7px;
-  border-radius: 10px;
+  padding: 3px 6px;
+  border-radius: 9px;
   gap: 2px;
   height: auto;
   display: flex;
@@ -503,7 +505,7 @@ body.horizontal-layout .pill {
 body.horizontal-layout .pill-title {
   display: block;
   margin: 0;
-  font-size: calc(0.62rem * var(--text-scale));
+  font-size: calc(0.56rem * var(--text-scale));
   letter-spacing: 0.02em;
   line-height: 1.05;
   white-space: normal;
@@ -513,7 +515,7 @@ body.horizontal-layout .pill-title {
 body.horizontal-layout .pill-value {
   display: block;
   margin: 0;
-  font-size: calc(1rem * var(--text-scale));
+  font-size: calc(0.9rem * var(--text-scale));
   line-height: 1;
 }
 
@@ -531,7 +533,7 @@ body.horizontal-layout #leaderboard {
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 10px;
+  gap: 7px;
   overflow-x: auto;
   overflow-y: hidden;
   padding: 0 2px;
@@ -553,14 +555,19 @@ body.horizontal-layout #leaderboard li.leaderboard-section-title {
 
 body.horizontal-layout #leaderboard li.leaderboard-row {
   display: inline-grid;
-  grid-template-columns: 42px minmax(165px, auto) auto;
-  gap: 7px;
+  grid-template-columns: 38px minmax(150px, auto) auto;
+  gap: 6px;
   align-items: center;
   min-width: max-content;
   white-space: nowrap;
-  font-size: calc(1rem * var(--text-scale));
-  padding: 6px 9px;
+  font-size: calc(0.94rem * var(--text-scale));
+  padding: 5px 8px;
   border-radius: 10px;
+}
+
+body.horizontal-layout #leaderboard li.leaderboard-row > span:first-child {
+  padding: 5px 0;
+  border-radius: 8px;
 }
 
 
