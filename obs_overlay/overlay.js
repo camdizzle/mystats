@@ -43,6 +43,7 @@ let leaderboardScrollRetryTimer = null;
 let sectionAnchors = [];
 let lastRenderedViewsKey = '';
 let cycleRestartTimer = null;
+let horizontalLoopWidth = 0;
 let lastRaceKey = null;
 let hasHydratedOnce = false;
 let top3IsShowing = false;
@@ -183,6 +184,16 @@ function updateBoardTitleFromScroll() {
   if (!sectionAnchors.length || !leaderboard || top3IsShowing) return;
 }
 
+function syncHorizontalLoopWidth() {
+  if (!leaderboard || !settings.horizontalLayout) {
+    horizontalLoopWidth = 0;
+    return;
+  }
+
+  const loopBoundary = leaderboard.querySelector('.leaderboard-loop-boundary');
+  horizontalLoopWidth = loopBoundary ? loopBoundary.offsetLeft : 0;
+}
+
 function renderTop3Rows(rows = [], title = '🔥 Latest Race Podium 🔥') {
   if (!leaderboard) return;
 
@@ -266,9 +277,9 @@ function startLeaderboardAutoScroll() {
 
     if (settings.horizontalLayout) {
       leaderboard.scrollLeft += 1.4;
-      if (leaderboard.scrollLeft >= currentMax - 1) {
-        leaderboard.scrollLeft = currentMax;
-        leaderboardScrollPauseUntil = Date.now() + 850;
+      if (horizontalLoopWidth > 0 && leaderboard.scrollLeft >= horizontalLoopWidth) {
+        leaderboard.scrollLeft -= horizontalLoopWidth;
+      } else if (leaderboard.scrollLeft >= currentMax - 1) {
         leaderboard.scrollLeft = 0;
       }
       return;
@@ -396,9 +407,14 @@ function renderCombinedRows(views) {
     return `${gap}${sectionTitleMarkup}${rowMarkup}`;
   }).join('');
 
-  leaderboard.innerHTML = `${markup}<li class="leaderboard-end-spacer" aria-hidden="true"></li>`;
+  const loopMessageMarkup = '<li class="leaderboard-loop-message">!mystats, !commands</li>';
+  const firstCycleMarkup = `${markup}<li class="leaderboard-gap" aria-hidden="true"></li>${loopMessageMarkup}`;
+  leaderboard.innerHTML = settings.horizontalLayout
+    ? `${firstCycleMarkup}<li class="leaderboard-loop-boundary" aria-hidden="true"></li>${firstCycleMarkup}`
+    : `${markup}<li class="leaderboard-end-spacer" aria-hidden="true"></li>`;
 
   syncEndSpacerHeight();
+  syncHorizontalLoopWidth();
 
   const maxScrollTop = Math.max(0, leaderboard.scrollHeight - leaderboard.clientHeight);
   const maxScrollLeft = Math.max(0, leaderboard.scrollWidth - leaderboard.clientWidth);
@@ -545,6 +561,7 @@ async function refresh() {
 
 window.addEventListener('resize', () => {
   syncEndSpacerHeight();
+  syncHorizontalLoopWidth();
   sectionAnchors = Array.from(leaderboard?.querySelectorAll('.leaderboard-section-title') || []).map((el) => ({
     title: el.dataset.sectionTitle || 'Top Results',
     offsetTop: el.offsetTop,
