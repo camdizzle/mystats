@@ -16,11 +16,19 @@ function escapeHtml(value) {
     .replace(/'/g, '&#039;');
 }
 
+function uniqueParticipantCount(rows = []) {
+  return new Set(
+    rows
+      .map((row) => String(row?.display_name || row?.username || '').trim())
+      .filter(Boolean)
+  ).size;
+}
+
 function renderKpis(rows = []) {
   const kpiHost = el('summary-kpis');
   if (!kpiHost) return;
 
-  const racers = rows.length;
+  const racers = uniqueParticipantCount(rows);
   const cycles = rows.reduce((acc, row) => acc + Number(row.cycles_completed || 0), 0);
   const nearComplete = rows.filter((row) => Number(row.progress_total || 0) - Number(row.progress_hits || 0) <= 2).length;
 
@@ -119,7 +127,7 @@ function renderSeasonKpis(rows = []) {
   const host = el('season-kpis');
   if (!host) return;
 
-  const racers = rows.length;
+  const racers = uniqueParticipantCount(rows);
   const completedAll = rows.filter((row) => Number(row.active_quests || 0) > 0 && Number(row.completed || 0) >= Number(row.active_quests || 0)).length;
   const totalCompleted = rows.reduce((acc, row) => acc + Number(row.completed || 0), 0);
 
