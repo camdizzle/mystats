@@ -2151,6 +2151,7 @@ def _build_main_dashboard_payload():
 
     season_quest_rows = get_quest_completion_leaderboard(limit=100)
     season_quest_targets = get_season_quest_targets()
+    tilt_totals, tilt_users = get_tilt_season_stats()
 
     return {
         'updated_at': datetime.now().isoformat(timespec='seconds'),
@@ -2164,6 +2165,11 @@ def _build_main_dashboard_payload():
             'session': mycycle_session or {},
             'rows': mycycle_rows,
             'settings': get_mycycle_settings(),
+        },
+        'tilt': {
+            'totals': tilt_totals,
+            'deaths_today': get_int_setting('tilt_total_deaths_today', 0),
+            'participants': len(tilt_users),
         },
     }
 
