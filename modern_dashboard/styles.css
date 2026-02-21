@@ -12,6 +12,24 @@ body {
 .subhead { margin: 2px 0 0; color: #9eb4dd; font-size: .88rem; }
 #updated-at { color: #9bb1d6; font-size: .82rem; }
 
+
+.dashboard-nav { display: flex; gap: 8px; margin-bottom: 12px; }
+.dashboard-nav-btn {
+  border-radius: 999px;
+  border: 1px solid rgba(127,216,255,.3);
+  background: rgba(255,255,255,.06);
+  color: #d4e4ff;
+  padding: 6px 10px;
+  font-size: .78rem;
+}
+.dashboard-nav-btn--active {
+  border-color: rgba(61,220,143,.45);
+  color: #8cf1b8;
+}
+.dashboard-nav-btn:disabled {
+  opacity: .65;
+}
+
 .mycycle-shell { display: grid; grid-template-columns: 300px 1fr; gap: 12px; min-height: 70vh; }
 .summary-panel, .leaderboard-panel {
   border-radius: 14px;
@@ -63,6 +81,4 @@ body {
 .pos-chip--miss { background: rgba(241,118,118,.16); border-color: rgba(241,118,118,.35); color: #ffb2b2; }
 .subline { margin-top: 7px; color: #9bb1d6; font-size: .78rem; }
 
-.future-panels { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
-.future-card { border: 1px dashed rgba(127,216,255,.3); border-radius: 12px; padding: 10px; color: #9bb1d6; }
 .empty { opacity: .75; font-style: italic; }
