@@ -321,7 +321,8 @@ function renderCombinedRows(views) {
   leaderboard.innerHTML = markup;
 
   const maxScrollTop = Math.max(0, leaderboard.scrollHeight - leaderboard.clientHeight);
-  if (previousScrollTop > 0 && maxScrollTop > 0) {
+  const scrollerIsActive = Boolean(leaderboardScrollTimer || leaderboardScrollRetryTimer);
+  if (!scrollerIsActive && previousScrollTop > 0 && maxScrollTop > 0) {
     leaderboard.scrollTop = Math.min(previousScrollTop, maxScrollTop);
   }
 
