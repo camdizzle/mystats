@@ -1243,6 +1243,7 @@ def get_mycycle_leaderboard(limit=200, session_id=None):
             'missing_places': missing_places,
             'current_cycle_races': int(row.get('current_cycle_races', 0)),
             'last_cycle_races': int(row.get('last_cycle_races', 0)),
+            'last_cycle_completed_at': row.get('last_cycle_completed_at'),
         })
     leaderboard.sort(key=lambda r: (-r['cycles_completed'], -r['progress_hits'], r['current_cycle_races']))
     return session, leaderboard[:limit]
