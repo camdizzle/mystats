@@ -709,17 +709,19 @@ def open_quest_completion_window(parent_window):
     ttk.Label(popup, text="Season Quest Completion Leaderboard", style="Small.TLabel").pack(anchor="w", padx=12, pady=(10, 4))
 
     columns = ("rank", "user", "completed", "races", "points", "race_hs", "br_hs", "tilt_levels", "tilt_tops", "tilt_points")
-    tree = ttk.Treeview(popup, columns=columns, show="headings", height=18)
-    tree.heading("rank", text="#")
-    tree.heading("user", text="User")
-    tree.heading("completed", text="Completed")
-    tree.heading("races", text="Races")
-    tree.heading("points", text="Points")
-    tree.heading("race_hs", text="Race HS")
-    tree.heading("br_hs", text="BR HS")
-    tree.heading("tilt_levels", text="Tilt Lvls")
-    tree.heading("tilt_tops", text="Top Tiltees")
-    tree.heading("tilt_points", text="Tilt Pts")
+    popup_style = "QuestCompletionPopup.Treeview"
+    app_style.configure(f"{popup_style}.Heading", padding=LEADERBOARD_HEADING_PADDING)
+    tree = ttk.Treeview(popup, columns=columns, show="headings", height=18, style=popup_style)
+    tree.heading("rank", text="#", anchor=LEADERBOARD_HEADING_ANCHOR)
+    tree.heading("user", text="User", anchor=LEADERBOARD_HEADING_ANCHOR)
+    tree.heading("completed", text="Completed", anchor=LEADERBOARD_HEADING_ANCHOR)
+    tree.heading("races", text="Races", anchor=LEADERBOARD_HEADING_ANCHOR)
+    tree.heading("points", text="Points", anchor=LEADERBOARD_HEADING_ANCHOR)
+    tree.heading("race_hs", text="Race HS", anchor=LEADERBOARD_HEADING_ANCHOR)
+    tree.heading("br_hs", text="BR HS", anchor=LEADERBOARD_HEADING_ANCHOR)
+    tree.heading("tilt_levels", text="Tilt Lvls", anchor=LEADERBOARD_HEADING_ANCHOR)
+    tree.heading("tilt_tops", text="Top Tiltees", anchor=LEADERBOARD_HEADING_ANCHOR)
+    tree.heading("tilt_points", text="Tilt Pts", anchor=LEADERBOARD_HEADING_ANCHOR)
 
     tree.column("rank", width=50, anchor="center")
     tree.column("user", width=190, anchor="w")
@@ -883,13 +885,15 @@ def open_rivalries_window(parent_window):
     ).pack(anchor="w", padx=12, pady=(10, 4))
 
     columns = ("rank", "player_a", "stats_a", "player_b", "stats_b", "gap")
-    tree = ttk.Treeview(popup, columns=columns, show="headings", height=18)
-    tree.heading("rank", text="#")
-    tree.heading("player_a", text="Player A")
-    tree.heading("stats_a", text="A Stats")
-    tree.heading("player_b", text="Player B")
-    tree.heading("stats_b", text="B Stats")
-    tree.heading("gap", text="Gap")
+    popup_style = "RivalsPopup.Treeview"
+    app_style.configure(f"{popup_style}.Heading", padding=LEADERBOARD_HEADING_PADDING)
+    tree = ttk.Treeview(popup, columns=columns, show="headings", height=18, style=popup_style)
+    tree.heading("rank", text="#", anchor=LEADERBOARD_HEADING_ANCHOR)
+    tree.heading("player_a", text="Player A", anchor=LEADERBOARD_HEADING_ANCHOR)
+    tree.heading("stats_a", text="A Stats", anchor=LEADERBOARD_HEADING_ANCHOR)
+    tree.heading("player_b", text="Player B", anchor=LEADERBOARD_HEADING_ANCHOR)
+    tree.heading("stats_b", text="B Stats", anchor=LEADERBOARD_HEADING_ANCHOR)
+    tree.heading("gap", text="Gap", anchor=LEADERBOARD_HEADING_ANCHOR)
 
     tree.column("rank", width=45, anchor="center")
     tree.column("player_a", width=180, anchor="w")
@@ -918,6 +922,9 @@ def open_rivalries_window(parent_window):
 MYCYCLE_FILE_NAME = "mycycle_data.json"
 MYCYCLE_SESSION_PREFIX = "season_"
 MYCYCLE_LOCK = threading.Lock()
+
+LEADERBOARD_HEADING_PADDING = (8, 18)
+LEADERBOARD_HEADING_ANCHOR = "center"
 
 
 def _mycycle_file_path():
@@ -1433,13 +1440,13 @@ def open_mycycle_leaderboard_window(parent_window, initial_session_id=None):
     columns = ("rank", "user", "cycles", "progress", "placements_line1", "placements_line2", "cycle_races", "last_cycle")
     leaderboard_tree_style = "MyCycleLeaderboard.Treeview"
     app_style.configure(leaderboard_tree_style, rowheight=30)
-    app_style.configure(f"{leaderboard_tree_style}.Heading", padding=(8, 14))
+    app_style.configure(f"{leaderboard_tree_style}.Heading", padding=LEADERBOARD_HEADING_PADDING)
     tree = ttk.Treeview(popup, columns=columns, show="headings", height=22, style=leaderboard_tree_style)
     leaderboard_settings = get_mycycle_settings()
     show_second_placement_line = leaderboard_settings['max_place'] - leaderboard_settings['min_place'] + 1 > 10
 
     for col, text in (("rank", "#"), ("user", "User"), ("cycles", "Cycles"), ("progress", "Current\nProgress"), ("placements_line1", "Placements\n(1/2)"), ("placements_line2", "Placements\n(2/2)" if show_second_placement_line else ""), ("cycle_races", "Races in\nCurrent Cycle"), ("last_cycle", "Races in Last\nCompleted Cycle")):
-        tree.heading(col, text=text)
+        tree.heading(col, text=text, anchor=LEADERBOARD_HEADING_ANCHOR)
 
     tree.column("rank", width=50, anchor="center")
     tree.column("user", width=170, anchor="w")
@@ -3397,7 +3404,7 @@ def build_main_content(parent):
     )
     season_quest_style = "SeasonQuest.Treeview"
     app_style.configure(season_quest_style, rowheight=30)
-    app_style.configure(f"{season_quest_style}.Heading", padding=(8, 12))
+    app_style.configure(f"{season_quest_style}.Heading", padding=LEADERBOARD_HEADING_PADDING)
     season_quest_tree = ttk.Treeview(
         season_quests_tab,
         columns=season_quest_columns,
@@ -3405,16 +3412,16 @@ def build_main_content(parent):
         height=20,
         style=season_quest_style,
     )
-    season_quest_tree.heading("rank", text="#")
-    season_quest_tree.heading("user", text="Player")
-    season_quest_tree.heading("completed", text="Completed\nQuests")
-    season_quest_tree.heading("points", text="Season\nPoints")
-    season_quest_tree.heading("races", text="Season\nRaces")
-    season_quest_tree.heading("race_hs", text="Race\nHS")
-    season_quest_tree.heading("br_hs", text="BR\nHS")
-    season_quest_tree.heading("tilt_levels", text="Tilt\nLevels")
-    season_quest_tree.heading("tilt_tops", text="Top\nTiltees")
-    season_quest_tree.heading("tilt_points", text="Tilt\nPoints")
+    season_quest_tree.heading("rank", text="#", anchor=LEADERBOARD_HEADING_ANCHOR)
+    season_quest_tree.heading("user", text="Player", anchor=LEADERBOARD_HEADING_ANCHOR)
+    season_quest_tree.heading("completed", text="Completed\nQuests", anchor=LEADERBOARD_HEADING_ANCHOR)
+    season_quest_tree.heading("points", text="Season\nPoints", anchor=LEADERBOARD_HEADING_ANCHOR)
+    season_quest_tree.heading("races", text="Season\nRaces", anchor=LEADERBOARD_HEADING_ANCHOR)
+    season_quest_tree.heading("race_hs", text="Race\nHS", anchor=LEADERBOARD_HEADING_ANCHOR)
+    season_quest_tree.heading("br_hs", text="BR\nHS", anchor=LEADERBOARD_HEADING_ANCHOR)
+    season_quest_tree.heading("tilt_levels", text="Tilt\nLevels", anchor=LEADERBOARD_HEADING_ANCHOR)
+    season_quest_tree.heading("tilt_tops", text="Top\nTiltees", anchor=LEADERBOARD_HEADING_ANCHOR)
+    season_quest_tree.heading("tilt_points", text="Tilt\nPoints", anchor=LEADERBOARD_HEADING_ANCHOR)
     season_quest_tree.column("rank", width=45, anchor="center")
     season_quest_tree.column("user", width=150, anchor="w")
     season_quest_tree.column("completed", width=95, anchor="center")
@@ -3437,13 +3444,15 @@ def build_main_content(parent):
         style="Small.TLabel"
     ).pack(anchor="w", padx=8, pady=(8, 4))
     rivals_columns = ("rank", "player_a", "points_a", "player_b", "points_b", "gap")
-    rivals_tree = ttk.Treeview(rivals_tab, columns=rivals_columns, show="headings", height=20)
-    rivals_tree.heading("rank", text="#")
-    rivals_tree.heading("player_a", text="Player A")
-    rivals_tree.heading("points_a", text="A Points")
-    rivals_tree.heading("player_b", text="Player B")
-    rivals_tree.heading("points_b", text="B Points")
-    rivals_tree.heading("gap", text="Gap")
+    rivals_style = "RivalsHome.Treeview"
+    app_style.configure(f"{rivals_style}.Heading", padding=LEADERBOARD_HEADING_PADDING)
+    rivals_tree = ttk.Treeview(rivals_tab, columns=rivals_columns, show="headings", height=20, style=rivals_style)
+    rivals_tree.heading("rank", text="#", anchor=LEADERBOARD_HEADING_ANCHOR)
+    rivals_tree.heading("player_a", text="Player A", anchor=LEADERBOARD_HEADING_ANCHOR)
+    rivals_tree.heading("points_a", text="A Points", anchor=LEADERBOARD_HEADING_ANCHOR)
+    rivals_tree.heading("player_b", text="Player B", anchor=LEADERBOARD_HEADING_ANCHOR)
+    rivals_tree.heading("points_b", text="B Points", anchor=LEADERBOARD_HEADING_ANCHOR)
+    rivals_tree.heading("gap", text="Gap", anchor=LEADERBOARD_HEADING_ANCHOR)
     rivals_tree.column("rank", width=45, anchor="center")
     rivals_tree.column("player_a", width=180, anchor="w")
     rivals_tree.column("points_a", width=120, anchor="e")
@@ -3475,13 +3484,13 @@ def build_main_content(parent):
     mycycle_columns = ("rank", "user", "cycles", "progress", "placements_line1", "placements_line2", "cycle_races", "last_cycle")
     mycycle_style = "MyCycleHome.Treeview"
     app_style.configure(mycycle_style, rowheight=30)
-    app_style.configure(f"{mycycle_style}.Heading", padding=(8, 12))
+    app_style.configure(f"{mycycle_style}.Heading", padding=LEADERBOARD_HEADING_PADDING)
     mycycle_tree = ttk.Treeview(mycycle_tab, columns=mycycle_columns, show="headings", height=20, style=mycycle_style)
     leaderboard_settings = get_mycycle_settings()
     show_second_placement_line = leaderboard_settings['max_place'] - leaderboard_settings['min_place'] + 1 > 10
 
     for col, text in (("rank", "#"), ("user", "User"), ("cycles", "Cycles"), ("progress", "Current\nProgress"), ("placements_line1", "Placements\n(1/2)"), ("placements_line2", "Placements\n(2/2)" if show_second_placement_line else ""), ("cycle_races", "Races in\nCurrent Cycle"), ("last_cycle", "Races in Last\nCompleted Cycle")):
-        mycycle_tree.heading(col, text=text)
+        mycycle_tree.heading(col, text=text, anchor=LEADERBOARD_HEADING_ANCHOR)
 
     mycycle_tree.column("rank", width=45, anchor="center")
     mycycle_tree.column("user", width=150, anchor="w")
