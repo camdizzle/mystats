@@ -213,6 +213,11 @@ h1 {
   border: 1px solid rgba(127, 216, 255, 0.2);
 }
 
+body.theme-violethearts #leaderboard li.leaderboard-row > span:last-child {
+  background: transparent;
+  border: 0;
+}
+
 #leaderboard .leaderboard-gap {
   height: 6px;
   padding: 0;

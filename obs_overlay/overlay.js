@@ -382,6 +382,7 @@ function applyTheme() {
   rootStyle.setProperty('--panel', `rgba(${theme.panelBase}, ${settings.cardOpacity / 100})`);
   rootStyle.setProperty('--panel-2', `rgba(${theme.panel2Base}, ${Math.min(0.92, settings.cardOpacity / 100 + 0.08)})`);
   rootStyle.setProperty('--text-scale', String(settings.textScale / 100));
+  document.body.classList.toggle('theme-violethearts', settings.theme === 'violethearts');
   document.body.classList.toggle('compact-rows', settings.compactRows);
 }
 
