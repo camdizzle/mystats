@@ -581,6 +581,25 @@ body.horizontal-layout #leaderboard .leaderboard-gap {
   height: 1px;
 }
 
+
+body.horizontal-layout #leaderboard .leaderboard-loop-message {
+  white-space: nowrap;
+  font-size: calc(0.5rem * var(--text-scale));
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  padding: 0 4px;
+}
+
+body.horizontal-layout #leaderboard .leaderboard-loop-boundary {
+  width: 0;
+  min-width: 0;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  margin: 0;
+  overflow: hidden;
+}
+
 body.horizontal-layout #leaderboard .leaderboard-end-spacer {
   width: 4000px;
   min-width: 4000px;
