@@ -1776,6 +1776,19 @@ def _overlay_now_for_timestamp(race_time):
     return datetime.now(race_time.tzinfo)
 
 
+def _overlay_display_name(*candidates):
+    """Return the first usable display name candidate, or a safe fallback."""
+    invalid_tokens = {'', 'unknown', 'none', 'null', 'undefined', 'n/a', 'na'}
+    for candidate in candidates:
+        name = str(candidate or '').strip()
+        if not name:
+            continue
+        if name.lower() in invalid_tokens:
+            continue
+        return name
+    return 'Unknown Racer'
+
+
 def _overlay_points_top10(file_paths):
     totals = {}
 
@@ -1787,7 +1800,7 @@ def _overlay_points_top10(file_paths):
                 for row in csv.reader(f):
                     if len(row) < 5:
                         continue
-                    name = (row[2] or '').strip() or (row[1] or '').strip()
+                    name = _overlay_display_name(row[2], row[1])
                     if not name:
                         continue
                     points = _safe_int(row[3])
@@ -1860,7 +1873,7 @@ def _overlay_recent_race_payload(race_file):
 
                 groups_by_key[race_key]['rows'].append({
                     'placement': placement,
-                    'name': (row[2] or '').strip() or (row[1] or '').strip(),
+                    'name': _overlay_display_name(row[2], row[1]),
                     'points': _safe_int(row[3]),
                     'finished': not (len(row) >= 8 and str(row[7]).strip().lower() == 'true'),
                 })
