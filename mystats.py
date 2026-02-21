@@ -55,6 +55,25 @@ try:
 except ImportError:
     ttkbootstrap_module = None
 
+pywebview_module = None
+pywebview_import_error = None
+
+
+def load_pywebview_module():
+    """Attempt to import pywebview and cache the result for dashboard launches."""
+    global pywebview_module, pywebview_import_error
+    if pywebview_module is not None:
+        return pywebview_module
+
+    try:
+        pywebview_module = importlib.import_module('webview')
+        pywebview_import_error = None
+    except Exception as import_error:
+        pywebview_module = None
+        pywebview_import_error = import_error
+
+    return pywebview_module
+
 # Global Variables
 version = '6.0.1'
 text_widget = None
@@ -3445,12 +3464,23 @@ class ModernDashboardController:
         self.status_label = status_label
         self.browser_url = f"http://127.0.0.1:{_load_overlay_server_port()}/dashboard"
         self.viewer_process = None
+        self.webview_window = None
+        self.webview_thread = None
+        self.webview_hwnd = None
+        self.host_hwnd = None
+        self.running = False
 
     def _set_status(self, message):
         if self.status_label and self.status_label.winfo_exists():
             self.status_label.config(text=message)
 
+    def _set_status_threadsafe(self, message):
+        if self.parent_frame and self.parent_frame.winfo_exists():
+            self.parent_frame.after(0, lambda: self._set_status(message))
+
     def _is_viewer_running(self):
+        if self.running:
+            return True
         return self.viewer_process is not None and self.viewer_process.poll() is None
 
     def _find_modern_browser_runtime(self):
@@ -3482,13 +3512,103 @@ class ModernDashboardController:
         except Exception:
             return False
 
-    def _open_in_default_browser(self):
+    def _sync_embedded_size(self):
+        if not self.webview_hwnd or not self.parent_frame or not self.parent_frame.winfo_exists():
+            return
+
         try:
-            webbrowser.open(self.browser_url)
-            self._set_status('Modern dashboard opened in your default browser tab.')
-            return True
+            import ctypes
+            width = max(200, self.parent_frame.winfo_width())
+            height = max(200, self.parent_frame.winfo_height())
+            ctypes.windll.user32.MoveWindow(int(self.webview_hwnd), 0, 0, int(width), int(height), True)
         except Exception:
+            pass
+
+    def _on_parent_resize(self, _event=None):
+        self._sync_embedded_size()
+
+    def _attach_native_window_to_frame(self, window):
+        try:
+            import ctypes
+
+            if not self.parent_frame or not self.parent_frame.winfo_exists():
+                return False
+
+            self.parent_frame.update_idletasks()
+            host_hwnd = int(self.parent_frame.winfo_id())
+            native = getattr(window, 'native', None)
+
+            child_hwnd = None
+            if native is None:
+                return False
+
+            if hasattr(native, 'Handle'):
+                child_hwnd = int(native.Handle)
+            elif hasattr(native, 'handle'):
+                child_hwnd = int(native.handle)
+            elif isinstance(native, int):
+                child_hwnd = int(native)
+
+            if not child_hwnd:
+                return False
+
+            GWL_STYLE = -16
+            WS_CHILD = 0x40000000
+            WS_VISIBLE = 0x10000000
+            WS_POPUP = 0x80000000
+            SW_SHOW = 5
+
+            current_style = ctypes.windll.user32.GetWindowLongW(child_hwnd, GWL_STYLE)
+            new_style = (current_style | WS_CHILD | WS_VISIBLE) & ~WS_POPUP
+            ctypes.windll.user32.SetWindowLongW(child_hwnd, GWL_STYLE, new_style)
+            ctypes.windll.user32.SetParent(child_hwnd, host_hwnd)
+            ctypes.windll.user32.ShowWindow(child_hwnd, SW_SHOW)
+
+            self.host_hwnd = host_hwnd
+            self.webview_hwnd = child_hwnd
+            self.running = True
+
+            self._set_status_threadsafe('Modern dashboard embedded in the MyStats tab.')
+            if self.parent_frame and self.parent_frame.winfo_exists():
+                self.parent_frame.after(100, self._sync_embedded_size)
+                self.parent_frame.after(350, self._sync_embedded_size)
+                self.parent_frame.bind('<Configure>', self._on_parent_resize)
+            return True
+        except Exception as error:
+            self._set_status_threadsafe(f'Embedding failed ({error}). Opening external browser window...')
             return False
+
+    def _launch_embedded_pywebview(self):
+        if load_pywebview_module() is None:
+            details = '' if pywebview_import_error is None else f' ({pywebview_import_error})'
+            self._set_status_threadsafe(f'Modern dashboard unavailable: install pywebview in this Python environment{details}.')
+            return
+
+        if not sys.platform.startswith('win'):
+            self._set_status_threadsafe('Embedded pywebview is only supported on Windows in MyStats. Opening external browser window...')
+            self.running = False
+            return
+
+        try:
+            self.webview_window = pywebview_module.create_window(
+                'MyStats Modern Dashboard',
+                self.browser_url,
+                width=1200,
+                height=800,
+                resizable=True,
+                hidden=False,
+            )
+
+            def on_shown():
+                attached = self._attach_native_window_to_frame(self.webview_window)
+                if not attached:
+                    self.running = False
+
+            self.webview_window.events.shown += on_shown
+            pywebview_module.start(debug=False)
+        except Exception as error:
+            self.running = False
+            self._set_status_threadsafe(f'Modern dashboard failed to launch pywebview: {error}')
 
     def start(self):
         if not is_modern_dashboard_enabled():
@@ -3499,17 +3619,32 @@ class ModernDashboardController:
             self._set_status('Modern dashboard window already open.')
             return
 
+        if load_pywebview_module() is not None:
+            self.running = True
+            self.webview_thread = threading.Thread(target=self._launch_embedded_pywebview, daemon=True)
+            self.webview_thread.start()
+            self._set_status('Opening modern dashboard in embedded pywebview...')
+            return
+
         if self._open_in_external_browser_runtime():
             return
 
-        if self._open_in_default_browser():
-            return
-
-        self._set_status('Modern dashboard unavailable: install Edge, Chrome, Brave, or Chromium.')
+        self._set_status('Modern dashboard unavailable: install pywebview or Edge/Chrome/Brave/Chromium.')
 
     def shutdown(self):
-        if not self._is_viewer_running():
+        self.running = False
+
+        if self.webview_window is not None:
+            try:
+                self.webview_window.destroy()
+            except Exception:
+                pass
+            finally:
+                self.webview_window = None
+
+        if not (self.viewer_process is not None and self.viewer_process.poll() is None):
             return
+
         try:
             self.viewer_process.terminate()
             self.viewer_process.wait(timeout=2)
@@ -3520,6 +3655,7 @@ class ModernDashboardController:
                 pass
         finally:
             self.viewer_process = None
+
 def build_main_content(parent):
     global chatbot_label, login_button, text_area
     global season_quest_tree, rivals_tree, mycycle_tree, mycycle_session_label
@@ -3681,7 +3817,7 @@ def build_main_content(parent):
 
     ttk.Label(
         modern_dashboard_tab,
-        text="Modern dashboard window for Season Quests, Rivals, and MyCycle",
+        text="Modern dashboard embedded view for Season Quests, Rivals, and MyCycle",
         style="Small.TLabel"
     ).pack(anchor="w", padx=8, pady=(8, 4))
 
@@ -3699,7 +3835,7 @@ def build_main_content(parent):
 
     ttk.Button(
         modern_dashboard_tab,
-        text="Open Modern Dashboard Window",
+        text="Open/Reload Modern Dashboard",
         command=modern_dashboard_controller.start,
         style="Primary.TButton"
     ).pack(anchor="w", padx=8, pady=(0, 8))

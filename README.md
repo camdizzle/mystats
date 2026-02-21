@@ -141,3 +141,25 @@ Overlay settings are controlled from the desktop app (Settings → Overlay) and 
 - Text scale
 - Top-3 medal emote visibility
 - Compact row spacing
+
+## Modern Dashboard Notes
+
+The **Modern Dashboard** is a web UI served by MyStats' built-in Flask server and opened at:
+
+`http://127.0.0.1:<overlay_server_port>/dashboard`
+
+### Embedded mode (pywebview)
+
+MyStats now attempts to embed the modern dashboard directly inside the **Dashboards (Modern)** tab using `pywebview` (Windows + Python 3.10 environment).
+
+If `pywebview` is unavailable, MyStats falls back to opening the dashboard in an external browser app window (Edge/Chrome/Brave/Chromium) when possible.
+
+### "Failed to load cycle data" / "Unable to load MyCycle data"
+
+That message comes from the dashboard page when `GET /api/dashboard/main` fails (typically when the local Flask server is not running on the expected port, or the app was opened from a file path instead of through `/dashboard`).
+
+Quick checks:
+- Verify MyStats is running.
+- Confirm Settings → Overlay **Server Port** and restart after changes.
+- Open `http://127.0.0.1:<port>/api/dashboard/main` directly in your browser; it should return JSON.
+- Open the dashboard from inside MyStats (button in **Dashboards (Modern)**), not by double-clicking `index.html`.
