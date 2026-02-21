@@ -225,7 +225,12 @@ function startLeaderboardAutoScroll() {
 
     if (leaderboard.scrollTop >= currentMax - 1) {
       leaderboard.scrollTop = currentMax;
-      showSplashView();
+
+      if (hasReachedEndOfStackedViews()) {
+        showSplashView();
+      } else {
+        leaderboardScrollPauseUntil = Date.now() + 800;
+      }
     }
   }, 32);
 }
@@ -253,9 +258,13 @@ function hasScrolledIntoFinalSection() {
   if (!sectionAnchors.length) return false;
   if (sectionAnchors.length === 1) return true;
 
-  const finalSection = sectionAnchors[sectionAnchors.length - 1];
+  const titles = leaderboard.querySelectorAll('.leaderboard-section-title');
+  const lastTitle = titles[titles.length - 1];
+  if (!lastTitle) return true;
+
+  const liveOffsetTop = lastTitle.offsetTop;
   const viewportBottom = leaderboard.scrollTop + leaderboard.clientHeight;
-  return viewportBottom >= finalSection.offsetTop + 20;
+  return viewportBottom >= liveOffsetTop + 20;
 }
 
 function escapeHtml(value) {
@@ -285,6 +294,7 @@ function renderCombinedRows(views) {
   showLeaderboardView();
   leaderboard.classList.remove('is-top3-mode');
   sectionAnchors = [];
+  const previousScrollTop = leaderboard.scrollTop;
 
   if (!Array.isArray(views) || !views.length) {
     leaderboard.innerHTML = '<li>No race data yet.</li>';
@@ -309,6 +319,12 @@ function renderCombinedRows(views) {
   }).join('');
 
   leaderboard.innerHTML = markup;
+
+  const maxScrollTop = Math.max(0, leaderboard.scrollHeight - leaderboard.clientHeight);
+  const scrollerIsActive = Boolean(leaderboardScrollTimer || leaderboardScrollRetryTimer);
+  if (!scrollerIsActive && previousScrollTop > 0 && maxScrollTop > 0) {
+    leaderboard.scrollTop = Math.min(previousScrollTop, maxScrollTop);
+  }
 
   const renderedRows = Array.from(leaderboard.querySelectorAll('.leaderboard-row'));
   renderedRows.forEach((row) => row.classList.remove('leaderboard-row--final'));
