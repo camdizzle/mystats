@@ -437,8 +437,8 @@ body.compact-rows #leaderboard li.leaderboard-row {
 }
 
 body.horizontal-layout {
-  width: 1920px;
-  min-width: 1920px;
+  width: min(1920px, 100vw);
+  min-width: 0;
   max-width: 1920px;
   height: 100px;
   min-height: 100px;
@@ -483,6 +483,7 @@ body.horizontal-layout .pill {
   padding: 4px 7px;
   border-radius: 10px;
   gap: 2px;
+  height: 100%;
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -491,6 +492,8 @@ body.horizontal-layout .pill {
 }
 
 body.horizontal-layout .pill-title {
+  display: block;
+  margin: 0;
   font-size: calc(0.62rem * var(--text-scale));
   letter-spacing: 0.02em;
   line-height: 1.05;
@@ -499,6 +502,8 @@ body.horizontal-layout .pill-title {
 }
 
 body.horizontal-layout .pill-value {
+  display: block;
+  margin: 0;
   font-size: calc(1rem * var(--text-scale));
   line-height: 1;
 }
