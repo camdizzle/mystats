@@ -56,9 +56,29 @@ function clampNumber(value, min, max, fallback) {
 }
 
 
-function getDisplayName(name, fallback = 'Unknown Racer') {
-  const value = String(name || '').trim();
-  return value || fallback;
+function getDisplayName(row = {}, fallbackPlacement = null) {
+  const invalidTokens = new Set(['', 'unknown', 'none', 'null', 'undefined', 'n/a', 'na']);
+  const candidates = [
+    row?.name,
+    row?.display_name,
+    row?.displayName,
+    row?.username,
+    row?.user,
+    row?.racer,
+    row?.player,
+  ];
+
+  for (const candidate of candidates) {
+    const value = String(candidate ?? '').replace(/\s+/g, ' ').trim();
+    if (!value) continue;
+    if (invalidTokens.has(value.toLowerCase())) continue;
+    return value;
+  }
+
+  if (fallbackPlacement !== null && fallbackPlacement !== undefined && fallbackPlacement !== '') {
+    return `Racer #${fallbackPlacement}`;
+  }
+  return 'Unknown Racer';
 }
 
 function getPlacementEmote(placement) {
@@ -173,7 +193,7 @@ function renderTop3Rows(rows = [], title = '🔥 Latest Race Podium 🔥') {
     const r = safeRows[idx];
     if (!r) return `<li class="top3-card top3-card--${idx + 1} is-hidden" aria-hidden="true"></li>`;
     const medal = ['🥇', '🥈', '🥉'][idx] || getPlacementEmote(r.placement);
-    return `<li class="top3-card top3-card--${idx + 1}"><span class="top3-rank">${escapeHtml(medal)} #${escapeHtml(r.placement)}</span><span class="top3-name">${escapeHtml(getDisplayName(r.name))}</span><span class="top3-points">${fmt(r.points)} pts</span></li>`;
+    return `<li class="top3-card top3-card--${idx + 1}"><span class="top3-rank">${escapeHtml(medal)} #${escapeHtml(r.placement)}</span><span class="top3-name">${escapeHtml(getDisplayName(r, r.placement))}</span><span class="top3-points">${fmt(r.points)} pts</span></li>`;
   }).join('');
 
   leaderboard.innerHTML = `${titleMarkup}${cardsMarkup}`;

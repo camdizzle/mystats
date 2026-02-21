@@ -1777,11 +1777,15 @@ def _overlay_now_for_timestamp(race_time):
 
 
 def _overlay_display_name(*candidates):
-    """Return the first non-empty name candidate, or a safe fallback."""
+    """Return the first usable display name candidate, or a safe fallback."""
+    invalid_tokens = {'', 'unknown', 'none', 'null', 'undefined', 'n/a', 'na'}
     for candidate in candidates:
         name = str(candidate or '').strip()
-        if name:
-            return name
+        if not name:
+            continue
+        if name.lower() in invalid_tokens:
+            continue
+        return name
     return 'Unknown Racer'
 
 

@@ -321,9 +321,13 @@ body.top3-active .top3-rank,
 
 body.top3-active .top3-name,
 #leaderboard.is-top3-mode .top3-name {
+  display: block;
+  width: 100%;
+  min-height: 1.1em;
   font-size: calc(2.2rem * var(--text-scale));
   font-weight: 800;
   line-height: 1;
+  color: var(--text);
   text-align: center;
   white-space: nowrap;
   overflow: hidden;
