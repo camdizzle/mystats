@@ -45,7 +45,7 @@ let lastRaceKey = null;
 let hasHydratedOnce = false;
 let top3IsShowing = false;
 let top3ShowTimeout = null;
-const splashDurationMs = 5500;
+const splashDurationMs = 5000;
 const top3ShowDurationMs = 10000;
 
 function clampNumber(value, min, max, fallback) {
@@ -116,8 +116,8 @@ function showLeaderboardView() {
   }
 }
 
-function showSplashView() {
-  if (!hasReachedEndOfStackedViews()) return;
+function showSplashView(force = false) {
+  if (!force && !hasReachedEndOfStackedViews()) return;
 
   stopLeaderboardAutoScroll();
   if (boardShell) boardShell.classList.add('is-hidden');
@@ -244,13 +244,9 @@ function hasReachedEndOfStackedViews() {
   const finalRow = leaderboard.querySelector('.leaderboard-row--final');
   if (!finalRow) return false;
 
-  const currentMax = leaderboard.scrollHeight - leaderboard.clientHeight;
-  const nearBottom = currentMax <= 2 || leaderboard.scrollTop >= currentMax - 4;
-  if (!nearBottom) return false;
-
   const listBounds = leaderboard.getBoundingClientRect();
   const finalRowBounds = finalRow.getBoundingClientRect();
-  return finalRowBounds.bottom <= listBounds.bottom + 24;
+  return finalRowBounds.bottom <= listBounds.top + 2;
 }
 
 function hasScrolledIntoFinalSection() {
@@ -265,6 +261,13 @@ function hasScrolledIntoFinalSection() {
   const liveOffsetTop = lastTitle.offsetTop;
   const viewportBottom = leaderboard.scrollTop + leaderboard.clientHeight;
   return viewportBottom >= liveOffsetTop + 20;
+}
+
+function syncEndSpacerHeight() {
+  if (!leaderboard) return;
+  const endSpacer = leaderboard.querySelector('.leaderboard-end-spacer');
+  if (!endSpacer) return;
+  endSpacer.style.height = `${leaderboard.clientHeight}px`;
 }
 
 function escapeHtml(value) {
@@ -289,20 +292,38 @@ function getViewsRenderKey(views) {
   }).join('@@');
 }
 
+
+function isPreviousRaceRecent(recentRace = {}) {
+  const raceTimestamp = recentRace?.race_timestamp;
+  if (!raceTimestamp) return false;
+
+  const parsed = new Date(raceTimestamp);
+  if (Number.isNaN(parsed.getTime())) return false;
+
+  return (Date.now() - parsed.getTime()) <= 10 * 60 * 1000;
+}
+
+function getRenderableViews(views = []) {
+  if (!Array.isArray(views)) return [];
+  return views.filter((view) => Array.isArray(view?.rows) && view.rows.length > 0);
+}
+
 function renderCombinedRows(views) {
   if (!leaderboard) return;
   showLeaderboardView();
   leaderboard.classList.remove('is-top3-mode');
   sectionAnchors = [];
   const previousScrollTop = leaderboard.scrollTop;
+  const renderableViews = getRenderableViews(views);
 
-  if (!Array.isArray(views) || !views.length) {
+  if (!renderableViews.length) {
     leaderboard.innerHTML = '<li>No race data yet.</li>';
     stopLeaderboardAutoScroll();
+    showSplashView(true);
     return;
   }
 
-  const markup = views.map((view, viewIndex) => {
+  const markup = renderableViews.map((view, viewIndex) => {
     const sectionTitle = view.title || 'Top Results';
     const rows = Array.isArray(view.rows) ? view.rows : [];
     const sectionTitleMarkup = `<li class="leaderboard-section-title" data-section-title="${escapeHtml(sectionTitle)}">${escapeHtml(sectionTitle)}</li>`;
@@ -318,7 +339,9 @@ function renderCombinedRows(views) {
     return `${gap}${sectionTitleMarkup}${rowMarkup}`;
   }).join('');
 
-  leaderboard.innerHTML = markup;
+  leaderboard.innerHTML = `${markup}<li class="leaderboard-end-spacer" aria-hidden="true"></li>`;
+
+  syncEndSpacerHeight();
 
   const maxScrollTop = Math.max(0, leaderboard.scrollHeight - leaderboard.clientHeight);
   const scrollerIsActive = Boolean(leaderboardScrollTimer || leaderboardScrollRetryTimer);
@@ -396,7 +419,8 @@ function syncViews(views = []) {
     return;
   }
 
-  const nextRenderKey = `${settings.showMedals}::${getViewsRenderKey(currentViews)}`;
+  const renderableViews = getRenderableViews(currentViews);
+  const nextRenderKey = `${settings.showMedals}::${getViewsRenderKey(renderableViews)}`;
 
   if (nextRenderKey === lastRenderedViewsKey) {
     updateBoardTitleFromScroll();
@@ -417,12 +441,16 @@ async function refresh() {
     $('overlay-title').textContent = p.title || 'MyStats Live Results';
     applyServerSettings(p.settings || {});
     updateHeaderStats(p.header_stats || {});
+    const shouldShowPreviousRace = Array.isArray(p.top10_previous_race)
+      && p.top10_previous_race.length
+      && isPreviousRaceRecent(p.recent_race_top3);
+
     const normalizedViews = Array.isArray(p.views)
       ? p.views
       : [
           { id: 'season', title: 'Top 10 Season', rows: p.top10_season || [] },
           { id: 'today', title: 'Top 10 Today', rows: p.top10_today || [] },
-          ...(Array.isArray(p.top10_previous_race) && p.top10_previous_race.length
+          ...(shouldShowPreviousRace
             ? [{ id: 'previous', title: 'Top 10 Previous Race', rows: p.top10_previous_race }]
             : []),
         ];
@@ -450,6 +478,7 @@ async function refresh() {
 }
 
 window.addEventListener('resize', () => {
+  syncEndSpacerHeight();
   sectionAnchors = Array.from(leaderboard?.querySelectorAll('.leaderboard-section-title') || []).map((el) => ({
     title: el.dataset.sectionTitle || 'Top Results',
     offsetTop: el.offsetTop,
