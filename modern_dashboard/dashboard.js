@@ -31,6 +31,39 @@ function renderKpis(rows = []) {
   )).join('');
 }
 
+
+function renderCycleHighlights(rows = []) {
+  const host = el('cycle-highlights');
+  if (!host) return;
+
+  if (!rows.length) {
+    host.innerHTML = '<div class="highlight-card"><div class="highlight-title">Cycle Highlights</div><div class="highlight-main">No cycle completions yet</div></div>';
+    return;
+  }
+
+  const topCycler = rows.reduce((best, row) => {
+    if (!best) return row;
+    const bestCycles = Number(best.cycles_completed || 0);
+    const rowCycles = Number(row.cycles_completed || 0);
+    if (rowCycles !== bestCycles) return rowCycles > bestCycles ? row : best;
+    return Number(row.progress_hits || 0) > Number(best.progress_hits || 0) ? row : best;
+  }, null);
+
+  const newestCycler = rows
+    .filter((row) => row.last_cycle_completed_at)
+    .sort((a, b) => String(b.last_cycle_completed_at).localeCompare(String(a.last_cycle_completed_at)))[0] || null;
+
+  const topName = topCycler?.display_name || topCycler?.username || '—';
+  const topCycles = Number(topCycler?.cycles_completed || 0);
+  const newestName = newestCycler?.display_name || newestCycler?.username || '—';
+  const newestWhen = newestCycler?.last_cycle_completed_at || 'No completed cycles yet';
+
+  host.innerHTML = [
+    `<div class="highlight-card"><div class="highlight-title">Top Cycler</div><div class="highlight-main">${escapeHtml(topName)}</div><div class="highlight-detail">${escapeHtml(`${fmt(topCycles)} cycles completed`)}</div></div>`,
+    `<div class="highlight-card"><div class="highlight-title">Newest Cycler</div><div class="highlight-main">${escapeHtml(newestName)}</div><div class="highlight-detail">${escapeHtml(newestWhen)}</div></div>`,
+  ].join('');
+}
+
 function renderMyCycleRows(data) {
   const rowsHost = el('mycycle');
   if (!rowsHost) return;
@@ -46,6 +79,7 @@ function renderMyCycleRows(data) {
   const sessionName = data?.mycycle?.session?.name || 'No active session';
   el('mycycle-meta').textContent = `Session: ${sessionName}`;
   renderKpis(rows);
+  renderCycleHighlights(rows);
 
   if (!rows.length) {
     rowsHost.innerHTML = '<div class="empty">No MyCycle race data yet.</div>';
