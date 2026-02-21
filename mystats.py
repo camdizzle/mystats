@@ -2677,8 +2677,36 @@ def open_settings_window():
     ttk.Checkbutton(chat_tab, text="Race Results", variable=chat_race_results_var).grid(row=2, column=0, sticky="w", pady=2)
     ttk.Checkbutton(chat_tab, text="All !commands", variable=chat_all_commands_var).grid(row=3, column=0, sticky="w", pady=2)
 
+    race_narrative_alerts_var = tk.BooleanVar(value=is_chat_response_enabled("race_narrative_alerts_enabled"))
+    race_narrative_grinder_var = tk.BooleanVar(value=is_chat_response_enabled("race_narrative_grinder_enabled"))
+    race_narrative_winmilestone_var = tk.BooleanVar(value=is_chat_response_enabled("race_narrative_winmilestone_enabled"))
+    race_narrative_leadchange_var = tk.BooleanVar(value=is_chat_response_enabled("race_narrative_leadchange_enabled"))
+
+    race_alerts_frame = ttk.LabelFrame(chat_tab, text="Race Narrative Player Alerts", style="Card.TLabelframe")
+    race_alerts_frame.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+
+    ttk.Checkbutton(race_alerts_frame, text="Narrative Alerts", variable=race_narrative_alerts_var).grid(row=0, column=0, sticky="w", padx=10, pady=(8, 4))
+    ttk.Checkbutton(race_alerts_frame, text="Grinder milestones", variable=race_narrative_grinder_var).grid(row=1, column=0, sticky="w", padx=10, pady=2)
+    ttk.Checkbutton(race_alerts_frame, text="Win milestones", variable=race_narrative_winmilestone_var).grid(row=2, column=0, sticky="w", padx=10, pady=2)
+    ttk.Checkbutton(race_alerts_frame, text="Lead changes", variable=race_narrative_leadchange_var).grid(row=3, column=0, sticky="w", padx=10, pady=(2, 8))
+
+    ttk.Label(race_alerts_frame, text="Cooldown (races)", style="Small.TLabel").grid(row=1, column=1, sticky="w", padx=(12, 8), pady=(2, 2))
+    race_narrative_cooldown_entry = ttk.Entry(race_alerts_frame, width=8, justify='center')
+    race_narrative_cooldown_entry.grid(row=1, column=2, sticky="w", padx=(0, 10), pady=(2, 2))
+    race_narrative_cooldown_entry.insert(0, config.get_setting("race_narrative_alert_cooldown_races") or "3")
+
+    ttk.Label(race_alerts_frame, text="Min lead gap", style="Small.TLabel").grid(row=2, column=1, sticky="w", padx=(12, 8), pady=2)
+    race_narrative_min_gap_entry = ttk.Entry(race_alerts_frame, width=8, justify='center')
+    race_narrative_min_gap_entry.grid(row=2, column=2, sticky="w", padx=(0, 10), pady=2)
+    race_narrative_min_gap_entry.insert(0, config.get_setting("race_narrative_alert_min_lead_change_points") or "500")
+
+    ttk.Label(race_alerts_frame, text="Max items per alert", style="Small.TLabel").grid(row=3, column=1, sticky="w", padx=(12, 8), pady=(2, 8))
+    race_narrative_max_items_entry = ttk.Entry(race_alerts_frame, width=8, justify='center')
+    race_narrative_max_items_entry.grid(row=3, column=2, sticky="w", padx=(0, 10), pady=(2, 8))
+    race_narrative_max_items_entry.insert(0, config.get_setting("race_narrative_alert_max_items") or "3")
+
     message_delay_frame = ttk.LabelFrame(chat_tab, text="Message Delay", style="Card.TLabelframe")
-    message_delay_frame.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+    message_delay_frame.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(10, 0))
 
     announce_delay_var = tk.BooleanVar(value=config.get_setting("announcedelay") == "True")
     ttk.Checkbutton(message_delay_frame, text="Enable Delay", variable=announce_delay_var).grid(row=0, column=0, sticky="w", padx=10, pady=(8, 6))
@@ -2686,6 +2714,7 @@ def open_settings_window():
     delay_seconds_entry = ttk.Entry(message_delay_frame, width=12, justify='center')
     delay_seconds_entry.grid(row=1, column=1, sticky="w", padx=(8, 10), pady=(0, 8))
     delay_seconds_entry.insert(0, config.get_setting("announcedelayseconds") or "")
+    chat_tab.grid_columnconfigure(0, weight=1)
 
     # --- Tilt tab ---
     ttk.Label(tilt_tab, text="Configure tilt chat alerts, !tiltsurvivors threshold, and tilt overlay behavior", style="Small.TLabel").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
@@ -2695,10 +2724,6 @@ def open_settings_window():
     narrative_alert_grinder_var = tk.BooleanVar(value=is_chat_response_enabled("narrative_alert_grinder_enabled"))
     narrative_alert_winmilestone_var = tk.BooleanVar(value=is_chat_response_enabled("narrative_alert_winmilestone_enabled"))
     narrative_alert_leadchange_var = tk.BooleanVar(value=is_chat_response_enabled("narrative_alert_leadchange_enabled"))
-    race_narrative_alerts_var = tk.BooleanVar(value=is_chat_response_enabled("race_narrative_alerts_enabled"))
-    race_narrative_grinder_var = tk.BooleanVar(value=is_chat_response_enabled("race_narrative_grinder_enabled"))
-    race_narrative_winmilestone_var = tk.BooleanVar(value=is_chat_response_enabled("race_narrative_winmilestone_enabled"))
-    race_narrative_leadchange_var = tk.BooleanVar(value=is_chat_response_enabled("race_narrative_leadchange_enabled"))
 
     tilt_alerts_frame = ttk.LabelFrame(tilt_tab, text="Tilt Chat Alerts", style="Card.TLabelframe")
     tilt_alerts_frame.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 8))
@@ -2724,37 +2749,14 @@ def open_settings_window():
     narrative_alert_max_items_entry.grid(row=4, column=2, sticky="w", padx=(0, 10), pady=(2, 8))
     narrative_alert_max_items_entry.insert(0, config.get_setting("narrative_alert_max_items") or "3")
 
-    race_alerts_frame = ttk.LabelFrame(tilt_tab, text="Race Narrative Player Alerts", style="Card.TLabelframe")
-    race_alerts_frame.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(0, 8))
-
-    ttk.Checkbutton(race_alerts_frame, text="Narrative Alerts", variable=race_narrative_alerts_var).grid(row=0, column=0, sticky="w", padx=10, pady=(8, 4))
-    ttk.Checkbutton(race_alerts_frame, text="Grinder milestones", variable=race_narrative_grinder_var).grid(row=1, column=0, sticky="w", padx=10, pady=2)
-    ttk.Checkbutton(race_alerts_frame, text="Win milestones", variable=race_narrative_winmilestone_var).grid(row=2, column=0, sticky="w", padx=10, pady=2)
-    ttk.Checkbutton(race_alerts_frame, text="Lead changes", variable=race_narrative_leadchange_var).grid(row=3, column=0, sticky="w", padx=10, pady=(2, 8))
-
-    ttk.Label(race_alerts_frame, text="Cooldown (races)", style="Small.TLabel").grid(row=1, column=1, sticky="w", padx=(12, 8), pady=(2, 2))
-    race_narrative_cooldown_entry = ttk.Entry(race_alerts_frame, width=8, justify='center')
-    race_narrative_cooldown_entry.grid(row=1, column=2, sticky="w", padx=(0, 10), pady=(2, 2))
-    race_narrative_cooldown_entry.insert(0, config.get_setting("race_narrative_alert_cooldown_races") or "3")
-
-    ttk.Label(race_alerts_frame, text="Min lead gap", style="Small.TLabel").grid(row=2, column=1, sticky="w", padx=(12, 8), pady=2)
-    race_narrative_min_gap_entry = ttk.Entry(race_alerts_frame, width=8, justify='center')
-    race_narrative_min_gap_entry.grid(row=2, column=2, sticky="w", padx=(0, 10), pady=2)
-    race_narrative_min_gap_entry.insert(0, config.get_setting("race_narrative_alert_min_lead_change_points") or "500")
-
-    ttk.Label(race_alerts_frame, text="Max items per alert", style="Small.TLabel").grid(row=3, column=1, sticky="w", padx=(12, 8), pady=(2, 8))
-    race_narrative_max_items_entry = ttk.Entry(race_alerts_frame, width=8, justify='center')
-    race_narrative_max_items_entry.grid(row=3, column=2, sticky="w", padx=(0, 10), pady=(2, 8))
-    race_narrative_max_items_entry.insert(0, config.get_setting("race_narrative_alert_max_items") or "3")
-
-    ttk.Label(tilt_tab, text="Max names announced (Race/Tilt)").grid(row=3, column=0, sticky="w", pady=(2, 4))
+    ttk.Label(tilt_tab, text="Max names announced (Race/Tilt)").grid(row=2, column=0, sticky="w", pady=(2, 4))
     max_name_values = [str(i) for i in range(3, 26)]
     selected_max_names = tk.StringVar(value=str(get_chat_max_names()))
     max_names_combobox = ttk.Combobox(tilt_tab, textvariable=selected_max_names, values=max_name_values, width=5, state="readonly")
-    max_names_combobox.grid(row=3, column=1, sticky="w", pady=(2, 4), padx=(8, 0))
+    max_names_combobox.grid(row=2, column=1, sticky="w", pady=(2, 4), padx=(8, 0))
 
     tiltsurvivors_frame = ttk.LabelFrame(tilt_tab, text="Tilt Command Thresholds", style="Card.TLabelframe")
-    tiltsurvivors_frame.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(6, 8))
+    tiltsurvivors_frame.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(6, 8))
     ttk.Label(tiltsurvivors_frame, text="!tiltsurvivors minimum levels participated", style="Small.TLabel").grid(row=0, column=0, sticky="w", padx=(10, 8), pady=(8, 4))
     tiltsurvivors_min_levels_entry = ttk.Entry(tiltsurvivors_frame, width=12, justify='center')
     tiltsurvivors_min_levels_entry.grid(row=0, column=1, sticky="w", padx=(0, 10), pady=(8, 4))
