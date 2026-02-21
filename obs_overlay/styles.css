@@ -437,9 +437,9 @@ body.compact-rows #leaderboard li.leaderboard-row {
 }
 
 body.horizontal-layout {
-  width: 1080px;
-  min-width: 1080px;
-  max-width: 1080px;
+  width: 1920px;
+  min-width: 1920px;
+  max-width: 1920px;
   height: 100px;
   min-height: 100px;
   max-height: 100px;
@@ -447,9 +447,9 @@ body.horizontal-layout {
 }
 
 body.horizontal-layout .card {
-  width: 1080px;
-  min-width: 1080px;
-  max-width: 1080px;
+  width: 1920px;
+  min-width: 1920px;
+  max-width: 1920px;
   height: 100px;
   min-height: 100px;
   max-height: 100px;
@@ -561,8 +561,8 @@ body.horizontal-layout #leaderboard .leaderboard-gap {
 }
 
 body.horizontal-layout #leaderboard .leaderboard-end-spacer {
-  width: 1080px;
-  min-width: 1080px;
+  width: 1920px;
+  min-width: 1920px;
   height: 1px;
   padding: 0;
   border: 0;
