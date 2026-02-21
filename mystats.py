@@ -364,6 +364,14 @@ def get_int_setting(setting_key, default=0):
         return default
 
 
+def _get_season_quest_completer_name():
+    for setting_key in ('TWITCH_USERNAME', 'CHANNEL'):
+        raw_value = (config.get_setting(setting_key) or '').strip()
+        if raw_value:
+            return raw_value.lstrip('#@')
+    return 'The streamer'
+
+
 def get_season_quest_updates():
     if not is_chat_response_enabled("season_quests_enabled"):
         return []
@@ -375,47 +383,48 @@ def get_season_quest_updates():
             'target_key': 'season_quest_target_races',
             'complete_key': 'season_quest_complete_races',
             'value': get_int_setting('totalcountseason', 0),
-            'message': "🎯 Season Quest Complete: {value:,} / {target:,} season races finished!"
+            'message': "🎯 Season Quest Complete: {name} finished {value:,} / {target:,} season races!"
         },
         {
             'target_key': 'season_quest_target_points',
             'complete_key': 'season_quest_complete_points',
             'value': get_int_setting('totalpointsseason', 0),
-            'message': "🎯 Season Quest Complete: {value:,} / {target:,} season points earned!"
+            'message': "🎯 Season Quest Complete: {name} earned {value:,} / {target:,} season points!"
         },
         {
             'target_key': 'season_quest_target_race_hs',
             'complete_key': 'season_quest_complete_race_hs',
             'value': get_int_setting('race_hs_season', 0),
-            'message': "🎯 Season Quest Complete: Race high score reached {value:,} (target {target:,})!"
+            'message': "🎯 Season Quest Complete: {name} reached race high score {value:,} (target {target:,})!"
         },
         {
             'target_key': 'season_quest_target_br_hs',
             'complete_key': 'season_quest_complete_br_hs',
             'value': get_int_setting('br_hs_season', 0),
-            'message': "🎯 Season Quest Complete: BR high score reached {value:,} (target {target:,})!"
+            'message': "🎯 Season Quest Complete: {name} reached BR high score {value:,} (target {target:,})!"
         },
         {
             'target_key': 'season_quest_target_tilt_levels',
             'complete_key': 'season_quest_complete_tilt_levels',
             'value': tilt_totals['levels'],
-            'message': "🎯 Season Quest Complete: {value:,} / {target:,} tilt levels participated!"
+            'message': "🎯 Season Quest Complete: {name} participated in {value:,} / {target:,} tilt levels!"
         },
         {
             'target_key': 'season_quest_target_tilt_tops',
             'complete_key': 'season_quest_complete_tilt_tops',
             'value': tilt_totals['top_tiltees'],
-            'message': "🎯 Season Quest Complete: {value:,} / {target:,} top-tiltee finishes!"
+            'message': "🎯 Season Quest Complete: {name} got {value:,} / {target:,} top-tiltee finishes!"
         },
         {
             'target_key': 'season_quest_target_tilt_points',
             'complete_key': 'season_quest_complete_tilt_points',
             'value': tilt_totals['points'],
-            'message': "🎯 Season Quest Complete: {value:,} / {target:,} tilt points earned!"
+            'message': "🎯 Season Quest Complete: {name} earned {value:,} / {target:,} tilt points!"
         },
     ]
 
     quest_messages = []
+    completer_name = _get_season_quest_completer_name()
 
     for quest in quest_definitions:
         target_value = get_int_setting(quest['target_key'], 0)
@@ -426,7 +435,7 @@ def get_season_quest_updates():
 
         if quest['value'] >= target_value:
             config.set_setting(quest['complete_key'], 'True', persistent=True)
-            quest_messages.append(quest['message'].format(value=quest['value'], target=target_value))
+            quest_messages.append(quest['message'].format(name=completer_name, value=quest['value'], target=target_value))
 
     return quest_messages
 
@@ -1645,8 +1654,17 @@ def _safe_int(value):
         return 0
 
 
+def _is_first_place_row(row):
+    if not row:
+        return False
+    placement_text = (row[0] or '').strip()
+    placement_digits = ''.join(ch for ch in placement_text if ch.isdigit())
+    return _safe_int(placement_digits) == 1
+
+
 def _build_overlay_header_stats(data_dir):
     season_points = 0
+    season_entries = 0
     season_races = 0
     season_unique = set()
 
@@ -1663,12 +1681,15 @@ def _build_overlay_header_stats(data_dir):
                     if not racer:
                         continue
                     season_points += points
-                    season_races += 1
+                    season_entries += 1
+                    if _is_first_place_row(row):
+                        season_races += 1
                     season_unique.add(racer.lower())
         except Exception:
             continue
 
     today_points = 0
+    today_entries = 0
     today_races = 0
     today_unique = set()
     today_file = config.get_setting('allraces_file')
@@ -1685,14 +1706,16 @@ def _build_overlay_header_stats(data_dir):
                     if not racer:
                         continue
                     today_points += points
-                    today_races += 1
+                    today_entries += 1
+                    if _is_first_place_row(row):
+                        today_races += 1
                     today_unique.add(racer.lower())
         except Exception:
             pass
 
     return {
-        'avg_points_today': round((today_points / today_races), 2) if today_races else 0,
-        'avg_points_season': round((season_points / season_races), 2) if season_races else 0,
+        'avg_points_today': round((today_points / today_entries), 2) if today_entries else 0,
+        'avg_points_season': round((season_points / season_entries), 2) if season_entries else 0,
         'unique_racers_today': len(today_unique),
         'unique_racers_season': len(season_unique),
         'total_races_today': today_races,
@@ -1733,7 +1756,15 @@ def _parse_overlay_timestamp(value):
     try:
         return datetime.fromisoformat(value)
     except ValueError:
-        return None
+        pass
+
+    if value.endswith('Z'):
+        try:
+            return datetime.fromisoformat(value[:-1] + '+00:00')
+        except ValueError:
+            pass
+
+    return None
 
 
 def _overlay_now_for_timestamp(race_time):
@@ -1801,7 +1832,7 @@ def _overlay_recent_race_payload(race_file):
     try:
         with open(race_file, 'r', encoding='utf-8', errors='ignore') as f:
             for row in csv.reader(f):
-                if len(row) < 6:
+                if len(row) < 4:
                     continue
 
                 placement_text = (row[0] or '').strip()
@@ -1848,6 +1879,11 @@ def _overlay_recent_race_payload(race_file):
     if race_time:
         try:
             is_recent = (_overlay_now_for_timestamp(race_time) - race_time).total_seconds() <= 600
+        except Exception:
+            is_recent = False
+    elif os.path.isfile(race_file):
+        try:
+            is_recent = (datetime.now() - datetime.fromtimestamp(os.path.getmtime(race_file))).total_seconds() <= 600
         except Exception:
             is_recent = False
 
