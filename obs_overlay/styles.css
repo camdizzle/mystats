@@ -253,21 +253,21 @@ body.top3-active #leaderboard li.leaderboard-section-title,
 body.top3-active #leaderboard,
 #leaderboard.is-top3-mode {
   overflow: hidden;
-  gap: 12px;
+  gap: 8px;
   align-content: center;
-  padding: 6px 4px;
+  padding: 4px 2px;
 }
 
 body.top3-active #leaderboard li.top3-card,
 #leaderboard.is-top3-mode li.top3-card {
   display: grid;
-  grid-template-columns: 1fr;
-  justify-items: center;
-  gap: 8px;
-  text-align: center;
-  padding: 14px 14px;
+  grid-template-columns: minmax(106px, auto) 1fr auto;
+  align-items: center;
+  column-gap: 10px;
+  text-align: left;
+  padding: 8px 10px;
   border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 14px;
+  border-radius: 12px;
   background: linear-gradient(165deg, rgba(255,255,255,0.16), rgba(255,255,255,0.05));
   box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08), 0 14px 26px rgba(0, 0, 0, 0.34);
   animation: popIn 420ms cubic-bezier(0.2, 0.7, 0.2, 1);
@@ -294,29 +294,35 @@ body.top3-active #leaderboard li.top3-card--3,
 
 body.top3-active .top3-rank,
 #leaderboard.is-top3-mode .top3-rank {
-  font-size: calc(1.55rem * var(--text-scale));
+  font-size: calc(1.7rem * var(--text-scale));
   font-weight: 900;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
   color: #ffe8a8;
-  text-align: center;
+  text-align: left;
   line-height: 1;
 }
 
 body.top3-active .top3-name,
 #leaderboard.is-top3-mode .top3-name {
   width: 100%;
-  font-size: calc(2.25rem * var(--text-scale));
+  font-size: calc(2.4rem * var(--text-scale));
   font-weight: 800;
-  line-height: 1;
+  line-height: 0.96;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   text-shadow: 0 0 18px rgba(127, 216, 255, 0.45), 0 3px 10px rgba(0, 0, 0, 0.35);
 }
 
 body.top3-active .top3-points,
 #leaderboard.is-top3-mode .top3-points {
-  font-size: calc(1.35rem * var(--text-scale));
+  font-size: calc(1.6rem * var(--text-scale));
   font-weight: 700;
-  padding: 4px 10px;
+  line-height: 1;
+  white-space: nowrap;
+  padding: 5px 10px;
   border-radius: 999px;
   background: rgba(3, 10, 28, 0.56);
   border: 1px solid rgba(127, 216, 255, 0.25);
@@ -373,7 +379,25 @@ body.compact-rows #leaderboard li.leaderboard-row {
 
   body.top3-active .top3-name,
 #leaderboard.is-top3-mode .top3-name {
-    font-size: calc(1.5rem * var(--text-scale));
+    font-size: calc(1.7rem * var(--text-scale));
+  }
+
+  body.top3-active #leaderboard li.top3-card,
+#leaderboard.is-top3-mode li.top3-card {
+    grid-template-columns: minmax(86px, auto) 1fr auto;
+    column-gap: 7px;
+    padding: 7px 8px;
+  }
+
+  body.top3-active .top3-rank,
+#leaderboard.is-top3-mode .top3-rank {
+    font-size: calc(1.2rem * var(--text-scale));
+  }
+
+  body.top3-active .top3-points,
+#leaderboard.is-top3-mode .top3-points {
+    font-size: calc(1.1rem * var(--text-scale));
+    padding: 4px 7px;
   }
 }
 
