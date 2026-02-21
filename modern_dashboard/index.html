@@ -19,6 +19,7 @@
     <section class="dashboard-nav" role="tablist" aria-label="Dashboard views">
       <button class="dashboard-nav-btn dashboard-nav-btn--active" data-view="mycycle" type="button">MyCycle</button>
       <button class="dashboard-nav-btn" data-view="season-quests" type="button">Season Quests</button>
+      <button class="dashboard-nav-btn" data-view="tilt" type="button">Tilt Dashboard</button>
       <button class="dashboard-nav-btn" type="button" disabled>Rivals (next)</button>
     </section>
 
@@ -55,6 +56,22 @@
           <span id="season-range-pill" class="range-pill">Top 100</span>
         </div>
         <div id="season-quests" class="rows"></div>
+      </article>
+    </section>
+
+    <section class="tilt-shell is-hidden" data-panel="tilt">
+      <article class="summary-panel">
+        <div class="meta">Tilt Dashboard pulse</div>
+        <div id="tilt-kpis" class="kpis"></div>
+        <div id="tilt-highlights" class="cycle-highlights"></div>
+      </article>
+
+      <article class="leaderboard-panel">
+        <div class="panel-title-row">
+          <h2>Tilt Leaderboard</h2>
+          <span id="tilt-range-pill" class="range-pill">Community Meta</span>
+        </div>
+        <div id="tilt-leaderboard" class="rows"></div>
       </article>
     </section>
 

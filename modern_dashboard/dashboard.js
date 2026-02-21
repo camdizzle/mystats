@@ -206,6 +206,116 @@ function renderSeasonQuestRows(data) {
   }).join('');
 }
 
+
+function renderTiltKpis(rows = [], data = {}) {
+  const host = el('tilt-kpis');
+  if (!host) return;
+
+  const totals = data?.tilt?.totals || {};
+  const deathsToday = Number(data?.tilt?.deaths_today || 0);
+  const totalLevels = Number(totals.levels || 0);
+  const totalPoints = Number(totals.points || 0);
+  const deathRate = totalLevels > 0 ? ((deathsToday / totalLevels) * 100) : 0;
+
+  host.innerHTML = [
+    { label: 'Tilt Competitors', value: fmt(uniqueParticipantCount(rows)) },
+    { label: 'Deaths Today', value: fmt(deathsToday) },
+    { label: 'Death Rate', value: `${deathRate.toFixed(1)}%` },
+    { label: 'Total Tilt Points', value: fmt(totalPoints) },
+  ].map((kpi) => (
+    `<div class="kpi"><div class="kpi-label">${escapeHtml(kpi.label)}</div><div class="kpi-value">${escapeHtml(kpi.value)}</div></div>`
+  )).join('');
+}
+
+function renderTiltHighlights(rows = [], data = {}) {
+  const host = el('tilt-highlights');
+  if (!host) return;
+
+  if (!rows.length) {
+    host.innerHTML = '<div class="highlight-card"><div class="highlight-title">Tilt Highlights</div><div class="highlight-main">No tilt data yet</div></div>';
+    return;
+  }
+
+  const leaderboardLeader = rows[0];
+  const topTiltee = rows.reduce((best, row) => {
+    if (!best) return row;
+    if (Number(row.tilt_top_tiltee || 0) !== Number(best.tilt_top_tiltee || 0)) {
+      return Number(row.tilt_top_tiltee || 0) > Number(best.tilt_top_tiltee || 0) ? row : best;
+    }
+    return Number(row.tilt_points || 0) > Number(best.tilt_points || 0) ? row : best;
+  }, null);
+
+  const leaderName = leaderboardLeader?.display_name || leaderboardLeader?.username || '—';
+  const topTilteeName = topTiltee?.display_name || topTiltee?.username || '—';
+
+  host.innerHTML = [
+    `<div class="highlight-card"><div class="highlight-title">Points Leader</div><div class="highlight-main">${escapeHtml(leaderName)}</div><div class="highlight-detail">${escapeHtml(`${fmt(leaderboardLeader?.tilt_points || 0)} tilt points`)}</div></div>`,
+    `<div class="highlight-card"><div class="highlight-title">Top Tiltee Legend</div><div class="highlight-main">${escapeHtml(topTilteeName)}</div><div class="highlight-detail">${escapeHtml(`${fmt(topTiltee?.tilt_top_tiltee || 0)} top-tiltee finishes`)}</div></div>`,
+  ].join('');
+}
+
+function renderTiltRows(data) {
+  const rowsHost = el('tilt-leaderboard');
+  if (!rowsHost) return;
+
+  const seasonPayload = data?.season_quests;
+  const allRows = Array.isArray(seasonPayload)
+    ? seasonPayload
+    : (Array.isArray(seasonPayload?.rows) ? seasonPayload.rows : []);
+
+  const rows = allRows
+    .filter((row) => Number(row.tilt_levels || 0) > 0 || Number(row.tilt_points || 0) > 0)
+    .map((row) => {
+      const tiltLevels = Number(row.tilt_levels || 0);
+      const deaths = Math.max(0, tiltLevels - Number(row.tilt_top_tiltee || 0));
+      const deathRate = tiltLevels > 0 ? (deaths / tiltLevels) * 100 : 0;
+      const pressureScore = (Number(row.tilt_points || 0) * 1.5) + (Number(row.tilt_top_tiltee || 0) * 25) - (deaths * 8);
+      const consistency = Math.max(0, 100 - deathRate);
+
+      return {
+        ...row,
+        deaths,
+        death_rate: deathRate,
+        pressure_score: pressureScore,
+        consistency,
+      };
+    })
+    .sort((a, b) => {
+      if (b.pressure_score !== a.pressure_score) return b.pressure_score - a.pressure_score;
+      if (b.tilt_points !== a.tilt_points) return b.tilt_points - a.tilt_points;
+      return b.tilt_top_tiltee - a.tilt_top_tiltee;
+    });
+
+  renderTiltKpis(rows, data);
+  renderTiltHighlights(rows, data);
+
+  if (!rows.length) {
+    rowsHost.innerHTML = '<div class="empty">No tilt competitors yet.</div>';
+    return;
+  }
+
+  el('tilt-range-pill').textContent = `Top ${Math.min(100, rows.length)}`;
+  rowsHost.innerHTML = rows.slice(0, 100).map((row, idx) => {
+    return `
+      <div class="row">
+        <div class="row-head">
+          <span class="rank">#${idx + 1}</span>
+          <span class="name">${escapeHtml(row.display_name || row.username || '-')}</span>
+          <span class="stat">${escapeHtml(`${fmt(Math.round(row.pressure_score))} pressure`)}</span>
+        </div>
+        <div class="quest-metrics">
+          <span>Tilt Points: ${escapeHtml(fmt(row.tilt_points))}</span>
+          <span>Tilt Levels: ${escapeHtml(fmt(row.tilt_levels))}</span>
+          <span>Top Tiltees: ${escapeHtml(fmt(row.tilt_top_tiltee))}</span>
+          <span>Death Count: ${escapeHtml(fmt(row.deaths))}</span>
+          <span>Death Rate: ${escapeHtml(`${row.death_rate.toFixed(1)}%`)}</span>
+          <span>Consistency: ${escapeHtml(`${row.consistency.toFixed(1)}%`)}</span>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
 function setActiveView(viewName) {
   activeView = viewName;
   document.querySelectorAll('.dashboard-nav-btn[data-view]').forEach((btn) => {
@@ -231,6 +341,7 @@ async function refresh() {
     el('updated-at').textContent = data.updated_at ? `Updated ${data.updated_at}` : 'Updated now';
     renderMyCycleRows(data);
     renderSeasonQuestRows(data);
+    renderTiltRows(data);
   } catch (error) {
     console.error('dashboard refresh failed', error);
     const node = el('mycycle');
