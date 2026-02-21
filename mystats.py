@@ -1916,7 +1916,7 @@ def _build_overlay_top3_payload():
         },
     ]
 
-    if recent_race['is_recent'] and recent_race['rows']:
+    if recent_race['rows']:
         views.append({
             'id': 'previous',
             'title': 'Top 10 Previous Race',
