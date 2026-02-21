@@ -372,8 +372,14 @@ def get_int_setting(setting_key, default=0):
     if cfg is None:
         return default
 
+    raw_value = cfg.get_setting(setting_key)
+    if raw_value is None or raw_value == '':
+        return default
+
+    normalized = str(raw_value).strip().replace(',', '')
+
     try:
-        return int(cfg.get_setting(setting_key) or default)
+        return int(float(normalized))
     except (TypeError, ValueError):
         return default
 
@@ -2143,12 +2149,16 @@ def _build_main_dashboard_payload():
     active_session_id = mycycle_session_ids[0] if mycycle_session_ids else None
     mycycle_session, mycycle_rows = get_mycycle_leaderboard(limit=250, session_id=active_session_id)
 
+    season_quest_rows = get_quest_completion_leaderboard(limit=100)
+    season_quest_targets = get_season_quest_targets()
+
     return {
         'updated_at': datetime.now().isoformat(timespec='seconds'),
         'season_quests': {
-            'rows': get_quest_completion_leaderboard(limit=100),
-            'targets': get_season_quest_targets(),
+            'rows': season_quest_rows,
+            'targets': season_quest_targets,
         },
+        'season_quest_targets': season_quest_targets,
         'rivals': get_global_rivalries(limit=200),
         'mycycle': {
             'session': mycycle_session or {},

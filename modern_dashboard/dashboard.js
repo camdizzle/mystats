@@ -136,7 +136,8 @@ function renderSeasonTargets(data) {
   const host = el('season-quest-targets');
   if (!host) return;
 
-  const targets = data?.season_quests?.targets || {};
+  const seasonPayload = data?.season_quests;
+  const targets = (!Array.isArray(seasonPayload) && seasonPayload?.targets) || data?.season_quest_targets || {};
   const questCards = [
     ['Season Races', targets.races],
     ['Season Points', targets.points],
@@ -157,7 +158,10 @@ function renderSeasonQuestRows(data) {
   const rowsHost = el('season-quests');
   if (!rowsHost) return;
 
-  const rows = Array.isArray(data?.season_quests?.rows) ? data.season_quests.rows : [];
+  const seasonPayload = data?.season_quests;
+  const rows = Array.isArray(seasonPayload)
+    ? seasonPayload
+    : (Array.isArray(seasonPayload?.rows) ? seasonPayload.rows : []);
   renderSeasonKpis(rows);
   renderSeasonTargets(data);
 
