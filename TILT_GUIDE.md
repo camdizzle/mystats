@@ -1,6 +1,6 @@
 # MyStats Tilt Mode Guide (Streamer-Friendly + Technical)
 
-Welcome to your **Tilt hub**. This guide explains Tilt tracking, dashboard usage, OBS overlay setup, and the technical formulas.
+Welcome to your **Tilt hub**. This guide explains Tilt tracking, dashboard usage, OBS overlay setup, in-app Tilt commands, and the technical formulas.
 
 ---
 
@@ -29,9 +29,7 @@ Use the overlays as viewer-facing Browser Sources in OBS:
 - Tilt overlay URL: `http://127.0.0.1:<overlay_server_port>/overlay/tilt`
 - Main overlay URL: `http://127.0.0.1:<overlay_server_port>/overlay`
 
-- Show current run context and top-tiltee spotlight.
-- Surface live standings.
-- Display level/run recap cards.
+---
 
 ## Exact connection steps (Dashboard + OBS)
 
@@ -49,118 +47,72 @@ Use the overlays as viewer-facing Browser Sources in OBS:
 
 ---
 
-## Tilt commands (API + verification)
+## In-app Tilt chat commands (`!` commands)
 
-Use these commands from a terminal for diagnostics and integrations.
+These are the Tilt-related commands users run in chat.
 
-### 1) Fetch current Tilt overlay payload
-
-**Command**
-```bash
-curl -s http://127.0.0.1:<port>/api/overlay/tilt
-```
-
+### `!mytilts [username]`
 **What it does**
-- Returns the active Tilt overlay JSON used by `/overlay/tilt`.
+- Shows Tilt points/deaths today and season totals for the caller or optional target username.
+- Also reports the last passed level.
 
-**Sample payload (trimmed)**
-```json
-{
-  "updated_at": "2026-02-22T14:35:01",
-  "title": "MyStats Tilt Run Tracker",
-  "settings": {
-    "theme": "midnight"
-  },
-  "current_run": {
-    "run_id": "d6f6c3f1-...",
-    "run_short_id": "d6f6c3",
-    "status": "active",
-    "level": 23,
-    "elapsed_time": "11:42",
-    "top_tiltee": "PlayerA",
-    "top_tiltee_count": 3,
-    "run_points": 1280,
-    "run_xp": 2142,
-    "best_run_xp_today": 3010,
-    "total_xp_today": 5220,
-    "total_deaths_today": 17,
-    "lifetime_expertise": 184320,
-    "leader": { "name": "PlayerA", "points": 620 },
-    "standings": [
-      { "name": "PlayerA", "points": 620 },
-      { "name": "PlayerB", "points": 510 }
-    ]
-  },
-  "last_run": {},
-  "level_completion": {},
-  "run_completion": {},
-  "run_completion_event_id": 14,
-  "suppress_initial_recaps": true
-}
-```
-
-### 2) Fetch dashboard payload (includes Tilt section)
-
-**Command**
-```bash
-curl -s http://127.0.0.1:<port>/api/dashboard/main
-```
-
-**What it does**
-- Returns full dashboard JSON for MyCycle, Season Quests, Rivals, and Tilt.
-
-**Sample payload (Tilt-relevant subset)**
-```json
-{
-  "tilt": {
-    "totals": {
-      "tilt_levels": 412,
-      "tilt_top_tiltee": 156,
-      "tilt_points": 82390
-    },
-    "deaths_today": 17,
-    "participants": 42
-  }
-}
-```
-
-### 3) Fetch only Tilt section from dashboard payload
-
-**Command**
-```bash
-curl -s http://127.0.0.1:<port>/api/dashboard/main | jq '.tilt'
-```
-
-**What it does**
-- Extracts only the Tilt object for scripts/alerts.
-
-**Sample payload**
-```json
-{
-  "totals": {
-    "tilt_levels": 412,
-    "tilt_top_tiltee": 156,
-    "tilt_points": 82390
-  },
-  "deaths_today": 17,
-  "participants": 42
-}
-```
-
-### 4) HTTP health check for Tilt overlay endpoint
-
-**Command**
-```bash
-curl -I http://127.0.0.1:<port>/overlay/tilt
-```
-
-**What it does**
-- Verifies the Tilt overlay page is being served.
-
-**Sample response**
+**Sample output**
 ```text
-HTTP/1.1 200 OK
-Content-Type: text/html; charset=utf-8
+PlayerA Stats | Today: 2,450 pts, 3 deaths | Season: 41,220 pts, 58 deaths | Last Passed: Level 27
+```
+
+### `!xp`
+**What it does**
+- Shows expertise values tracked by the app:
+  - last level XP
+  - last run XP
+  - today XP
+  - season XP
+
+**Sample output**
+```text
+Expertise Stats | Last Level XP: 156 | Last Run XP: 2,142 | Today's XP: 5,220 | Season XP: 184,320
+```
+
+### `!toptiltees`
+**What it does**
+- Shows top users by top-tiltee finishes (up to top 10).
+- Tie-breaker uses season tilt points.
+
+**Sample output**
+```text
+Top Tiltees: (1) PlayerA 22 tops, 41,220 points, (2) PlayerB 18 tops, 36,100 points, (3) PlayerC 15 tops, 29,880 points.
+```
+
+### `!top10tiltees`
+**What it does**
+- Shows top 10 users by total Tilt points.
+
+**Sample output**
+```text
+Top 10 Tilees by Tilt Points: (1) PlayerA 41,220 points, (2) PlayerB 36,100 points, (3) PlayerC 29,880 points.
+```
+
+### `!tiltsurvivors`
+**What it does**
+- Shows best Tilt survival rates (lowest death rate) among users who meet a minimum levels-participated threshold.
+- Minimum level threshold is configurable by settings (`tiltsurvivors_min_levels`, fallback `tiltdeath_min_levels`).
+
+**Sample output**
+```text
+Top 10 Best Tilt Survival Rate (min 20 levels): (1) PlayerA 4 deaths, 92.0% survive, (2) PlayerB 6 deaths, 88.5% survive.
+```
+
+### `!top10xp`
+**What it does**
+- Shows top 10 from the TiltedExpertise leaderboard (Pixel by Pixel source), after refreshing lifetime XP baseline.
+
+**Sample output**
+```text
+🏆 TOP 10 TiltedExpertise 🏆
+🥇 1. PlayerA - 184,320
+🥈 2. PlayerB - 173,940
+🥉 3. PlayerC - 169,102
 ```
 
 ---
@@ -219,5 +171,5 @@ Pressure is a ranking/highlight metric and is separate from expertise.
 
 - Dashboard: `http://127.0.0.1:<port>/dashboard`
 - OBS Tilt Browser Source: `http://127.0.0.1:<port>/overlay/tilt`
-- Tilt API payload: `http://127.0.0.1:<port>/api/overlay/tilt`
+- Tilt chat commands: `!mytilts`, `!xp`, `!toptiltees`, `!top10tiltees`, `!tiltsurvivors`, `!top10xp`
 - Expertise = survivor-count × level multiplier, accumulated into run/day/lifetime totals.
