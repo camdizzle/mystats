@@ -17,7 +17,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 from gspread.exceptions import SpreadsheetNotFound, WorksheetNotFound
 import requests
 import tkinter.simpledialog as simpledialog
-from PIL import Image, ImageTk
+from PIL import Image, ImageTk, ImageDraw
 from twitchio.ext import commands
 from flask import Flask, jsonify, request, send_from_directory
 import threading
@@ -45,11 +45,17 @@ from datetime import datetime, timedelta
 import atexit
 import socket
 import logging
+import queue
 
 try:
     import ttkbootstrap as ttkbootstrap_module
 except ImportError:
     ttkbootstrap_module = None
+
+try:
+    import pystray
+except ImportError:
+    pystray = None
 
 # Global Variables
 version = '6.0.1'
@@ -71,12 +77,107 @@ mycycle_export_button = None
 mycycle_home_session_ids = []
 mycycle_home_session_index = 0
 root = None
+tray_icon = None
+tray_thread = None
+tray_queue = queue.Queue()
+is_forced_exit = False
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s"
 )
 logger = logging.getLogger("mystats")
+
+
+def supports_system_tray():
+    return pystray is not None
+
+
+def _build_tray_image():
+    image = Image.new('RGBA', (64, 64), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle((6, 6, 58, 58), radius=12, fill=(20, 20, 20, 255))
+    draw.text((20, 18), "MS", fill=(255, 255, 255, 255))
+    return image
+
+
+def _drain_tray_queue():
+    if not root or not root.winfo_exists():
+        return
+
+    while True:
+        try:
+            command = tray_queue.get_nowait()
+        except queue.Empty:
+            break
+
+        if command == "show":
+            restore_from_tray()
+        elif command == "exit":
+            force_exit_application()
+
+    root.after(250, _drain_tray_queue)
+
+
+def _on_tray_open(icon, item):
+    tray_queue.put("show")
+
+
+def _on_tray_exit(icon, item):
+    tray_queue.put("exit")
+
+
+def start_system_tray_icon():
+    global tray_icon, tray_thread
+
+    if not supports_system_tray() or tray_icon is not None:
+        return
+
+    menu = pystray.Menu(
+        pystray.MenuItem("Open MyStats", _on_tray_open),
+        pystray.MenuItem("Exit", _on_tray_exit),
+    )
+
+    tray_icon = pystray.Icon("mystats", _build_tray_image(), "MyStats", menu)
+    tray_thread = threading.Thread(target=tray_icon.run, daemon=True)
+    tray_thread.start()
+
+
+def stop_system_tray_icon():
+    global tray_icon, tray_thread
+
+    if tray_icon is not None:
+        tray_icon.stop()
+        tray_icon = None
+        tray_thread = None
+
+
+def minimize_to_tray():
+    if not root or not root.winfo_exists():
+        return
+
+    if not supports_system_tray():
+        root.iconify()
+        return
+
+    root.withdraw()
+    start_system_tray_icon()
+
+
+def restore_from_tray():
+    if not root or not root.winfo_exists():
+        return
+
+    stop_system_tray_icon()
+    root.deiconify()
+    root.lift()
+    root.focus_force()
+
+
+def force_exit_application():
+    global is_forced_exit
+    is_forced_exit = True
+    on_close()
 
 
 def get_initial_ui_theme():
@@ -3628,6 +3729,10 @@ def test_audio_playback():
 
 
 def on_close():
+    if not is_forced_exit:
+        minimize_to_tray()
+        return
+
     # Disable the root window to prevent interaction
     root.attributes('-disabled', True)
 
@@ -3660,6 +3765,7 @@ def on_close():
     # Destroy the Tkinter windows after a delay
     def close_windows():
         sys.stdout = sys.__stdout__  # Reset stdout
+        stop_system_tray_icon()
         wait_window.destroy()
         root.destroy()
 
@@ -4111,6 +4217,7 @@ def initialize_main_window():
     root_window.grid_columnconfigure(1, weight=1)
 
     root = root_window
+    root.after(250, _drain_tray_queue)
 
     build_stats_sidebar(root_window)
     build_main_content(root_window)
