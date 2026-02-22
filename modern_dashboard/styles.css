@@ -33,7 +33,8 @@ body {
 .mycycle-shell,
 .season-shell,
 .tilt-shell,
-.rivals-shell { display: grid; grid-template-columns: 280px 1fr; gap: 10px; min-height: 76vh; }
+.rivals-shell,
+.races-shell { display: grid; grid-template-columns: 280px 1fr; gap: 10px; min-height: 76vh; }
 .summary-panel, .leaderboard-panel {
   border-radius: 12px;
   border: 1px solid rgba(126, 169, 245, .25);
@@ -147,4 +148,24 @@ body {
   gap: 4px;
   font-size: .71rem;
   color: #b4c9ee;
+}
+
+
+.race-type-filter {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.mini-filter-btn {
+  border-radius: 999px;
+  border: 1px solid rgba(127,216,255,.3);
+  background: rgba(255,255,255,.06);
+  color: #d4e4ff;
+  padding: 5px 8px;
+  font-size: .72rem;
+}
+.mini-filter-btn--active {
+  border-color: rgba(61,220,143,.45);
+  color: #8cf1b8;
 }

@@ -21,6 +21,7 @@
       <button class="dashboard-nav-btn" data-view="season-quests" type="button">Season Quests</button>
       <button class="dashboard-nav-btn" data-view="tilt" type="button">Tilt Dashboard</button>
       <button class="dashboard-nav-btn" data-view="rivals" type="button">Rivals</button>
+      <button class="dashboard-nav-btn" data-view="races" type="button">Race Dashboard</button>
     </section>
 
     <section class="mycycle-shell" data-panel="mycycle">
@@ -90,6 +91,27 @@
         <div id="rivals-leaderboard" class="rows"></div>
       </article>
     </section>
+    <section class="races-shell is-hidden" data-panel="races">
+      <article class="summary-panel">
+        <div class="meta">Race + BR snapshot</div>
+        <div class="race-type-filter" role="group" aria-label="Race type filter">
+          <button class="mini-filter-btn mini-filter-btn--active" type="button" data-race-filter="both">Both</button>
+          <button class="mini-filter-btn" type="button" data-race-filter="race">Races</button>
+          <button class="mini-filter-btn" type="button" data-race-filter="br">BR</button>
+        </div>
+        <div id="races-kpis" class="kpis"></div>
+        <div id="races-highlights" class="cycle-highlights"></div>
+      </article>
+
+      <article class="leaderboard-panel">
+        <div class="panel-title-row">
+          <h2>Race Leaderboard</h2>
+          <span id="races-range-pill" class="range-pill">Both modes</span>
+        </div>
+        <div id="races-leaderboard" class="rows"></div>
+      </article>
+    </section>
+
 
   </main>
   <script src="/dashboard/dashboard.js"></script>

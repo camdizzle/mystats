@@ -1,6 +1,7 @@
 const el = (id) => document.getElementById(id);
 
 let activeView = 'mycycle';
+let raceDashboardFilter = 'both';
 
 function fmt(n) {
   const x = Number(n || 0);
@@ -417,6 +418,146 @@ function renderRivalsRows(data) {
   }).join('');
 }
 
+
+function getRaceRowTotals(row, filterMode = 'both') {
+  const raceCount = Number(row.race_count || 0);
+  const brCount = Number(row.br_count || 0);
+  const racePoints = Number(row.race_points || 0);
+  const brPoints = Number(row.br_points || 0);
+
+  if (filterMode === 'race') {
+    return {
+      events: raceCount,
+      points: racePoints,
+      highScore: Number(row.race_hs || 0),
+      modeLabel: 'Races',
+    };
+  }
+
+  if (filterMode === 'br') {
+    return {
+      events: brCount,
+      points: brPoints,
+      highScore: Number(row.br_hs || 0),
+      modeLabel: 'BR',
+    };
+  }
+
+  return {
+    events: raceCount + brCount,
+    points: racePoints + brPoints,
+    highScore: Math.max(Number(row.race_hs || 0), Number(row.br_hs || 0)),
+    modeLabel: 'Both',
+  };
+}
+
+function renderRaceDashboardKpis(rows = [], filterMode = 'both') {
+  const host = el('races-kpis');
+  if (!host) return;
+
+  const filteredRows = rows.filter((row) => getRaceRowTotals(row, filterMode).events > 0);
+  const totalEvents = filteredRows.reduce((acc, row) => acc + getRaceRowTotals(row, filterMode).events, 0);
+  const totalPoints = filteredRows.reduce((acc, row) => acc + getRaceRowTotals(row, filterMode).points, 0);
+  const avgPoints = totalEvents > 0 ? (totalPoints / totalEvents) : 0;
+
+  host.innerHTML = [
+    { label: 'Tracked Racers', value: fmt(filteredRows.length) },
+    { label: filterMode === 'race' ? 'Total Races' : (filterMode === 'br' ? 'Total BRs' : 'Total Events'), value: fmt(totalEvents) },
+    { label: 'Total Points', value: fmt(totalPoints) },
+    { label: 'Avg Points/Event', value: avgPoints.toFixed(1) },
+  ].map((kpi) => (
+    `<div class="kpi"><div class="kpi-label">${escapeHtml(kpi.label)}</div><div class="kpi-value">${escapeHtml(kpi.value)}</div></div>`
+  )).join('');
+}
+
+function renderRaceDashboardHighlights(rows = [], filterMode = 'both') {
+  const host = el('races-highlights');
+  if (!host) return;
+
+  const filteredRows = rows
+    .map((row) => ({ ...row, totals: getRaceRowTotals(row, filterMode) }))
+    .filter((row) => row.totals.events > 0)
+    .sort((a, b) => {
+      if (b.totals.points !== a.totals.points) return b.totals.points - a.totals.points;
+      return b.totals.events - a.totals.events;
+    });
+
+  if (!filteredRows.length) {
+    host.innerHTML = '<div class="highlight-card"><div class="highlight-title">Race Highlights</div><div class="highlight-main">No race data yet for this filter</div></div>';
+    return;
+  }
+
+  const pointsLeader = filteredRows[0];
+  const hsLeader = filteredRows.reduce((best, row) => {
+    if (!best) return row;
+    if (row.totals.highScore !== best.totals.highScore) return row.totals.highScore > best.totals.highScore ? row : best;
+    return row.totals.points > best.totals.points ? row : best;
+  }, null);
+
+  host.innerHTML = [
+    `<div class="highlight-card"><div class="highlight-title">Points Leader</div><div class="highlight-main">${escapeHtml(pointsLeader.display_name || pointsLeader.username || '—')}</div><div class="highlight-detail">${escapeHtml(`${fmt(pointsLeader.totals.points)} points`)}</div></div>`,
+    `<div class="highlight-card"><div class="highlight-title">High Score Leader</div><div class="highlight-main">${escapeHtml(hsLeader.display_name || hsLeader.username || '—')}</div><div class="highlight-detail">${escapeHtml(`${fmt(hsLeader.totals.highScore)} top score`)}</div></div>`,
+  ].join('');
+}
+
+function renderRaceDashboardRows(data) {
+  const rowsHost = el('races-leaderboard');
+  if (!rowsHost) return;
+
+  const allRows = Array.isArray(data?.races) ? data.races : [];
+  const rows = allRows
+    .map((row) => ({ ...row, totals: getRaceRowTotals(row, raceDashboardFilter) }))
+    .filter((row) => row.totals.events > 0)
+    .sort((a, b) => {
+      if (b.totals.points !== a.totals.points) return b.totals.points - a.totals.points;
+      if (b.totals.events !== a.totals.events) return b.totals.events - a.totals.events;
+      return b.totals.highScore - a.totals.highScore;
+    });
+
+  renderRaceDashboardKpis(allRows, raceDashboardFilter);
+  renderRaceDashboardHighlights(allRows, raceDashboardFilter);
+
+  const modeLabel = raceDashboardFilter === 'race' ? 'Races' : (raceDashboardFilter === 'br' ? 'BR' : 'Both modes');
+  el('races-range-pill').textContent = `${modeLabel} • Top ${Math.min(200, rows.length)}`;
+
+  if (!rows.length) {
+    rowsHost.innerHTML = '<div class="empty">No competitors found for this filter.</div>';
+    return;
+  }
+
+  rowsHost.innerHTML = rows.slice(0, 200).map((row, idx) => {
+    const avg = row.totals.events > 0 ? (row.totals.points / row.totals.events) : 0;
+    return `
+      <div class="row">
+        <div class="row-head">
+          <span class="rank">#${idx + 1}</span>
+          <span class="name">${escapeHtml(row.display_name || row.username || '-')}</span>
+          <span class="stat">${escapeHtml(`${fmt(row.totals.points)} pts`)}</span>
+        </div>
+        <div class="quest-metrics">
+          <span>Events: ${escapeHtml(fmt(row.totals.events))}</span>
+          <span>Avg/Event: ${escapeHtml(avg.toFixed(1))}</span>
+          <span>High Score: ${escapeHtml(fmt(row.totals.highScore))}</span>
+          <span>Race: ${escapeHtml(`${fmt(row.race_points)} pts / ${fmt(row.race_count)}`)}</span>
+          <span>BR: ${escapeHtml(`${fmt(row.br_points)} pts / ${fmt(row.br_count)}`)}</span>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function wireRaceFilterButtons() {
+  document.querySelectorAll('.mini-filter-btn[data-race-filter]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      raceDashboardFilter = btn.dataset.raceFilter || 'both';
+      document.querySelectorAll('.mini-filter-btn[data-race-filter]').forEach((candidate) => {
+        candidate.classList.toggle('mini-filter-btn--active', candidate.dataset.raceFilter === raceDashboardFilter);
+      });
+      refresh();
+    });
+  });
+}
+
 function setActiveView(viewName) {
   activeView = viewName;
   document.querySelectorAll('.dashboard-nav-btn[data-view]').forEach((btn) => {
@@ -444,6 +585,7 @@ async function refresh() {
     renderSeasonQuestRows(data);
     renderTiltRows(data);
     renderRivalsRows(data);
+    renderRaceDashboardRows(data);
   } catch (error) {
     console.error('dashboard refresh failed', error);
     const node = el('mycycle');
@@ -453,4 +595,5 @@ async function refresh() {
 
 refresh();
 wireViewTabs();
+wireRaceFilterButtons();
 setInterval(refresh, 15000);
