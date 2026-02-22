@@ -397,20 +397,23 @@ function renderRivalsHighlights(rows = []) {
   }
 
   const closest = rows[0];
-  const hottest = rows.reduce((best, row) => {
+  const mostOneSided = rows.reduce((best, row) => {
     if (!best) return row;
-    const rowCombined = Number(row.points_a || 0) + Number(row.points_b || 0);
-    const bestCombined = Number(best.points_a || 0) + Number(best.points_b || 0);
-    if (rowCombined !== bestCombined) return rowCombined > bestCombined ? row : best;
-    return Number(row.point_gap || 0) < Number(best.point_gap || 0) ? row : best;
+    const rowGap = Number(row.point_gap || 0);
+    const bestGap = Number(best.point_gap || 0);
+    if (rowGap !== bestGap) return rowGap > bestGap ? row : best;
+
+    const rowRaceGap = Math.abs(Number(row.races_a || 0) - Number(row.races_b || 0));
+    const bestRaceGap = Math.abs(Number(best.races_a || 0) - Number(best.races_b || 0));
+    return rowRaceGap > bestRaceGap ? row : best;
   }, null);
 
   const closestNames = `${closest.display_a || closest.user_a || '—'} vs ${closest.display_b || closest.user_b || '—'}`;
-  const hottestNames = `${hottest.display_a || hottest.user_a || '—'} vs ${hottest.display_b || hottest.user_b || '—'}`;
+  const oneSidedNames = `${mostOneSided.display_a || mostOneSided.user_a || '—'} vs ${mostOneSided.display_b || mostOneSided.user_b || '—'}`;
 
   host.innerHTML = [
     `<div class="highlight-card"><div class="highlight-title">Closest Matchup</div><div class="highlight-main">${escapeHtml(closestNames)}</div><div class="highlight-detail">${escapeHtml(`${fmt(closest.point_gap)} point gap`)}</div></div>`,
-    `<div class="highlight-card"><div class="highlight-title">Highest Stakes</div><div class="highlight-main">${escapeHtml(hottestNames)}</div><div class="highlight-detail">${escapeHtml(`${fmt(Number(hottest.points_a || 0) + Number(hottest.points_b || 0))} combined points`)}</div></div>`,
+    `<div class="highlight-card"><div class="highlight-title">Most One-Sided</div><div class="highlight-main">${escapeHtml(oneSidedNames)}</div><div class="highlight-detail">${escapeHtml(`${fmt(mostOneSided.point_gap)} point gap`)}</div></div>`,
   ].join('');
 }
 
@@ -435,21 +438,27 @@ function renderRivalsRows(data) {
     const racesA = Number(row.races_a || 0);
     const racesB = Number(row.races_b || 0);
     const gap = Math.abs(pointsA - pointsB);
-    const combined = pointsA + pointsB;
-    const racesCombined = racesA + racesB;
+    const pointDelta = pointsA - pointsB;
+    const raceDelta = racesA - racesB;
+    const pprA = racesA > 0 ? pointsA / racesA : 0;
+    const pprB = racesB > 0 ? pointsB / racesB : 0;
+    const pprDelta = pprA - pprB;
+    const leaderName = pointDelta >= 0 ? (row.display_a || row.user_a || 'Player A') : (row.display_b || row.user_b || 'Player B');
+    const leadValue = Math.abs(pointDelta);
 
     return `
       <div class="row">
         <div class="row-head">
           <span class="rank">#${idx + 1}</span>
           <span class="name">${escapeHtml(`${row.display_a || row.user_a || '-'} vs ${row.display_b || row.user_b || '-'}`)}</span>
-          <span class="stat">${escapeHtml(`${fmt(gap)} gap`)}</span>
+          <span class="stat">${escapeHtml(`${leaderName} +${fmt(leadValue)}`)}</span>
         </div>
         <div class="quest-metrics">
           <span>${escapeHtml(row.display_a || row.user_a || 'Player A')}: ${escapeHtml(fmt(pointsA))} pts (${escapeHtml(fmt(racesA))} races)</span>
           <span>${escapeHtml(row.display_b || row.user_b || 'Player B')}: ${escapeHtml(fmt(pointsB))} pts (${escapeHtml(fmt(racesB))} races)</span>
-          <span>Combined Points: ${escapeHtml(fmt(combined))}</span>
-          <span>Combined Races: ${escapeHtml(fmt(racesCombined))}</span>
+          <span>Point Gap: ${escapeHtml(fmt(gap))}</span>
+          <span>Race Gap: ${escapeHtml(fmt(Math.abs(raceDelta)))}</span>
+          <span>PPR Edge: ${escapeHtml((Math.abs(pprDelta)).toFixed(2))} (${escapeHtml((pprDelta >= 0 ? (row.display_a || row.user_a || 'Player A') : (row.display_b || row.user_b || 'Player B')))} ahead)</span>
         </div>
       </div>
     `;
