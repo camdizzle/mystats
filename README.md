@@ -1,20 +1,16 @@
-ALL SETTINGS ARE UPDATED IN settings.txt.  PLEASE UPDATE THAT FILE BEFORE USING.
+ALL SETTINGS ARE UPDATED IN settings.txt
 
-You can obtain your oauth token by going to: 
+You can link your own account to mystats via the app.  Click the button in the top right corner.  If you have any token errors and the app will not open, then delete token.json file from your mystats folder and restart the app.
 
-https://twitchapps.com/tmi/ 
+If you use the default account, you need to make mystats_results a moderator in your twitch chat
 
-Log in with the account that you wish to use to make the announcements in chat.  The TWITCH_USERNAME in the settings file will need to match the account that you use to obtain the token.
-
-OBS OVERLAY FILES:
+Manual OBS OVERLAY FILES:
 CountofRaces.txt (The number of races recorded in the results file for today)
 AvgPointsToday.txt (Avg of points earned / Races completed)
 HighScore.txt (Name and Points of the high score of the day!)
 LatestWinner.txt (Text output displaying the last race winner)
 TotalPointsToday.txt (Total points earned today)
 WinnerTotalPoints.txt (Total points of the last race winner)
-
-If you have any questions, or issues, or suggestions, visit discord.gg/camwow and contact CamWOW!!!.
 
 ## Version 6.1.0 Enhancements
 
@@ -43,8 +39,6 @@ The modern dashboard is also served by the same local Flask server and is intend
 
 **How dashboard data works:**
 - Dashboard page: `http://127.0.0.1:<overlay_server_port>/dashboard`
-- Dashboard API payload: `http://127.0.0.1:<overlay_server_port>/api/dashboard/main`
-- Front-end cards/leaderboards poll the API and rerender automatically.
 
 **How to connect/open dashboard:**
 1. Start MyStats.
@@ -94,25 +88,3 @@ Overlay settings are controlled from the desktop app (Settings → Overlay) and 
 - Text scale
 - Top-3 medal emote visibility
 - Compact row spacing
-
-## Modern Dashboard Notes
-
-The **Modern Dashboard** is a web UI served by MyStats' built-in Flask server and opened at:
-
-`http://127.0.0.1:<overlay_server_port>/dashboard`
-
-### Embedded mode (pywebview)
-
-MyStats now attempts to embed the modern dashboard directly inside the **Dashboards (Modern)** tab using `pywebview` (Windows + Python 3.10 environment).
-
-If `pywebview` is unavailable, MyStats falls back to opening the dashboard in an external browser app window (Edge/Chrome/Brave/Chromium) when possible.
-
-### "Failed to load cycle data" / "Unable to load MyCycle data"
-
-That message comes from the dashboard page when `GET /api/dashboard/main` fails (typically when the local Flask server is not running on the expected port, or the app was opened from a file path instead of through `/dashboard`).
-
-Quick checks:
-- Verify MyStats is running.
-- Confirm Settings → Overlay **Server Port** and restart after changes.
-- Open `http://127.0.0.1:<port>/api/dashboard/main` directly in your browser; it should return JSON.
-- Open the dashboard from inside MyStats (button in **Dashboards (Modern)**), not by double-clicking `index.html`.
