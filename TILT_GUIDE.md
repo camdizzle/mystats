@@ -29,7 +29,9 @@ Use the overlays as viewer-facing Browser Sources in OBS:
 - Tilt overlay URL: `http://127.0.0.1:<overlay_server_port>/overlay/tilt`
 - Main overlay URL: `http://127.0.0.1:<overlay_server_port>/overlay`
 
----
+- Show current run context and top-tiltee spotlight.
+- Surface live standings.
+- Display level/run recap cards.
 
 ## Exact connection steps (Dashboard + OBS)
 
