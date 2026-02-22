@@ -348,6 +348,15 @@ def parse_tilt_level_state(level_rows):
     }
 
 
+def parse_boolean_token(value, default=False):
+    token = str(value or '').strip().lower()
+    if token in ('true', 'yes', 'y', '1'):
+        return True
+    if token in ('false', 'no', 'n', '0'):
+        return False
+    return default
+
+
 def parse_tilt_result_row(row):
     """Parse a tilt results row written by `tilted` and return (username, points, run_id)."""
     if len(row) < 5:
@@ -3042,6 +3051,7 @@ def open_settings_window():
     ttk.Label(tilt_tab, text="Configure tilt chat alerts, !tiltsurvivors threshold, and tilt overlay behavior", style="Small.TLabel").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
 
     chat_tilt_results_var = tk.BooleanVar(value=is_chat_response_enabled("chat_tilt_results"))
+    chat_tilt_suppress_offline_var = tk.BooleanVar(value=is_chat_response_enabled("chat_tilt_suppress_offline"))
     chat_narrative_alerts_var = tk.BooleanVar(value=is_chat_response_enabled("chat_narrative_alerts"))
     narrative_alert_grinder_var = tk.BooleanVar(value=is_chat_response_enabled("narrative_alert_grinder_enabled"))
     narrative_alert_winmilestone_var = tk.BooleanVar(value=is_chat_response_enabled("narrative_alert_winmilestone_enabled"))
@@ -3052,23 +3062,24 @@ def open_settings_window():
 
     ttk.Checkbutton(tilt_alerts_frame, text="Tilt Results", variable=chat_tilt_results_var).grid(row=0, column=0, sticky="w", padx=10, pady=(8, 4))
     ttk.Checkbutton(tilt_alerts_frame, text="Narrative Alerts", variable=chat_narrative_alerts_var).grid(row=1, column=0, sticky="w", padx=10, pady=(0, 4))
-    ttk.Checkbutton(tilt_alerts_frame, text="Grinder milestones", variable=narrative_alert_grinder_var).grid(row=2, column=0, sticky="w", padx=10, pady=2)
-    ttk.Checkbutton(tilt_alerts_frame, text="Win milestones", variable=narrative_alert_winmilestone_var).grid(row=3, column=0, sticky="w", padx=10, pady=2)
-    ttk.Checkbutton(tilt_alerts_frame, text="Lead changes", variable=narrative_alert_leadchange_var).grid(row=4, column=0, sticky="w", padx=10, pady=(2, 8))
+    ttk.Checkbutton(tilt_alerts_frame, text="Suppress messages when level is offline", variable=chat_tilt_suppress_offline_var).grid(row=2, column=0, sticky="w", padx=10, pady=(0, 4))
+    ttk.Checkbutton(tilt_alerts_frame, text="Grinder milestones", variable=narrative_alert_grinder_var).grid(row=3, column=0, sticky="w", padx=10, pady=2)
+    ttk.Checkbutton(tilt_alerts_frame, text="Win milestones", variable=narrative_alert_winmilestone_var).grid(row=4, column=0, sticky="w", padx=10, pady=2)
+    ttk.Checkbutton(tilt_alerts_frame, text="Lead changes", variable=narrative_alert_leadchange_var).grid(row=5, column=0, sticky="w", padx=10, pady=(2, 8))
 
-    ttk.Label(tilt_alerts_frame, text="Cooldown (races)", style="Small.TLabel").grid(row=2, column=1, sticky="w", padx=(12, 8), pady=(2, 2))
+    ttk.Label(tilt_alerts_frame, text="Cooldown (races)", style="Small.TLabel").grid(row=3, column=1, sticky="w", padx=(12, 8), pady=(2, 2))
     narrative_alert_cooldown_entry = ttk.Entry(tilt_alerts_frame, width=8, justify='center')
-    narrative_alert_cooldown_entry.grid(row=2, column=2, sticky="w", padx=(0, 10), pady=(2, 2))
+    narrative_alert_cooldown_entry.grid(row=3, column=2, sticky="w", padx=(0, 10), pady=(2, 2))
     narrative_alert_cooldown_entry.insert(0, config.get_setting("narrative_alert_cooldown_races") or "3")
 
-    ttk.Label(tilt_alerts_frame, text="Min lead gap", style="Small.TLabel").grid(row=3, column=1, sticky="w", padx=(12, 8), pady=2)
+    ttk.Label(tilt_alerts_frame, text="Min lead gap", style="Small.TLabel").grid(row=4, column=1, sticky="w", padx=(12, 8), pady=2)
     narrative_alert_min_gap_entry = ttk.Entry(tilt_alerts_frame, width=8, justify='center')
-    narrative_alert_min_gap_entry.grid(row=3, column=2, sticky="w", padx=(0, 10), pady=2)
+    narrative_alert_min_gap_entry.grid(row=4, column=2, sticky="w", padx=(0, 10), pady=2)
     narrative_alert_min_gap_entry.insert(0, config.get_setting("narrative_alert_min_lead_change_points") or "500")
 
-    ttk.Label(tilt_alerts_frame, text="Max items per alert", style="Small.TLabel").grid(row=4, column=1, sticky="w", padx=(12, 8), pady=(2, 8))
+    ttk.Label(tilt_alerts_frame, text="Max items per alert", style="Small.TLabel").grid(row=5, column=1, sticky="w", padx=(12, 8), pady=(2, 8))
     narrative_alert_max_items_entry = ttk.Entry(tilt_alerts_frame, width=8, justify='center')
-    narrative_alert_max_items_entry.grid(row=4, column=2, sticky="w", padx=(0, 10), pady=(2, 8))
+    narrative_alert_max_items_entry.grid(row=5, column=2, sticky="w", padx=(0, 10), pady=(2, 8))
     narrative_alert_max_items_entry.insert(0, config.get_setting("narrative_alert_max_items") or "3")
 
     ttk.Label(tilt_tab, text="Max names announced (Race/Tilt)").grid(row=2, column=0, sticky="w", pady=(2, 4))
@@ -3389,6 +3400,7 @@ def open_settings_window():
         chat_tilt_results_var.set(True)
         chat_all_commands_var.set(True)
         chat_narrative_alerts_var.set(True)
+        chat_tilt_suppress_offline_var.set(True)
         narrative_alert_grinder_var.set(True)
         narrative_alert_winmilestone_var.set(True)
         narrative_alert_leadchange_var.set(True)
@@ -3485,6 +3497,7 @@ def open_settings_window():
         config.set_setting("chat_br_results", str(chat_br_results_var.get()), persistent=True)
         config.set_setting("chat_race_results", str(chat_race_results_var.get()), persistent=True)
         config.set_setting("chat_tilt_results", str(chat_tilt_results_var.get()), persistent=True)
+        config.set_setting("chat_tilt_suppress_offline", str(chat_tilt_suppress_offline_var.get()), persistent=True)
         config.set_setting("chat_all_commands", str(chat_all_commands_var.get()), persistent=True)
         config.set_setting("chat_narrative_alerts", str(chat_narrative_alerts_var.get()), persistent=True)
         config.set_setting("narrative_alert_grinder_enabled", str(narrative_alert_grinder_var.get()), persistent=True)
@@ -4507,6 +4520,7 @@ class ConfigManager:
                                 'tilt_player_file', 'active_event_ids', 'paused_event_ids', 'checkpoint_results_file',
                                 'tilts_results_file', 'tilt_level_file', 'map_data_file', 'map_results_file',
                                 'UI_THEME', 'chat_br_results', 'chat_race_results', 'chat_tilt_results',
+                                'chat_tilt_suppress_offline',
                                 'chat_mystats_command', 'chat_all_commands', 'chat_narrative_alerts',
                                 'narrative_alert_grinder_enabled', 'narrative_alert_winmilestone_enabled',
                                 'narrative_alert_leadchange_enabled', 'narrative_alert_cooldown_races',
@@ -4535,6 +4549,7 @@ class ConfigManager:
             'chat_br_results': 'True',
             'chat_race_results': 'True',
             'chat_tilt_results': 'True',
+            'chat_tilt_suppress_offline': 'True',
             'chat_mystats_command': 'True',
             'chat_all_commands': 'True',
             'chat_narrative_alerts': 'True',
@@ -6965,6 +6980,9 @@ async def tilted(bot):
             level_points = level_state['level_xp']
             total_xp = level_state['total_xp']
             level_passed = level_state['level_passed']
+            is_level_live = parse_boolean_token(level_state.get('live'), default=True)
+            suppress_offline_tilt_chat = is_chat_response_enabled("chat_tilt_suppress_offline")
+            should_suppress_tilt_chat = suppress_offline_tilt_chat and not is_level_live
 
             config.set_setting('tilt_current_level', str(current_level), persistent=False)
             config.set_setting('tilt_current_elapsed', str(elapsed_time), persistent=False)
@@ -7144,7 +7162,7 @@ async def tilted(bot):
                     max_items = max(1, get_int_setting("narrative_alert_max_items", 3))
                     if cooldown_races == 0 or (tilt_levels_count - last_tilt_narrative_alert_level_count) >= cooldown_races:
                         combined_narrative = "📣 Player Alerts: " + " | ".join(narrative_messages[:max_items]) + "."
-                        if is_chat_response_enabled("chat_tilt_results"):
+                        if is_chat_response_enabled("chat_tilt_results") and not should_suppress_tilt_chat:
                             await send_chat_message(bot.channel, combined_narrative, category="tilt")
                         last_tilt_narrative_alert_level_count = tilt_levels_count
 
@@ -7158,7 +7176,7 @@ async def tilted(bot):
                 if limited_finishers:
                     chunks = chunked_join_messages(base_msg, f"Level {current_level} Survivors: ", limited_finishers, max_length=max_message_length)
                     for chunk in chunks:
-                        if is_chat_response_enabled("chat_tilt_results"):
+                        if is_chat_response_enabled("chat_tilt_results") and not should_suppress_tilt_chat:
                             await send_chat_message(bot.channel, chunk, category="tilt")
                     text_area.insert('end', f"\n{base_msg}{', '.join(limited_finishers)}\n")
                 else:
@@ -7211,11 +7229,11 @@ async def tilted(bot):
                         max_length=max_message_length
                     )
                     for chunk in chunks:
-                        if is_chat_response_enabled("chat_tilt_results"):
+                        if is_chat_response_enabled("chat_tilt_results") and not should_suppress_tilt_chat:
                             await send_chat_message(bot.channel, chunk, category="tilt")
                     text_area.insert('end', f"\nTilt run complete! Final standings: {', '.join(standings_items)}\n")
                 else:
-                    if is_chat_response_enabled("chat_tilt_results"):
+                    if is_chat_response_enabled("chat_tilt_results") and not should_suppress_tilt_chat:
                         await send_chat_message(bot.channel, "Tilt run complete! No results to display.", category="tilt")
                     text_area.insert('end', f"\nTilt run complete! No results to display.\n")
 
