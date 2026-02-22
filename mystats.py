@@ -765,6 +765,94 @@ def get_quest_completion_leaderboard(limit=100):
     return leaderboard[:limit]
 
 
+def get_race_dashboard_leaderboard(limit=250):
+    stats_by_user = {}
+    data_dir = config.get_setting('directory')
+    if not data_dir:
+        return []
+
+    for allraces in glob.glob(os.path.join(data_dir, "allraces_*.csv")):
+        try:
+            with open(allraces, 'rb') as f:
+                raw_data = f.read()
+            result = chardet.detect(raw_data)
+            encoding = result['encoding'] if result['encoding'] else 'utf-8'
+
+            with open(allraces, 'r', encoding=encoding, errors='ignore') as f:
+                reader = csv.reader(f)
+                for row in reader:
+                    if len(row) < 5:
+                        continue
+
+                    username = row[1].strip().lower()
+                    display_name = row[2].strip() if len(row) > 2 else username
+                    if not username:
+                        continue
+
+                    mode = row[4].strip().lower()
+                    try:
+                        points = int(row[3])
+                    except (TypeError, ValueError):
+                        points = 0
+
+                    if username not in stats_by_user:
+                        stats_by_user[username] = {
+                            'username': username,
+                            'display_name': display_name or username,
+                            'race_count': 0,
+                            'br_count': 0,
+                            'race_points': 0,
+                            'br_points': 0,
+                            'race_hs': 0,
+                            'br_hs': 0,
+                        }
+
+                    if display_name:
+                        stats_by_user[username]['display_name'] = display_name
+
+                    if mode == 'race':
+                        stats_by_user[username]['race_count'] += 1
+                        stats_by_user[username]['race_points'] += points
+                        if points > stats_by_user[username]['race_hs']:
+                            stats_by_user[username]['race_hs'] = points
+                    elif mode == 'br':
+                        stats_by_user[username]['br_count'] += 1
+                        stats_by_user[username]['br_points'] += points
+                        if points > stats_by_user[username]['br_hs']:
+                            stats_by_user[username]['br_hs'] = points
+        except FileNotFoundError:
+            continue
+        except Exception as e:
+            print(f"Error reading race dashboard data from {allraces}: {e}")
+
+    leaderboard = []
+    for row in stats_by_user.values():
+        race_count = int(row.get('race_count', 0))
+        br_count = int(row.get('br_count', 0))
+        total_events = race_count + br_count
+        race_points = int(row.get('race_points', 0))
+        br_points = int(row.get('br_points', 0))
+        total_points = race_points + br_points
+
+        leaderboard.append({
+            **row,
+            'total_events': total_events,
+            'total_points': total_points,
+            'avg_points': round(total_points / total_events, 2) if total_events > 0 else 0,
+        })
+
+    leaderboard.sort(
+        key=lambda row: (
+            row['total_points'],
+            row['total_events'],
+            row['race_hs'],
+            row['br_hs'],
+        ),
+        reverse=True,
+    )
+    return leaderboard[:limit]
+
+
 def open_quest_completion_window(parent_window):
     leaderboard = get_quest_completion_leaderboard(limit=200)
     if not leaderboard:
@@ -2225,6 +2313,7 @@ def _build_main_dashboard_payload():
         },
         'season_quest_targets': season_quest_targets,
         'rivals': get_global_rivalries(limit=200),
+        'races': get_race_dashboard_leaderboard(limit=250),
         'mycycle': {
             'session': mycycle_session or {},
             'rows': mycycle_rows,
