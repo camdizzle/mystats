@@ -17,7 +17,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 from gspread.exceptions import SpreadsheetNotFound, WorksheetNotFound
 import requests
 import tkinter.simpledialog as simpledialog
-from PIL import Image, ImageTk
+from PIL import Image, ImageTk, ImageDraw
 from twitchio.ext import commands
 from flask import Flask, jsonify, request, send_from_directory
 import threading
@@ -45,11 +45,24 @@ from datetime import datetime, timedelta
 import atexit
 import socket
 import logging
+import queue
+import tempfile
+import subprocess
 
 try:
     import ttkbootstrap as ttkbootstrap_module
 except ImportError:
     ttkbootstrap_module = None
+
+try:
+    import pystray
+except ImportError:
+    pystray = None
+
+try:
+    from win10toast import ToastNotifier
+except ImportError:
+    ToastNotifier = None
 
 # Global Variables
 version = '6.0.1'
@@ -71,12 +84,108 @@ mycycle_export_button = None
 mycycle_home_session_ids = []
 mycycle_home_session_index = 0
 root = None
+tray_icon = None
+tray_thread = None
+tray_queue = queue.Queue()
+is_forced_exit = False
+win_toaster = ToastNotifier() if ToastNotifier is not None else None
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s"
 )
 logger = logging.getLogger("mystats")
+
+
+def supports_system_tray():
+    return pystray is not None
+
+
+def _build_tray_image():
+    image = Image.new('RGBA', (64, 64), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle((6, 6, 58, 58), radius=12, fill=(20, 20, 20, 255))
+    draw.text((20, 18), "MS", fill=(255, 255, 255, 255))
+    return image
+
+
+def _drain_tray_queue():
+    if not root or not root.winfo_exists():
+        return
+
+    while True:
+        try:
+            command = tray_queue.get_nowait()
+        except queue.Empty:
+            break
+
+        if command == "show":
+            restore_from_tray()
+        elif command == "exit":
+            force_exit_application()
+
+    root.after(250, _drain_tray_queue)
+
+
+def _on_tray_open(icon, item):
+    tray_queue.put("show")
+
+
+def _on_tray_exit(icon, item):
+    tray_queue.put("exit")
+
+
+def start_system_tray_icon():
+    global tray_icon, tray_thread
+
+    if not supports_system_tray() or tray_icon is not None:
+        return
+
+    menu = pystray.Menu(
+        pystray.MenuItem("Open MyStats", _on_tray_open),
+        pystray.MenuItem("Exit", _on_tray_exit),
+    )
+
+    tray_icon = pystray.Icon("mystats", _build_tray_image(), "MyStats", menu)
+    tray_thread = threading.Thread(target=tray_icon.run, daemon=True)
+    tray_thread.start()
+
+
+def stop_system_tray_icon():
+    global tray_icon, tray_thread
+
+    if tray_icon is not None:
+        tray_icon.stop()
+        tray_icon = None
+        tray_thread = None
+
+
+def minimize_to_tray():
+    if not root or not root.winfo_exists():
+        return
+
+    if not supports_system_tray():
+        root.iconify()
+        return
+
+    root.withdraw()
+    start_system_tray_icon()
+
+
+def restore_from_tray():
+    if not root or not root.winfo_exists():
+        return
+
+    stop_system_tray_icon()
+    root.deiconify()
+    root.lift()
+    root.focus_force()
+
+
+def force_exit_application():
+    global is_forced_exit
+    is_forced_exit = True
+    on_close()
 
 
 def get_initial_ui_theme():
@@ -3628,6 +3737,10 @@ def test_audio_playback():
 
 
 def on_close():
+    if not is_forced_exit:
+        minimize_to_tray()
+        return
+
     # Disable the root window to prevent interaction
     root.attributes('-disabled', True)
 
@@ -3660,6 +3773,7 @@ def on_close():
     # Destroy the Tkinter windows after a delay
     def close_windows():
         sys.stdout = sys.__stdout__  # Reset stdout
+        stop_system_tray_icon()
         wait_window.destroy()
         root.destroy()
 
@@ -4111,6 +4225,7 @@ def initialize_main_window():
     root_window.grid_columnconfigure(1, weight=1)
 
     root = root_window
+    root.after(250, _drain_tray_queue)
 
     build_stats_sidebar(root_window)
     build_main_content(root_window)
@@ -4592,7 +4707,8 @@ class ConfigManager:
                                 'overlay_card_opacity', 'overlay_text_scale', 'overlay_show_medals',
                                 'overlay_compact_rows', 'overlay_horizontal_layout', 'overlay_server_port', 'tilt_lifetime_base_xp',
                                 'tilt_overlay_theme', 'tilt_scroll_step_px', 'tilt_scroll_interval_ms',
-                                'tilt_scroll_pause_ms', 'tiltsurvivors_min_levels', 'tiltdeath_min_levels'}
+                                'tilt_scroll_pause_ms', 'tiltsurvivors_min_levels', 'tiltdeath_min_levels',
+                                'update_later_clicks', 'update_later_version'}
         self.transient_keys = set([])
         self.defaults = {
             'chat_br_results': 'True',
@@ -4660,7 +4776,9 @@ class ConfigManager:
             'tilt_scroll_interval_ms': '40',
             'tilt_scroll_pause_ms': '900',
             'tiltsurvivors_min_levels': '20',
-            'tiltdeath_min_levels': '20'
+            'tiltdeath_min_levels': '20',
+            'update_later_clicks': '0',
+            'update_later_version': ''
         }
         self.load_settings()
 
@@ -5252,11 +5370,159 @@ def open_url(url):
     webbrowser.open_new(url)
 
 
-def show_update_message():
+def show_windows_toast(title, message, duration=6):
+    if win_toaster is None:
+        return
+
+    try:
+        win_toaster.show_toast(title, message, duration=duration, threaded=True)
+    except Exception as exc:
+        logger.warning(f"Toast notification failed: {exc}")
+
+
+def is_minimized_to_tray():
+    return tray_icon is not None and root is not None and root.winfo_exists() and not root.winfo_viewable()
+
+
+def _create_update_progress_dialog(version_label):
+    progress_window = tk.Toplevel(root)
+    progress_window.title("Downloading Update")
+    progress_window.geometry("420x160")
+    progress_window.transient(root)
+
+    root_x = root.winfo_x()
+    root_y = root.winfo_y()
+    root_width = root.winfo_width()
+    root_height = root.winfo_height()
+    pos_x = root_x + (root_width // 2) - 210
+    pos_y = root_y + (root_height // 2) - 80
+    progress_window.geometry(f"420x160+{pos_x}+{pos_y}")
+
+    ttk.Label(
+        progress_window,
+        text=f"Downloading MyStats {version_label}...",
+        style="Small.TLabel"
+    ).pack(anchor='w', padx=16, pady=(14, 8))
+
+    progress_var = tk.DoubleVar(value=0.0)
+    progress_bar = ttk.Progressbar(progress_window, mode='determinate', maximum=100, variable=progress_var)
+    progress_bar.pack(fill='x', padx=16)
+
+    percent_var = tk.StringVar(value="0%")
+    ttk.Label(progress_window, textvariable=percent_var).pack(anchor='e', padx=16, pady=(8, 0))
+
+    status_var = tk.StringVar(value="Preparing download...")
+    ttk.Label(progress_window, textvariable=status_var, style="Small.TLabel").pack(anchor='w', padx=16, pady=(6, 10))
+
+    progress_window.protocol("WM_DELETE_WINDOW", lambda: None)
+    return progress_window, progress_var, percent_var, status_var
+
+
+def _start_installer_and_exit(installer_path, silent_mode=True):
+    command = [installer_path]
+    if silent_mode:
+        command.extend(["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS"])
+
+    try:
+        subprocess.Popen(command, shell=False)
+        force_exit_application()
+    except Exception as exc:
+        messagebox.showerror("Update Failed", f"Could not start installer: {exc}")
+
+
+def download_and_install_update(download_url, version_label, silent_mode=True):
+    if not download_url:
+        messagebox.showerror("Update Failed", "No download URL was provided by the update service.")
+        return
+
+    toast_on_progress = is_minimized_to_tray()
+    show_windows_toast("MyStats Update", f"Downloading MyStats {version_label} update...")
+
+    progress_window, progress_var, percent_var, status_var = _create_update_progress_dialog(version_label)
+    last_toast_bucket = {'value': -1}
+
+    def update_progress(downloaded, total_bytes):
+        if total_bytes <= 0:
+            status_var.set(f"Downloaded {downloaded / (1024 * 1024):.2f} MB")
+            return
+
+        percent = min(100, int((downloaded / total_bytes) * 100))
+        progress_var.set(percent)
+        percent_var.set(f"{percent}%")
+        status_var.set(f"{downloaded / (1024 * 1024):.2f} MB / {total_bytes / (1024 * 1024):.2f} MB")
+
+        if toast_on_progress:
+            bucket = percent // 25
+            if bucket > last_toast_bucket['value'] and percent not in (0, 100):
+                last_toast_bucket['value'] = bucket
+                show_windows_toast("MyStats Update", f"Download progress: {percent}%")
+
+    def worker():
+        installer_path = None
+        try:
+            response = requests.get(download_url, stream=True, timeout=60)
+            response.raise_for_status()
+            total_bytes = int(response.headers.get('content-length') or 0)
+            downloaded = 0
+
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.exe', prefix='mystats_update_') as tmp_file:
+                installer_path = tmp_file.name
+                for chunk in response.iter_content(chunk_size=1024 * 128):
+                    if not chunk:
+                        continue
+                    tmp_file.write(chunk)
+                    downloaded += len(chunk)
+                    root.after(0, lambda d=downloaded, t=total_bytes: update_progress(d, t))
+
+            root.after(0, lambda: progress_var.set(100))
+            root.after(0, lambda: percent_var.set("100%"))
+            root.after(0, lambda: status_var.set("Download complete. Launching installer..."))
+            root.after(0, lambda: show_windows_toast("MyStats Update", "Download complete. Launching installer..."))
+            root.after(350, lambda: progress_window.destroy() if progress_window.winfo_exists() else None)
+            root.after(500, lambda: _start_installer_and_exit(installer_path, silent_mode=silent_mode))
+        except Exception as exc:
+            if installer_path and os.path.exists(installer_path):
+                try:
+                    os.remove(installer_path)
+                except OSError:
+                    pass
+
+            def fail():
+                if progress_window.winfo_exists():
+                    progress_window.destroy()
+                messagebox.showerror("Update Failed", f"Could not download/install update: {exc}")
+
+            root.after(0, fail)
+
+    threading.Thread(target=worker, daemon=True).start()
+
+
+def _get_update_later_clicks(versioncheck):
+    tracked_version = config.get_setting('update_later_version') or ''
+    if tracked_version != str(versioncheck):
+        config.set_setting('update_later_version', str(versioncheck), persistent=True)
+        config.set_setting('update_later_clicks', '0', persistent=True)
+        return 0
+
+    try:
+        return max(0, int(config.get_setting('update_later_clicks') or 0))
+    except (TypeError, ValueError):
+        config.set_setting('update_later_clicks', '0', persistent=True)
+        return 0
+
+
+def _register_update_later_click(versioncheck):
+    clicks = _get_update_later_clicks(versioncheck)
+    clicks = min(3, clicks + 1)
+    config.set_setting('update_later_clicks', str(clicks), persistent=True)
+    return clicks
+
+
+def show_update_message(versioncheck, download_url):
     # Create a custom popup window
     popup = tk.Toplevel(root)
-    popup.title("Update Required")
-    popup.geometry("400x300")
+    popup.title("Update Available")
+    popup.geometry("560x320")
 
     # Center the popup window on the main window
     root_x = root.winfo_x()
@@ -5264,17 +5530,16 @@ def show_update_message():
     root_width = root.winfo_width()
     root_height = root.winfo_height()
 
-    popup_width = 400
-    popup_height = 300
+    popup_width = 560
+    popup_height = 320
 
     pos_x = root_x + (root_width // 2) - (popup_width // 2)
     pos_y = root_y + (root_height // 2) - (popup_height // 2)
     popup.geometry(f"{popup_width}x{popup_height}+{pos_x}+{pos_y}")
 
-    # Load and resize the update icon
     try:
-        image = Image.open("warning.png")  # Load the image
-        image = image.resize((100, 100), Image.LANCZOS)  # Resize to 100x100 pixels using LANCZOS filter
+        image = Image.open("warning.png")
+        image = image.resize((90, 90), Image.LANCZOS)
         photo = ImageTk.PhotoImage(image)
     except Exception as e:
         print(f"Error loading image: {e}")
@@ -5282,28 +5547,49 @@ def show_update_message():
 
     if photo:
         icon_label = tk.Label(popup, image=photo)
-        icon_label.image = photo  # Keep a reference to avoid garbage collection
+        icon_label.image = photo
         icon_label.pack(pady=10)
-    else:
-        print("Update icon not displayed due to image loading issue.")
 
-    # Add text label
-    label = tk.Label(popup, text="An update is available. Please download the latest version to continue.",
-                     wraplength=380)
-    label.pack(pady=10)
+    label = tk.Label(
+        popup,
+        text=(
+            f"An update is available (current: {version}, latest: {versioncheck}).\n"
+            "You can update in place now without reinstalling manually."
+        ),
+        wraplength=390,
+        justify='center'
+    )
+    label.pack(pady=8)
 
-    # Hyperlink label
-    hyperlink = tk.Label(popup, text="Click here to download the update", fg="blue", cursor="hand2")
+    hyperlink = tk.Label(popup, text="Release/download page", fg="blue", cursor="hand2")
     hyperlink.pack(pady=5)
-    hyperlink.bind("<Button-1>", lambda e: open_url("https://mystats.camwow.tv/download"))
+    hyperlink.bind("<Button-1>", lambda e: open_url(download_url or "https://mystats.camwow.tv/download"))
 
-    # Close button
-    close_button = tk.Button(popup, text="Close", command=lambda: on_close())
-    close_button.pack(pady=20)
+    button_frame = ttk.Frame(popup)
+    button_frame.pack(pady=16)
 
-    popup.transient(root)  # Set the popup to be modal (disables main window)
+    ttk.Button(
+        button_frame,
+        text="One-Click Update",
+        command=lambda: [popup.destroy(), download_and_install_update(download_url, versioncheck, silent_mode=True)]
+    ).pack(side='left', padx=6)
+
+    later_clicks = _get_update_later_clicks(versioncheck)
+
+    later_button = ttk.Button(button_frame, text="Later")
+    if later_clicks >= 3:
+        later_button.state(["disabled"])
+        later_button.configure(text="Later (Disabled)")
+    else:
+        later_button.configure(
+            text=f"Later ({3 - later_clicks} left)",
+            command=lambda: [_register_update_later_click(versioncheck), popup.destroy()]
+        )
+    later_button.pack(side='left', padx=6)
+
+    popup.transient(root)
     popup.grab_set()
-    root.wait_window(popup)  # Wait until the popup window is closed
+    root.wait_window(popup)
 
 
 def close_application(popup):
@@ -5341,6 +5627,7 @@ def ver_season_only():
 
                     season = response_data.get("season", "")
                     versioncheck = response_data.get("version", "")
+                    download_url = response_data.get("download_url") or "https://mystats.camwow.tv/download"
 
                     if not config.get_setting('season'):
                         config.set_setting('season', '56', persistent=True)
@@ -5355,12 +5642,13 @@ def ver_season_only():
 
                     if str(versioncheck) == str(version):
                         print("No Updates available.\n")
+                        config.set_setting('update_later_clicks', '0', persistent=True)
+                        config.set_setting('update_later_version', '', persistent=True)
                         return season
                     else:
-                        print(f"An update is available, check discord (https://discord.gg/camwow) "
-                              f"for an updated installation file")
-                        print(f"Current Version: {version} | New Version: {versioncheck}")
-                        show_update_message()  # Show custom popup with hyperlink
+                        print(f"An update is available. Current Version: {version} | New Version: {versioncheck}")
+                        show_windows_toast("MyStats Update Available", f"New version {versioncheck} is ready to install.")
+                        show_update_message(versioncheck, download_url)
                 else:
                     print("API call failed with status code:", response.status_code)
                     print("Error message:", response.text)
@@ -7281,10 +7569,12 @@ async def tilted(bot):
                         if is_chat_response_enabled("chat_tilt_results") and not should_suppress_tilt_chat:
                             await send_chat_message(bot.channel, chunk, category="tilt")
                     text_area.insert('end', f"\nTilt run complete! Final standings: {', '.join(standings_items)}\n")
+                    show_windows_toast("MyStats Tilt", f"Tilt run complete. Top player: {limited_run_results[0][0]}")
                 else:
                     if is_chat_response_enabled("chat_tilt_results") and not should_suppress_tilt_chat:
                         await send_chat_message(bot.channel, "Tilt run complete! No results to display.", category="tilt")
                     text_area.insert('end', f"\nTilt run complete! No results to display.\n")
+                    show_windows_toast("MyStats Tilt", "Tilt run complete. No standings were available.")
 
                 top_users_today = sorted(run_ledger.items(), key=lambda x: x[1], reverse=True)[:10]
                 top_user_names = [name for name, _ in top_users_today]
@@ -7731,6 +8021,10 @@ async def race(bot):
                 print(f"Current Race Time: {formatted_CurrentTime}")
 
                 config.set_setting('wr', 'yes', persistent=False)
+                show_windows_toast(
+                    "MyStats World Record",
+                    f"New WR by {first_row_full[2]}: {formatted_CurrentTime} (saved {formatted_RecordAmount})"
+                )
             else:
                 config.set_setting('wr', 'no', persistent=False)
 
