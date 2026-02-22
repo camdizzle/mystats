@@ -316,6 +316,107 @@ function renderTiltRows(data) {
   }).join('');
 }
 
+
+function renderRivalsKpis(rows = []) {
+  const host = el('rivals-kpis');
+  if (!host) return;
+
+  const uniqueNames = new Set();
+  let totalGap = 0;
+  let closestGap = null;
+
+  rows.forEach((row) => {
+    const nameA = String(row.display_a || row.user_a || '').trim();
+    const nameB = String(row.display_b || row.user_b || '').trim();
+    if (nameA) uniqueNames.add(nameA);
+    if (nameB) uniqueNames.add(nameB);
+
+    const gap = Number(row.point_gap || 0);
+    totalGap += gap;
+    if (closestGap === null || gap < closestGap) closestGap = gap;
+  });
+
+  const avgGap = rows.length ? (totalGap / rows.length) : 0;
+
+  host.innerHTML = [
+    { label: 'Rival Pairs', value: fmt(rows.length) },
+    { label: 'Unique Rivals', value: fmt(uniqueNames.size) },
+    { label: 'Closest Gap', value: fmt(closestGap ?? 0) },
+    { label: 'Average Gap', value: fmt(Math.round(avgGap)) },
+  ].map((kpi) => (
+    `<div class="kpi"><div class="kpi-label">${escapeHtml(kpi.label)}</div><div class="kpi-value">${escapeHtml(kpi.value)}</div></div>`
+  )).join('');
+}
+
+function renderRivalsHighlights(rows = []) {
+  const host = el('rivals-highlights');
+  if (!host) return;
+
+  if (!rows.length) {
+    host.innerHTML = '<div class="highlight-card"><div class="highlight-title">Rivals Highlights</div><div class="highlight-main">No rivalries found with current settings</div></div>';
+    return;
+  }
+
+  const closest = rows[0];
+  const hottest = rows.reduce((best, row) => {
+    if (!best) return row;
+    const rowCombined = Number(row.points_a || 0) + Number(row.points_b || 0);
+    const bestCombined = Number(best.points_a || 0) + Number(best.points_b || 0);
+    if (rowCombined !== bestCombined) return rowCombined > bestCombined ? row : best;
+    return Number(row.point_gap || 0) < Number(best.point_gap || 0) ? row : best;
+  }, null);
+
+  const closestNames = `${closest.display_a || closest.user_a || '—'} vs ${closest.display_b || closest.user_b || '—'}`;
+  const hottestNames = `${hottest.display_a || hottest.user_a || '—'} vs ${hottest.display_b || hottest.user_b || '—'}`;
+
+  host.innerHTML = [
+    `<div class="highlight-card"><div class="highlight-title">Closest Matchup</div><div class="highlight-main">${escapeHtml(closestNames)}</div><div class="highlight-detail">${escapeHtml(`${fmt(closest.point_gap)} point gap`)}</div></div>`,
+    `<div class="highlight-card"><div class="highlight-title">Highest Stakes</div><div class="highlight-main">${escapeHtml(hottestNames)}</div><div class="highlight-detail">${escapeHtml(`${fmt(Number(hottest.points_a || 0) + Number(hottest.points_b || 0))} combined points`)}</div></div>`,
+  ].join('');
+}
+
+function renderRivalsRows(data) {
+  const rowsHost = el('rivals-leaderboard');
+  if (!rowsHost) return;
+
+  const rows = Array.isArray(data?.rivals) ? data.rivals : [];
+
+  renderRivalsKpis(rows);
+  renderRivalsHighlights(rows);
+
+  if (!rows.length) {
+    rowsHost.innerHTML = '<div class="empty">No rivals found. Lower minimum races or increase max point gap in settings.</div>';
+    return;
+  }
+
+  el('rivals-range-pill').textContent = `Top ${Math.min(200, rows.length)} rivalries`;
+  rowsHost.innerHTML = rows.slice(0, 200).map((row, idx) => {
+    const pointsA = Number(row.points_a || 0);
+    const pointsB = Number(row.points_b || 0);
+    const racesA = Number(row.races_a || 0);
+    const racesB = Number(row.races_b || 0);
+    const gap = Math.abs(pointsA - pointsB);
+    const combined = pointsA + pointsB;
+    const racesCombined = racesA + racesB;
+
+    return `
+      <div class="row">
+        <div class="row-head">
+          <span class="rank">#${idx + 1}</span>
+          <span class="name">${escapeHtml(`${row.display_a || row.user_a || '-'} vs ${row.display_b || row.user_b || '-'}`)}</span>
+          <span class="stat">${escapeHtml(`${fmt(gap)} gap`)}</span>
+        </div>
+        <div class="quest-metrics">
+          <span>${escapeHtml(row.display_a || row.user_a || 'Player A')}: ${escapeHtml(fmt(pointsA))} pts (${escapeHtml(fmt(racesA))} races)</span>
+          <span>${escapeHtml(row.display_b || row.user_b || 'Player B')}: ${escapeHtml(fmt(pointsB))} pts (${escapeHtml(fmt(racesB))} races)</span>
+          <span>Combined Points: ${escapeHtml(fmt(combined))}</span>
+          <span>Combined Races: ${escapeHtml(fmt(racesCombined))}</span>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
 function setActiveView(viewName) {
   activeView = viewName;
   document.querySelectorAll('.dashboard-nav-btn[data-view]').forEach((btn) => {
@@ -342,6 +443,7 @@ async function refresh() {
     renderMyCycleRows(data);
     renderSeasonQuestRows(data);
     renderTiltRows(data);
+    renderRivalsRows(data);
   } catch (error) {
     console.error('dashboard refresh failed', error);
     const node = el('mycycle');
