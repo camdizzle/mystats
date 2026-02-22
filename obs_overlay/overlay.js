@@ -48,8 +48,52 @@ let lastRaceKey = null;
 let hasHydratedOnce = false;
 let top3IsShowing = false;
 let top3ShowTimeout = null;
+let recordOverlayTimeout = null;
 const splashDurationMs = 5000;
+const recordOverlayDurationMs = 5000;
 const top3ShowDurationMs = 10000;
+
+const recordOverlay = $('record-overlay');
+const recordOverlayMessage = $('record-overlay-message');
+const recordOverlayDelta = $('record-overlay-delta');
+
+function formatDurationDelta(secondsRaw) {
+  const total = Number(secondsRaw);
+  if (!Number.isFinite(total) || total <= 0) return '0.000s';
+  if (total >= 60) {
+    const minutes = Math.floor(total / 60);
+    const seconds = total % 60;
+    return `${minutes}:${seconds.toFixed(3).padStart(6, '0')}`;
+  }
+  return `${total.toFixed(3)}s`;
+}
+
+function hideRecordOverlay() {
+  if (boardShell) boardShell.classList.remove('is-hidden');
+  if (!recordOverlay) return;
+  recordOverlay.classList.remove('is-visible');
+  recordOverlay.setAttribute('aria-hidden', 'true');
+}
+
+function showRecordOverlay(top3View = {}) {
+  const holderName = getDisplayName({
+    name: top3View?.record_holder_name,
+    display_name: top3View?.record_holder_name,
+  }, 1);
+  const beatBy = formatDurationDelta(top3View?.record_delta_seconds);
+
+  if (recordOverlayMessage) {
+    recordOverlayMessage.textContent = `${holderName} set a new world record!`;
+  }
+  if (recordOverlayDelta) {
+    recordOverlayDelta.textContent = `Beat previous by ${beatBy}`;
+  }
+  if (boardShell) boardShell.classList.add('is-hidden');
+  if (recordOverlay) {
+    recordOverlay.classList.add('is-visible');
+    recordOverlay.setAttribute('aria-hidden', 'false');
+  }
+}
 
 function clampNumber(value, min, max, fallback) {
   const num = Number(value);
@@ -136,6 +180,7 @@ function clearCycleRestartTimer() {
 
 function showLeaderboardView() {
   if (boardShell) boardShell.classList.remove('is-hidden');
+  hideRecordOverlay();
   document.body.classList.remove('top3-active');
   leaderboard?.classList.remove('is-top3-mode');
   if (splashScreen) {
@@ -222,17 +267,30 @@ function showTop3ForTenSeconds(top3View) {
   const top3Title = top3View.title || '🔥 Latest Race Podium 🔥';
   stopLeaderboardAutoScroll();
   clearCycleRestartTimer();
-  renderTop3Rows(finishedRows, top3Title);
 
-  if (top3ShowTimeout) clearTimeout(top3ShowTimeout);
-  top3ShowTimeout = setTimeout(() => {
-    top3IsShowing = false;
-    document.body.classList.remove('top3-active');
-    leaderboard?.classList.remove('is-top3-mode');
-    lastRenderedViewsKey = '';
-    renderCombinedRows(currentViews);
-    ensureLeaderboardAutoScroll();
-  }, top3ShowDurationMs);
+  const startPodiumView = () => {
+    hideRecordOverlay();
+    renderTop3Rows(finishedRows, top3Title);
+
+    if (top3ShowTimeout) clearTimeout(top3ShowTimeout);
+    top3ShowTimeout = setTimeout(() => {
+      top3IsShowing = false;
+      document.body.classList.remove('top3-active');
+      leaderboard?.classList.remove('is-top3-mode');
+      lastRenderedViewsKey = '';
+      renderCombinedRows(currentViews);
+      ensureLeaderboardAutoScroll();
+    }, top3ShowDurationMs);
+  };
+
+  if (top3View?.is_record_race) {
+    showRecordOverlay(top3View);
+    if (recordOverlayTimeout) clearTimeout(recordOverlayTimeout);
+    recordOverlayTimeout = setTimeout(startPodiumView, recordOverlayDurationMs);
+    return;
+  }
+
+  startPodiumView();
 }
 
 function startLeaderboardAutoScroll() {
@@ -395,12 +453,14 @@ function renderCombinedRows(views) {
     const sectionTitle = view.title || 'Top Results';
     const rows = Array.isArray(view.rows) ? view.rows : [];
     const sectionTitleMarkup = `<li class="leaderboard-section-title" data-section-title="${escapeHtml(sectionTitle)}">${escapeHtml(sectionTitle)}</li>`;
+    const isRecordRaceView = String(view?.id || '').toLowerCase() === 'previous' && view?.is_record_race;
 
     const rowMarkup = rows.map((r, rowIndex) => {
       const emote = settings.showMedals ? getPlacementEmote(r.placement) : '';
       const decoratedName = emote ? `${emote} ${r.name}` : r.name;
       const podiumClass = rowIndex < 3 ? ` leaderboard-row--podium-${rowIndex + 1}` : '';
-      return `<li class="leaderboard-row${podiumClass}"><span class="row-rank">#${escapeHtml(r.placement)}</span><span>${escapeHtml(decoratedName)}</span><span>${fmt(r.points)} pts</span></li>`;
+      const recordClass = isRecordRaceView ? ' leaderboard-row--record-race' : '';
+      return `<li class="leaderboard-row${podiumClass}${recordClass}"><span class="row-rank">#${escapeHtml(r.placement)}</span><span>${escapeHtml(decoratedName)}</span><span>${fmt(r.points)} pts</span></li>`;
     }).join('');
 
     const gap = viewIndex > 0 ? '<li class="leaderboard-gap" aria-hidden="true"></li>' : '';
