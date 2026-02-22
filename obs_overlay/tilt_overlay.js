@@ -260,10 +260,10 @@ function renderStandings(listId, standings, emptyText) {
 
 function renderCurrentRun(run = {}) {
   const isActive = run.status === 'active';
-  $('run-status').textContent = `Status: ${isActive ? 'Active' : 'Idle'}`;
+  $('run-status-value').textContent = isActive ? 'Active' : 'Idle';
   $('run-status').classList.toggle('pill--active', isActive);
-  $('run-level').textContent = `Level: ${fmt(run.level)}`;
-  $('run-elapsed').textContent = `Elapsed: ${run.elapsed_time || '0:00'}`;
+  $('run-level-value').textContent = fmt(run.level);
+  $('run-elapsed-value').textContent = run.elapsed_time || '0:00';
 
   const leader = run.leader ? `${run.leader.name} (${fmt(run.leader.points)} pts)` : 'None';
   const topTiltee = run.top_tiltee || 'None';
@@ -271,7 +271,7 @@ function renderCurrentRun(run = {}) {
   const topTilteeWithCount = topTiltee === 'None' ? 'None' : `${topTiltee} (${fmt(topTilteeCount)} tops)`;
   $('current-leader').textContent = leader;
   $('current-top-tiltee').textContent = topTilteeWithCount;
-  $('top-tiltee-pill').textContent = `Top Tiltee: ${topTilteeWithCount}`;
+  $('top-tiltee-value').textContent = topTilteeWithCount;
   $('current-run-points').textContent = fmt(run.run_points);
   $('current-run-xp').textContent = fmt(run.run_xp);
   $('best-run-xp').textContent = fmt(run.best_run_xp_today);
@@ -488,7 +488,7 @@ async function refresh() {
     }
 
   } catch (e) {
-    $('run-status').textContent = 'Status: Unavailable';
+    $('run-status-value').textContent = 'Unavailable';
     $('last-run-summary').textContent = 'Unable to load tilt overlay data from /api/overlay/tilt.';
     hideRecapOverlays();
     // Keep baseline/event memory across transient fetch errors so historical run-complete events are not retriggered.
