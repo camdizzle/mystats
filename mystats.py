@@ -375,24 +375,37 @@ def parse_tilt_result_detail(row):
 
     username, points, run_id = parsed
 
-    def parse_flag_token(value):
+    def parse_flag_token(value, allow_numeric=True):
         token = str(value).strip().lower()
-        if token in ('1', 'true', 'yes', 'y'):
+        if token in ('true', 'yes', 'y'):
             return True
-        if token in ('0', 'false', 'no', 'n'):
+        if token in ('false', 'no', 'n'):
             return False
+        if allow_numeric and token in ('1', '0'):
+            return token == '1'
         return None
 
     is_top_tiltee = False
-    # Tilt result exports exist in two shapes:
-    # - ...,<is_top_tiltee>
-    # - ...,<is_top_tiltee>,<event_ids>
-    # Parse from the tail and accept either layout.
-    for candidate in (row[-1], row[-2] if len(row) >= 2 else None):
-        parsed_flag = parse_flag_token(candidate)
+    # Tilt result exports have evolved over time. We parse from the tail and
+    # prefer explicit boolean words first, then fall back to nearby numeric
+    # flags (for older 1/0 formats).
+    tail_tokens = list(reversed(row[-6:]))
+
+    for candidate in tail_tokens:
+        parsed_flag = parse_flag_token(candidate, allow_numeric=False)
         if parsed_flag is not None:
             is_top_tiltee = parsed_flag
             break
+
+    if not is_top_tiltee:
+        for candidate in (row[-1], row[-2] if len(row) >= 2 else None, row[-3] if len(row) >= 3 else None):
+            token = str(candidate or '').strip()
+            if not token or '[' in token or ']' in token or ',' in token:
+                continue
+            parsed_flag = parse_flag_token(token, allow_numeric=True)
+            if parsed_flag is not None:
+                is_top_tiltee = parsed_flag
+                break
 
     return {
         'run_id': run_id,
@@ -406,6 +419,12 @@ def is_tilt_top_tiltee_milestone(count):
     if count in (3, 5):
         return True
     return count >= 10 and count % 5 == 0
+
+
+def normalize_tilt_player_name(value):
+    raw = str(value or '').strip().lower().lstrip('@')
+    compact = ''.join(ch for ch in raw if ch.isalnum() or ch == '_')
+    return compact or raw
 
 
 def get_tilt_multiplier(level_number):
@@ -7055,8 +7074,9 @@ async def tilted(bot):
                         else:
                             event_ids = [0]
 
+                        normalized_top_tiltee = normalize_tilt_player_name(top_tiltee)
                         for _, _, row in survivors:
-                            is_top_tiltee = str(row[0]).strip().lower() == top_tiltee.lower()
+                            is_top_tiltee = normalize_tilt_player_name(row[0]) == normalized_top_tiltee
                             data_to_write = [run_id, current_level] + row + [str(is_top_tiltee), event_ids]
                             writer.writerow(data_to_write)
                 except Exception as e:
