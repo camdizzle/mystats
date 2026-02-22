@@ -375,10 +375,24 @@ def parse_tilt_result_detail(row):
 
     username, points, run_id = parsed
 
+    def parse_flag_token(value):
+        token = str(value).strip().lower()
+        if token in ('1', 'true', 'yes', 'y'):
+            return True
+        if token in ('0', 'false', 'no', 'n'):
+            return False
+        return None
+
     is_top_tiltee = False
-    if len(row) >= 2:
-        raw_top_value = str(row[-2]).strip().lower()
-        is_top_tiltee = raw_top_value in ('1', 'true', 'yes', 'y')
+    # Tilt result exports exist in two shapes:
+    # - ...,<is_top_tiltee>
+    # - ...,<is_top_tiltee>,<event_ids>
+    # Parse from the tail and accept either layout.
+    for candidate in (row[-1], row[-2] if len(row) >= 2 else None):
+        parsed_flag = parse_flag_token(candidate)
+        if parsed_flag is not None:
+            is_top_tiltee = parsed_flag
+            break
 
     return {
         'run_id': run_id,
