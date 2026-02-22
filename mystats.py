@@ -3497,6 +3497,8 @@ def build_stats_sidebar(parent):
     button_frame.pack(pady=(20, 0))
 
     button_width = 8
+    button_frame.grid_columnconfigure(0, weight=1, uniform="sidebar_actions")
+    button_frame.grid_columnconfigure(1, weight=1, uniform="sidebar_actions")
 
     settings_button = ttk.Button(
         button_frame,
@@ -3509,12 +3511,11 @@ def build_stats_sidebar(parent):
 
     dashboards_button = ttk.Button(
         button_frame,
-        text="Dashboards",
+        text="MyStats Web Dashboards",
         command=open_dashboard,
-        width=button_width,
         style="Primary.TButton"
     )
-    dashboards_button.grid(row=1, column=0, padx=5, pady=(0, 5))
+    dashboards_button.grid(row=1, column=0, columnspan=2, padx=5, pady=(0, 5), sticky='ew')
 
     events_button = ttk.Button(
         button_frame,
