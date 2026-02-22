@@ -209,25 +209,26 @@ h1 {
     radial-gradient(circle at 88% 86%, rgba(255, 180, 120, 0.22), transparent 34%),
     linear-gradient(145deg, rgba(6, 14, 30, 0.97), rgba(16, 22, 52, 0.98));
   box-shadow: 0 20px 46px rgba(0, 0, 0, 0.56);
-  padding: 16px;
+  padding: 24px 28px;
   z-index: 60;
   animation: levelOverlayIn 260ms ease-out;
   display: flex;
   flex-direction: column;
-  justify-content: flex-start;
-  gap: 8px;
+  justify-content: center;
+  align-items: center;
+  gap: 16px;
+  text-align: center;
 }
 
 .level-overlay__burst {
-  justify-self: start;
   width: max-content;
-  padding: 4px 10px;
+  padding: 8px 16px;
   border-radius: 999px;
   background: rgba(122, 250, 255, 0.14);
   border: 1px solid rgba(122, 250, 255, 0.42);
   font-weight: 800;
   letter-spacing: 0.08em;
-  font-size: calc(0.72rem * var(--text-scale));
+  font-size: calc(0.98rem * var(--text-scale));
 }
 
 .level-overlay__title {
@@ -235,20 +236,23 @@ h1 {
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  font-size: calc(1.28rem * var(--text-scale));
+  font-size: calc(2.5rem * var(--text-scale));
+  line-height: 1.05;
+  max-width: 14ch;
   text-shadow: 0 0 12px rgba(127, 216, 255, 0.35);
 }
 
 .level-overlay__subtitle {
   color: rgba(238, 243, 255, 0.82);
-  font-size: calc(0.88rem * var(--text-scale));
-  margin-bottom: 4px;
+  font-size: calc(1.28rem * var(--text-scale));
+  max-width: 26ch;
 }
 
 .level-overlay__stats {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
+  width: min(100%, 560px);
 }
 
 @keyframes levelOverlayIn {
@@ -270,24 +274,26 @@ h1 {
     radial-gradient(circle at 88% 86%, rgba(255, 122, 210, 0.24), transparent 34%),
     linear-gradient(145deg, rgba(28, 11, 42, 0.97), rgba(20, 30, 66, 0.98));
   box-shadow: 0 22px 50px rgba(0, 0, 0, 0.58);
-  padding: 16px;
+  padding: 24px 28px;
   z-index: 62;
   animation: levelOverlayIn 280ms ease-out;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  justify-content: flex-start;
+  justify-content: center;
+  align-items: center;
+  gap: 16px;
+  text-align: center;
 }
 
 .run-overlay__burst {
   width: max-content;
-  padding: 4px 10px;
+  padding: 8px 16px;
   border-radius: 999px;
   background: rgba(255, 208, 125, 0.16);
   border: 1px solid rgba(255, 208, 125, 0.45);
   font-weight: 800;
   letter-spacing: 0.08em;
-  font-size: calc(0.72rem * var(--text-scale));
+  font-size: calc(0.98rem * var(--text-scale));
 }
 
 .run-overlay__title {
@@ -295,20 +301,24 @@ h1 {
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  font-size: calc(1.22rem * var(--text-scale));
+  font-size: calc(2.4rem * var(--text-scale));
+  line-height: 1.05;
+  max-width: 14ch;
 }
 
 .run-overlay__subtitle {
   color: rgba(255, 244, 231, 0.84);
-  font-size: calc(0.88rem * var(--text-scale));
+  font-size: calc(1.24rem * var(--text-scale));
+  max-width: 25ch;
 }
 
 .run-overlay__top3 {
   list-style: none;
-  margin: 2px 0;
+  margin: 6px 0;
   padding: 0;
   display: grid;
-  gap: 6px;
+  gap: 10px;
+  width: min(100%, 560px);
 }
 
 .run-overlay__top3 li {
@@ -316,17 +326,17 @@ h1 {
   grid-template-columns: auto 1fr auto;
   align-items: center;
   gap: 10px;
-  padding: 8px 10px;
-  border-radius: 12px;
+  padding: 11px 14px;
+  border-radius: 14px;
   background: rgba(255,255,255,0.12);
   border: 1px solid rgba(255,255,255,0.22);
   font-weight: 800;
-  font-size: calc(0.9rem * var(--text-scale));
+  font-size: calc(1.1rem * var(--text-scale));
 }
 
 .run-overlay__rank {
-  width: 28px;
-  height: 28px;
+  width: 38px;
+  height: 38px;
   border-radius: 999px;
   display: inline-flex;
   align-items: center;
@@ -353,14 +363,15 @@ h1 {
 .run-overlay__stats {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
+  width: min(100%, 560px);
 }
 
 
 .overlay-hero {
   border: 1px solid rgba(255,255,255,0.24);
-  border-radius: 12px;
-  padding: 9px 10px;
+  border-radius: 14px;
+  padding: 12px 14px;
   background: linear-gradient(145deg, rgba(255,255,255,0.16), rgba(255,255,255,0.08));
 }
 
@@ -370,7 +381,7 @@ h1 {
 }
 
 .overlay-hero__label {
-  font-size: calc(0.72rem * var(--text-scale));
+  font-size: calc(0.88rem * var(--text-scale));
   text-transform: uppercase;
   letter-spacing: 0.08em;
   opacity: 0.8;
@@ -378,7 +389,7 @@ h1 {
 
 .overlay-hero__value {
   margin-top: 3px;
-  font-size: calc(1.08rem * var(--text-scale));
+  font-size: calc(1.5rem * var(--text-scale));
   font-weight: 900;
   letter-spacing: 0.02em;
 }
@@ -386,40 +397,42 @@ h1 {
 .overlay-pill-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
+  justify-content: center;
 }
 
 .overlay-pill {
-  padding: 5px 8px;
+  padding: 7px 11px;
   border-radius: 999px;
   border: 1px solid rgba(255,255,255,0.24);
   background: rgba(255,255,255,0.1);
-  font-size: calc(0.78rem * var(--text-scale));
+  font-size: calc(0.95rem * var(--text-scale));
   font-weight: 700;
 }
 
 .overlay-metrics {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 7px 8px;
+  gap: 10px;
+  text-align: left;
 }
 
 .overlay-metric {
-  border-radius: 10px;
+  border-radius: 12px;
   border: 1px solid rgba(255,255,255,0.2);
   background: rgba(255,255,255,0.09);
-  padding: 7px 8px;
+  padding: 10px 12px;
 }
 
 .overlay-metric span {
   display: block;
   opacity: 0.74;
-  font-size: calc(0.68rem * var(--text-scale));
+  font-size: calc(0.84rem * var(--text-scale));
   margin-bottom: 2px;
 }
 
 .overlay-metric strong {
-  font-size: calc(0.95rem * var(--text-scale));
+  font-size: calc(1.15rem * var(--text-scale));
 }
 
 
