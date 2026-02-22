@@ -48,14 +48,37 @@ h1 {
 }
 
 .pill {
-  display: block;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
   text-align: center;
-  padding: 6px 7px;
-  border-radius: 999px;
+  padding: 7px 8px;
+  border-radius: 16px;
   background: rgba(127, 216, 255, 0.15);
   border: 1px solid rgba(127, 216, 255, 0.35);
-  font-weight: 700;
   font-size: calc(0.82rem * var(--text-scale));
+  line-height: 1.1;
+  gap: 2px;
+}
+
+.pill-title {
+  display: block;
+  font-size: calc(0.6rem * var(--text-scale));
+  font-weight: 700;
+  color: rgba(238, 243, 255, 0.74);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  line-height: 1.05;
+}
+
+.pill-value {
+  display: block;
+  font-size: calc(0.92rem * var(--text-scale));
+  font-weight: 800;
+  color: var(--text);
+  line-height: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .pill--active {
