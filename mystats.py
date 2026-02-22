@@ -2387,6 +2387,22 @@ def dashboard_main_payload():
 
 # Path to the token file
 TOKEN_FILE_PATH = 'token_data.json'
+DEFAULT_BOT_USERNAME = 'mystats_results'
+
+
+def clear_invalid_token_data(reason):
+    """Remove unusable OAuth token data and log user-facing recovery guidance."""
+    try:
+        if os.path.exists(TOKEN_FILE_PATH):
+            os.remove(TOKEN_FILE_PATH)
+            print(f"Removed invalid token file ({TOKEN_FILE_PATH}): {reason}")
+    except OSError as exc:
+        print(f"Could not remove invalid token file: {exc}")
+
+    print(
+        "Twitch custom bot token failed. Falling back to the default MyStats bot account "
+        f"({DEFAULT_BOT_USERNAME}). Click 'Custom Bot Login' to reauthenticate your account."
+    )
 
 
 # Save token data to a file and reconnect the bot with the new token asynchronously
@@ -2449,6 +2465,7 @@ def refresh_access_token():
         return new_token_info['access_token']
     else:
         print(f"Failed to refresh token: {response.text}")
+        clear_invalid_token_data("refresh token rejected by Twitch")
         return None
 
 # Function to get the OAuth token (file or ConfigManager)
@@ -2503,7 +2520,17 @@ def fallback_to_saved_username():
     if saved_username:
         login_button.config(text=saved_username)
     else:
-        print("No saved username in config.")
+        login_button.config(text=DEFAULT_BOT_USERNAME)
+        print("No saved username in config. Using default account: mystats_results")
+
+
+def set_default_bot_login_button(reason):
+    if 'login_button' in globals() and login_button is not None:
+        login_button.config(text=DEFAULT_BOT_USERNAME)
+    print(
+        "Switched chatbot display to default account (mystats_results). "
+        f"Reason: {reason}"
+    )
 
 
 # Updated logic for setting the login button's username
@@ -5441,25 +5468,29 @@ class Bot(commands.Bot):
         token_data = load_token_data()
 
         if token_data:
-            # Check if token is expired and refresh if needed
-            if is_token_expired(token_data):
-                print("Token expired, attempting to refresh...")
-                new_token = refresh_access_token()  # Try to refresh the token
-                if new_token:
-                    print("Token refreshed successfully.")
-                    return new_token  # Return the refreshed token
-                else:
-                    raise Exception("Failed to refresh token. Please reauthenticate.")
-            else:
-                return token_data['access_token']  # Return valid token from the file
+            file_access_token = token_data.get('access_token')
+            if file_access_token and not is_token_expired(token_data) and verify_token(file_access_token):
+                return file_access_token
+
+            print("Stored custom token is expired or invalid, attempting token refresh...")
+            new_token = refresh_access_token()  # Try to refresh the token
+            if new_token and verify_token(new_token):
+                print("Token refreshed successfully.")
+                return new_token  # Return the refreshed token
+
+            clear_invalid_token_data("custom token expired/invalid and refresh failed")
+            set_default_bot_login_button("Custom token could not be used")
+
         else:
             print("No token file found, falling back to ConfigManager token...")
-            config_token = config.get_setting('TWITCH_TOKEN')
-            if config_token:
-                print("Using ConfigManager token.")
-                return config_token  # Use the token from config if no token file exists
-            else:
-                raise Exception("No valid token found in ConfigManager. Please authenticate.")
+
+        config_token = config.get_setting('TWITCH_TOKEN')
+        if config_token:
+            print("Using ConfigManager token.")
+            set_default_bot_login_button("Using MyStats default account token")
+            return config_token  # Use the token from config if no token file exists
+
+        raise Exception("No valid token found in ConfigManager. Please authenticate.")
 
     async def event_ready(self):
         self.channel = self.get_channel(self.channel_name)
