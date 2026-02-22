@@ -5550,12 +5550,6 @@ def show_update_message(versioncheck, download_url):
         command=lambda: [popup.destroy(), download_and_install_update(download_url, versioncheck, silent_mode=True)]
     ).pack(side='left', padx=6)
 
-    ttk.Button(
-        button_frame,
-        text="Update (Wizard)",
-        command=lambda: [popup.destroy(), download_and_install_update(download_url, versioncheck, silent_mode=False)]
-    ).pack(side='left', padx=6)
-
     ttk.Button(button_frame, text="Later", command=popup.destroy).pack(side='left', padx=6)
 
     popup.transient(root)
