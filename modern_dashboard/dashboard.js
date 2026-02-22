@@ -2,6 +2,8 @@ const el = (id) => document.getElementById(id);
 
 let activeView = 'mycycle';
 let raceDashboardFilter = 'both';
+let tiltSortBy = 'tilt_points';
+let tiltSortOrder = 'desc';
 
 function fmt(n) {
   const x = Number(n || 0);
@@ -228,6 +230,25 @@ function renderTiltKpis(rows = [], data = {}) {
   )).join('');
 }
 
+function compareTiltRows(a, b, sortBy = 'tilt_points', sortOrder = 'desc') {
+  const direction = sortOrder === 'asc' ? 1 : -1;
+
+  if (sortBy === 'name') {
+    const nameA = String(a.display_name || a.username || '').toLowerCase();
+    const nameB = String(b.display_name || b.username || '').toLowerCase();
+    const nameCmp = nameA.localeCompare(nameB);
+    if (nameCmp !== 0) return nameCmp * direction;
+  } else {
+    const valueA = Number(a?.[sortBy] || 0);
+    const valueB = Number(b?.[sortBy] || 0);
+    if (valueA !== valueB) return (valueA - valueB) * direction;
+  }
+
+  if (Number(b.tilt_points || 0) !== Number(a.tilt_points || 0)) return Number(b.tilt_points || 0) - Number(a.tilt_points || 0);
+  if (Number(b.tilt_top_tiltee || 0) !== Number(a.tilt_top_tiltee || 0)) return Number(b.tilt_top_tiltee || 0) - Number(a.tilt_top_tiltee || 0);
+  return String(a.display_name || a.username || '').localeCompare(String(b.display_name || b.username || ''));
+}
+
 function renderTiltHighlights(rows = [], data = {}) {
   const host = el('tilt-highlights');
   if (!host) return;
@@ -237,7 +258,17 @@ function renderTiltHighlights(rows = [], data = {}) {
     return;
   }
 
-  const leaderboardLeader = rows[0];
+  const pointsLeader = rows.reduce((best, row) => {
+    if (!best) return row;
+    if (Number(row.tilt_points || 0) !== Number(best.tilt_points || 0)) {
+      return Number(row.tilt_points || 0) > Number(best.tilt_points || 0) ? row : best;
+    }
+    if (Number(row.tilt_top_tiltee || 0) !== Number(best.tilt_top_tiltee || 0)) {
+      return Number(row.tilt_top_tiltee || 0) > Number(best.tilt_top_tiltee || 0) ? row : best;
+    }
+    return String(row.display_name || row.username || '').localeCompare(String(best.display_name || best.username || '')) < 0 ? row : best;
+  }, null);
+
   const topTiltee = rows.reduce((best, row) => {
     if (!best) return row;
     if (Number(row.tilt_top_tiltee || 0) !== Number(best.tilt_top_tiltee || 0)) {
@@ -246,11 +277,11 @@ function renderTiltHighlights(rows = [], data = {}) {
     return Number(row.tilt_points || 0) > Number(best.tilt_points || 0) ? row : best;
   }, null);
 
-  const leaderName = leaderboardLeader?.display_name || leaderboardLeader?.username || '—';
+  const leaderName = pointsLeader?.display_name || pointsLeader?.username || '—';
   const topTilteeName = topTiltee?.display_name || topTiltee?.username || '—';
 
   host.innerHTML = [
-    `<div class="highlight-card"><div class="highlight-title">Points Leader</div><div class="highlight-main">${escapeHtml(leaderName)}</div><div class="highlight-detail">${escapeHtml(`${fmt(leaderboardLeader?.tilt_points || 0)} tilt points`)}</div></div>`,
+    `<div class="highlight-card"><div class="highlight-title">Points Leader</div><div class="highlight-main">${escapeHtml(leaderName)}</div><div class="highlight-detail">${escapeHtml(`${fmt(pointsLeader?.tilt_points || 0)} tilt points`)}</div></div>`,
     `<div class="highlight-card"><div class="highlight-title">Top Tiltee Legend</div><div class="highlight-main">${escapeHtml(topTilteeName)}</div><div class="highlight-detail">${escapeHtml(`${fmt(topTiltee?.tilt_top_tiltee || 0)} top-tiltee finishes`)}</div></div>`,
   ].join('');
 }
@@ -281,11 +312,7 @@ function renderTiltRows(data) {
         consistency,
       };
     })
-    .sort((a, b) => {
-      if (b.pressure_score !== a.pressure_score) return b.pressure_score - a.pressure_score;
-      if (b.tilt_points !== a.tilt_points) return b.tilt_points - a.tilt_points;
-      return b.tilt_top_tiltee - a.tilt_top_tiltee;
-    });
+    .sort((a, b) => compareTiltRows(a, b, tiltSortBy, tiltSortOrder));
 
   renderTiltKpis(rows, data);
   renderTiltHighlights(rows, data);
@@ -302,7 +329,7 @@ function renderTiltRows(data) {
         <div class="row-head">
           <span class="rank">#${idx + 1}</span>
           <span class="name">${escapeHtml(row.display_name || row.username || '-')}</span>
-          <span class="stat">${escapeHtml(`${fmt(Math.round(row.pressure_score))} pressure`)}</span>
+          <span class="stat">${escapeHtml(tiltSortBy === 'pressure_score' ? `${fmt(Math.round(row.pressure_score))} pressure` : `${fmt(row.tilt_points)} pts`)}</span>
         </div>
         <div class="quest-metrics">
           <span>Tilt Points: ${escapeHtml(fmt(row.tilt_points))}</span>
@@ -558,6 +585,25 @@ function wireRaceFilterButtons() {
   });
 }
 
+function wireTiltSortControls() {
+  const sortBySelect = el('tilt-sort-by');
+  const sortOrderSelect = el('tilt-sort-order');
+  if (!sortBySelect || !sortOrderSelect) return;
+
+  sortBySelect.value = tiltSortBy;
+  sortOrderSelect.value = tiltSortOrder;
+
+  sortBySelect.addEventListener('change', () => {
+    tiltSortBy = sortBySelect.value || 'tilt_points';
+    refresh();
+  });
+
+  sortOrderSelect.addEventListener('change', () => {
+    tiltSortOrder = sortOrderSelect.value === 'asc' ? 'asc' : 'desc';
+    refresh();
+  });
+}
+
 function setActiveView(viewName) {
   activeView = viewName;
   document.querySelectorAll('.dashboard-nav-btn[data-view]').forEach((btn) => {
@@ -596,4 +642,5 @@ async function refresh() {
 refresh();
 wireViewTabs();
 wireRaceFilterButtons();
+wireTiltSortControls();
 setInterval(refresh, 15000);
