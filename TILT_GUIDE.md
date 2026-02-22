@@ -1,74 +1,171 @@
 # MyStats Tilt Mode Guide (Streamer-Friendly + Technical)
 
-Welcome to your **Tilt hype hub**. This guide explains how Tilt tracking, the dashboard, and OBS overlays work together.
+Welcome to your **Tilt hub**. This guide explains Tilt tracking, dashboard usage, OBS overlay setup, and the technical formulas.
 
 ---
 
 ## What Tilt tracking gives you
 
-MyStats turns Tilt sessions into a full stream workflow:
+MyStats provides:
 
-- **Live run status** (current level, elapsed time, current top tiltee).
-- **Run leaderboard tracking** (leader + standings for the active run).
+- **Live run status** (level, elapsed time, top tiltee).
+- **Run leaderboard tracking** (leader + standings for current run).
 - **Run, daily, and lifetime expertise progression** updates.
 - **Level completion + run completion recap payloads** for overlays.
-- **Dashboard + OBS overlay views** served from the local MyStats web server.
-- **Chat-ready narrative/milestone outputs** while Tilt is active.
+- **Dashboard + OBS overlay views** from the local MyStats web server.
 
 ---
 
 ## Dashboard + Overlay: what each one does
 
 ### Dashboard (Web)
-The dashboard is your operator view. It is served by the built-in Flask server and loads at:
+Use the dashboard as your operator/control view:
 
-- `http://127.0.0.1:<overlay_server_port>/dashboard`
-
-Use it to:
-
-- Monitor Tilt KPIs and totals.
-- Watch leaderboard pressure and placement changes.
-- Check MyCycle / Season Quests / Tilt in one web UI.
+- URL: `http://127.0.0.1:<overlay_server_port>/dashboard`
 
 ### Overlay (OBS)
-The Tilt overlay is viewer-facing and should be added as an OBS Browser Source.
+Use the overlays as viewer-facing Browser Sources in OBS:
 
 - Tilt overlay URL: `http://127.0.0.1:<overlay_server_port>/overlay/tilt`
 - Main overlay URL: `http://127.0.0.1:<overlay_server_port>/overlay`
-
-Use it to:
 
 - Show current run context and top-tiltee spotlight.
 - Surface live standings.
 - Display level/run recap cards.
 
-**Best practice:** dashboard on a side monitor, overlay in your OBS scene.
-
----
-
 ## Exact connection steps (Dashboard + OBS)
 
 1. Start **MyStats**.
-2. Open **Settings → Overlay** and confirm **Server Port** (default is typically `5000`).
-3. Verify in a browser:
+2. Open **Settings → Overlay**.
+3. Confirm **Server Port** (default is usually `5000`).
+4. Open in a browser to verify:
    - Dashboard: `http://127.0.0.1:<port>/dashboard`
    - Tilt overlay page: `http://127.0.0.1:<port>/overlay/tilt`
-4. In OBS, add **Browser Source**.
-5. Paste one of these as the URL:
+5. In OBS, add a **Browser Source**.
+6. Use one of these URLs:
    - `http://127.0.0.1:<port>/overlay/tilt` (Tilt scene)
-   - `http://127.0.0.1:<port>/overlay` (main race overlay)
-6. If you change the port, restart MyStats and update OBS source URLs.
+   - `http://127.0.0.1:<port>/overlay` (main race scene)
+7. If port changes, restart MyStats and update OBS Browser Source URLs.
 
-**Quick diagnostics**
-- If overlay shows errors: open `http://127.0.0.1:<port>/api/overlay/tilt` and confirm JSON loads.
-- If dashboard is blank: open `http://127.0.0.1:<port>/api/dashboard/main` and confirm JSON loads.
-- If either page returns Not Found: confirm your install still includes `obs_overlay/` and `modern_dashboard/` assets.
+---
+
+## Tilt commands (API + verification)
+
+Use these commands from a terminal for diagnostics and integrations.
+
+### 1) Fetch current Tilt overlay payload
+
+**Command**
+```bash
+curl -s http://127.0.0.1:<port>/api/overlay/tilt
+```
+
+**What it does**
+- Returns the active Tilt overlay JSON used by `/overlay/tilt`.
+
+**Sample payload (trimmed)**
+```json
+{
+  "updated_at": "2026-02-22T14:35:01",
+  "title": "MyStats Tilt Run Tracker",
+  "settings": {
+    "theme": "midnight"
+  },
+  "current_run": {
+    "run_id": "d6f6c3f1-...",
+    "run_short_id": "d6f6c3",
+    "status": "active",
+    "level": 23,
+    "elapsed_time": "11:42",
+    "top_tiltee": "PlayerA",
+    "top_tiltee_count": 3,
+    "run_points": 1280,
+    "run_xp": 2142,
+    "best_run_xp_today": 3010,
+    "total_xp_today": 5220,
+    "total_deaths_today": 17,
+    "lifetime_expertise": 184320,
+    "leader": { "name": "PlayerA", "points": 620 },
+    "standings": [
+      { "name": "PlayerA", "points": 620 },
+      { "name": "PlayerB", "points": 510 }
+    ]
+  },
+  "last_run": {},
+  "level_completion": {},
+  "run_completion": {},
+  "run_completion_event_id": 14,
+  "suppress_initial_recaps": true
+}
+```
+
+### 2) Fetch dashboard payload (includes Tilt section)
+
+**Command**
+```bash
+curl -s http://127.0.0.1:<port>/api/dashboard/main
+```
+
+**What it does**
+- Returns full dashboard JSON for MyCycle, Season Quests, Rivals, and Tilt.
+
+**Sample payload (Tilt-relevant subset)**
+```json
+{
+  "tilt": {
+    "totals": {
+      "tilt_levels": 412,
+      "tilt_top_tiltee": 156,
+      "tilt_points": 82390
+    },
+    "deaths_today": 17,
+    "participants": 42
+  }
+}
+```
+
+### 3) Fetch only Tilt section from dashboard payload
+
+**Command**
+```bash
+curl -s http://127.0.0.1:<port>/api/dashboard/main | jq '.tilt'
+```
+
+**What it does**
+- Extracts only the Tilt object for scripts/alerts.
+
+**Sample payload**
+```json
+{
+  "totals": {
+    "tilt_levels": 412,
+    "tilt_top_tiltee": 156,
+    "tilt_points": 82390
+  },
+  "deaths_today": 17,
+  "participants": 42
+}
+```
+
+### 4) HTTP health check for Tilt overlay endpoint
+
+**Command**
+```bash
+curl -I http://127.0.0.1:<port>/overlay/tilt
+```
+
+**What it does**
+- Verifies the Tilt overlay page is being served.
+
+**Sample response**
+```text
+HTTP/1.1 200 OK
+Content-Type: text/html; charset=utf-8
+```
 
 ---
 
 ## Tilt expertise formulas (technical users)
-
-Below is the code-level behavior used during Tilt processing.
 
 ### 1) Per-level earned expertise
 
@@ -101,30 +198,26 @@ Multiplier schedule:
 
 ### 4) Lifetime expertise anchor + increment
 
-MyStats combines a synced baseline and live session progress:
-
 - `adjusted_total_xp = parsed_total_xp_from_level_state + lifetime_base_xp`
 - `lifetime_expertise_working = max(previous_lifetime_expertise, adjusted_total_xp)`
 - `lifetime_expertise_new = lifetime_expertise_working + earned_xp`
-
-This is why startup baseline sync matters: it prevents stale local totals from being used as the long-term anchor.
 
 ---
 
 ## Other Tilt scoring shown in dashboard (pressure)
 
-The Tilt leaderboard pressure score (dashboard highlight sorting) uses:
+The dashboard pressure score uses:
 
 - `deaths = max(0, tilt_levels - tilt_top_tiltee)`
 - `pressure = (tilt_points * 1.5) + (tilt_top_tiltee * 25) - (deaths * 8)`
 
-This is separate from expertise, and is meant to rank “impact” in live standings.
+Pressure is a ranking/highlight metric and is separate from expertise.
 
 ---
 
 ## TL;DR
 
-- Use `http://127.0.0.1:<port>/dashboard` for operator monitoring.
-- Use `http://127.0.0.1:<port>/overlay/tilt` as your OBS Tilt Browser Source.
-- Expertise is survivor-count × level multiplier, accumulated into run/daily/lifetime totals.
-- Pressure score is separate and used for dashboard ranking emphasis.
+- Dashboard: `http://127.0.0.1:<port>/dashboard`
+- OBS Tilt Browser Source: `http://127.0.0.1:<port>/overlay/tilt`
+- Tilt API payload: `http://127.0.0.1:<port>/api/overlay/tilt`
+- Expertise = survivor-count × level multiplier, accumulated into run/day/lifetime totals.
