@@ -1,123 +1,175 @@
-# MyStats Tilt Mode Guide (Streamer-Friendly)
+# MyStats Tilt Mode Guide (Streamer-Friendly + Technical)
 
-Welcome to your **Tilt hype hub**. This guide explains how Tilt tracking, the web dashboard, and the overlay work together so your stream always has a clear story.
+Welcome to your **Tilt hub**. This guide explains Tilt tracking, dashboard usage, OBS overlay setup, in-app Tilt commands, and the technical formulas.
 
 ---
 
 ## What Tilt tracking gives you
 
-MyStats turns Tilt sessions into a complete viewing experience:
+MyStats provides:
 
-- **Live run status** so everyone knows what is happening right now.
-- **Leader + top-tiltee callouts** so your top performers get instant spotlight.
-- **Run, daily, and lifetime progression** updates without manual spreadsheet math.
-- **Level and run recaps** to create natural hype checkpoints.
-- **Dashboard + OBS overlay support** for polished visuals.
-- **Chat-ready summaries and commands** to keep engagement high.
+- **Live run status** (level, elapsed time, top tiltee).
+- **Run leaderboard tracking** (leader + standings for current run).
+- **Run, daily, and lifetime expertise progression** updates.
+- **Level completion + run completion recap payloads** for overlays.
+- **Dashboard + OBS overlay views** from the local MyStats web server.
 
 ---
 
 ## Dashboard + Overlay: what each one does
 
 ### Dashboard (Web)
-The MyStats web dashboard is your live control-glance view. It now opens from the app sidebar as **MyStats Web Dashboards** and includes the title **MyStats Dashboard Hub**.
+Use the dashboard as your operator/control view:
 
-Use the dashboard to:
-
-- Watch leaderboard movement in near real time.
-- Track Tilt KPIs (run points, run XP, lifetime progress cues).
-- Swap between MyCycle, Season Quests, and Tilt views from one page.
+- URL: `http://127.0.0.1:<overlay_server_port>/dashboard`
 
 ### Overlay (OBS)
-The overlay is viewer-facing and designed for stream scenes.
+Use the overlays as viewer-facing Browser Sources in OBS:
 
-Use the overlay to:
-
-- Show current run/level context.
-- Surface leaders and top tiltees while the match evolves.
-- Display recap moments after clears and at run end.
-
-**Best practice:** Keep the web dashboard on a side monitor for you, and the overlay in OBS for chat.
+- Tilt overlay URL: `http://127.0.0.1:<overlay_server_port>/overlay/tilt`
+- Main overlay URL: `http://127.0.0.1:<overlay_server_port>/overlay`
 
 ---
 
-## Important startup behavior (latest EXP sync)
+## Exact connection steps (Dashboard + OBS)
 
-When MyStats loads, it can refresh your base Tilt lifetime EXP from the leaderboard so the session starts with your most recent value.
-
-Why this matters:
-
-- You avoid stale local values.
-- Lifetime progress calculations are based on your latest known API total.
-- Every new app launch starts from the freshest EXP anchor available.
-
-In short: **launching MyStats updates the Tilt experience baseline from leaderboard data, so your EXP progression starts accurate each time.**
-
----
-
-## How to use Tilt mode (quick flow)
-
-1. Launch MyStats.
-2. Ensure your channel/settings are configured.
-3. Open **MyStats Web Dashboards** from the sidebar for live monitoring.
-4. Add the Tilt overlay source in OBS.
-5. Play Tilt as normal; MyStats handles updates, recaps, and progression outputs.
+1. Start **MyStats**.
+2. Open **Settings → Overlay**.
+3. Confirm **Server Port** (default is usually `5000`).
+4. Open in a browser to verify:
+   - Dashboard: `http://127.0.0.1:<port>/dashboard`
+   - Tilt overlay page: `http://127.0.0.1:<port>/overlay/tilt`
+5. In OBS, add a **Browser Source**.
+6. Use one of these URLs:
+   - `http://127.0.0.1:<port>/overlay/tilt` (Tilt scene)
+   - `http://127.0.0.1:<port>/overlay` (main race scene)
+7. If port changes, restart MyStats and update OBS Browser Source URLs.
 
 ---
 
-## Math behind Tilt progression (simple explainers)
+## In-app Tilt chat commands (`!` commands)
 
-You do not need to calculate this manually, but it helps to understand what viewers are seeing.
+These are the Tilt-related commands users run in chat.
 
-### 1) Run totals
-MyStats aggregates per-level performance into run totals:
+### `!mytilts [username]`
+**What it does**
+- Shows Tilt points/deaths today and season totals for the caller or optional target username.
+- Also reports the last passed level.
 
-- **Run Points** = sum of points/events credited during the active run.
-- **Run XP** = cumulative XP earned during the active run.
+**Sample output**
+```text
+PlayerA Stats | Today: 2,450 pts, 3 deaths | Season: 41,220 pts, 58 deaths | Last Passed: Level 27
+```
 
-This is the “how strong is this run” layer.
+### `!xp`
+**What it does**
+- Shows expertise values tracked by the app:
+  - last level XP
+  - last run XP
+  - today XP
+  - season XP
 
-### 2) Daily progression
-Daily progression is the sum of all run gains within the current day window:
+**Sample output**
+```text
+Expertise Stats | Last Level XP: 156 | Last Run XP: 2,142 | Today's XP: 5,220 | Season XP: 184,320
+```
 
-- **Daily XP** = Σ(run XP for today)
-- **Daily points** = Σ(run points for today)
+### `!toptiltees`
+**What it does**
+- Shows top users by top-tiltee finishes (up to top 10).
+- Tie-breaker uses season tilt points.
 
-This is the “how today is going overall” layer.
+**Sample output**
+```text
+Top Tiltees: (1) PlayerA 22 tops, 41,220 points, (2) PlayerB 18 tops, 36,100 points, (3) PlayerC 15 tops, 29,880 points.
+```
 
-### 3) Lifetime progression anchor
-Lifetime progress starts from a base value and adds current-session gains:
+### `!top10tiltees`
+**What it does**
+- Shows top 10 users by total Tilt points.
 
-- **Lifetime Base XP** = leaderboard-synced starting value at app load.
-- **Current Lifetime XP** ≈ Lifetime Base XP + session/day gains tracked since startup.
+**Sample output**
+```text
+Top 10 Tilees by Tilt Points: (1) PlayerA 41,220 points, (2) PlayerB 36,100 points, (3) PlayerC 29,880 points.
+```
 
-This is the “long-term account trajectory” layer.
+### `!tiltsurvivors`
+**What it does**
+- Shows best Tilt survival rates (lowest death rate) among users who meet a minimum levels-participated threshold.
+- Minimum level threshold is configurable by settings (`tiltsurvivors_min_levels`, fallback `tiltdeath_min_levels`).
 
-### 4) Milestone-style thinking
-Milestones are just threshold checks against totals:
+**Sample output**
+```text
+Top 10 Best Tilt Survival Rate (min 20 levels): (1) PlayerA 4 deaths, 92.0% survive, (2) PlayerB 6 deaths, 88.5% survive.
+```
 
-- If total XP crosses target bands, you can trigger recap/chat hype moments.
-- If run or daily totals break prior marks, you can spotlight momentum.
+### `!top10xp`
+**What it does**
+- Shows top 10 from the TiltedExpertise leaderboard (Pixel by Pixel source), after refreshing lifetime XP baseline.
 
-So the system is basically: **collect events → aggregate totals → compare to thresholds → surface hype outputs**.
+**Sample output**
+```text
+🏆 TOP 10 TiltedExpertise 🏆
+🥇 1. PlayerA - 184,320
+🥈 2. PlayerB - 173,940
+🥉 3. PlayerC - 169,102
+```
 
 ---
 
-## What your viewers feel
+## Tilt expertise formulas (technical users)
 
-With dashboard + overlay + recap flow, viewers get:
+### 1) Per-level earned expertise
 
-- A clear run narrative (start, swings, finish).
-- Frequent “checkpoint hype” moments.
-- Easy visibility into leaders, top tiltees, and progression.
-- Confidence that EXP/progress numbers are current from app launch.
+For each processed level:
+
+- `survivors = count(players at current level with points > 0)`
+- `earned_xp = floor(survivors * multiplier(level))`
+
+Multiplier schedule:
+
+- Levels 1–14: `1/3`
+- 15–17: `6`
+- 18–20: `7`
+- 21–23: `12`
+- 24–26: `13.5`
+- 27–29: `50`
+- 30–32: `66`
+- 33–35: `84`
+- 36–38: `104`
+- 39–41: `126`
+- 42+: `135 + 9 * floor((level - 42) / 3)`
+
+### 2) Run expertise
+
+- `run_xp_new = run_xp_prev + earned_xp`
+
+### 3) Daily expertise
+
+- `total_xp_today_new = total_xp_today_prev + earned_xp`
+
+### 4) Lifetime expertise anchor + increment
+
+- `adjusted_total_xp = parsed_total_xp_from_level_state + lifetime_base_xp`
+- `lifetime_expertise_working = max(previous_lifetime_expertise, adjusted_total_xp)`
+- `lifetime_expertise_new = lifetime_expertise_working + earned_xp`
+
+---
+
+## Other Tilt scoring shown in dashboard (pressure)
+
+The dashboard pressure score uses:
+
+- `deaths = max(0, tilt_levels - tilt_top_tiltee)`
+- `pressure = (tilt_points * 1.5) + (tilt_top_tiltee * 25) - (deaths * 8)`
+
+Pressure is a ranking/highlight metric and is separate from expertise.
 
 ---
 
 ## TL;DR
 
-- MyStats provides live Tilt tracking, recap beats, and chat-ready outputs.
-- **MyStats Web Dashboards** gives you the control-glance web view.
-- The overlay powers polished viewer-facing OBS scenes.
-- On load, MyStats can sync lifetime EXP from leaderboard data so you begin with your latest value.
-- Progress math is straightforward aggregation + milestone checks under the hood.
+- Dashboard: `http://127.0.0.1:<port>/dashboard`
+- OBS Tilt Browser Source: `http://127.0.0.1:<port>/overlay/tilt`
+- Tilt chat commands: `!mytilts`, `!xp`, `!toptiltees`, `!top10tiltees`, `!tiltsurvivors`, `!top10xp`
+- Expertise = survivor-count × level multiplier, accumulated into run/day/lifetime totals.
