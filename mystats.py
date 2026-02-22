@@ -4707,7 +4707,8 @@ class ConfigManager:
                                 'overlay_card_opacity', 'overlay_text_scale', 'overlay_show_medals',
                                 'overlay_compact_rows', 'overlay_horizontal_layout', 'overlay_server_port', 'tilt_lifetime_base_xp',
                                 'tilt_overlay_theme', 'tilt_scroll_step_px', 'tilt_scroll_interval_ms',
-                                'tilt_scroll_pause_ms', 'tiltsurvivors_min_levels', 'tiltdeath_min_levels'}
+                                'tilt_scroll_pause_ms', 'tiltsurvivors_min_levels', 'tiltdeath_min_levels',
+                                'update_later_clicks', 'update_later_version'}
         self.transient_keys = set([])
         self.defaults = {
             'chat_br_results': 'True',
@@ -4775,7 +4776,9 @@ class ConfigManager:
             'tilt_scroll_interval_ms': '40',
             'tilt_scroll_pause_ms': '900',
             'tiltsurvivors_min_levels': '20',
-            'tiltdeath_min_levels': '20'
+            'tiltdeath_min_levels': '20',
+            'update_later_clicks': '0',
+            'update_later_version': ''
         }
         self.load_settings()
 
@@ -5494,6 +5497,27 @@ def download_and_install_update(download_url, version_label, silent_mode=True):
     threading.Thread(target=worker, daemon=True).start()
 
 
+def _get_update_later_clicks(versioncheck):
+    tracked_version = config.get_setting('update_later_version') or ''
+    if tracked_version != str(versioncheck):
+        config.set_setting('update_later_version', str(versioncheck), persistent=True)
+        config.set_setting('update_later_clicks', '0', persistent=True)
+        return 0
+
+    try:
+        return max(0, int(config.get_setting('update_later_clicks') or 0))
+    except (TypeError, ValueError):
+        config.set_setting('update_later_clicks', '0', persistent=True)
+        return 0
+
+
+def _register_update_later_click(versioncheck):
+    clicks = _get_update_later_clicks(versioncheck)
+    clicks = min(3, clicks + 1)
+    config.set_setting('update_later_clicks', str(clicks), persistent=True)
+    return clicks
+
+
 def show_update_message(versioncheck, download_url):
     # Create a custom popup window
     popup = tk.Toplevel(root)
@@ -5550,7 +5574,18 @@ def show_update_message(versioncheck, download_url):
         command=lambda: [popup.destroy(), download_and_install_update(download_url, versioncheck, silent_mode=True)]
     ).pack(side='left', padx=6)
 
-    ttk.Button(button_frame, text="Later", command=popup.destroy).pack(side='left', padx=6)
+    later_clicks = _get_update_later_clicks(versioncheck)
+
+    later_button = ttk.Button(button_frame, text="Later")
+    if later_clicks >= 3:
+        later_button.state(["disabled"])
+        later_button.configure(text="Later (Disabled)")
+    else:
+        later_button.configure(
+            text=f"Later ({3 - later_clicks} left)",
+            command=lambda: [_register_update_later_click(versioncheck), popup.destroy()]
+        )
+    later_button.pack(side='left', padx=6)
 
     popup.transient(root)
     popup.grab_set()
@@ -5607,6 +5642,8 @@ def ver_season_only():
 
                     if str(versioncheck) == str(version):
                         print("No Updates available.\n")
+                        config.set_setting('update_later_clicks', '0', persistent=True)
+                        config.set_setting('update_later_version', '', persistent=True)
                         return season
                     else:
                         print(f"An update is available. Current Version: {version} | New Version: {versioncheck}")
