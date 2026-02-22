@@ -20,7 +20,7 @@
       <button class="dashboard-nav-btn dashboard-nav-btn--active" data-view="mycycle" type="button">MyCycle</button>
       <button class="dashboard-nav-btn" data-view="season-quests" type="button">Season Quests</button>
       <button class="dashboard-nav-btn" data-view="tilt" type="button">Tilt Dashboard</button>
-      <button class="dashboard-nav-btn" type="button" disabled>Rivals (next)</button>
+      <button class="dashboard-nav-btn" data-view="rivals" type="button">Rivals</button>
     </section>
 
     <section class="mycycle-shell" data-panel="mycycle">
@@ -72,6 +72,22 @@
           <span id="tilt-range-pill" class="range-pill">Community Meta</span>
         </div>
         <div id="tilt-leaderboard" class="rows"></div>
+      </article>
+    </section>
+
+    <section class="rivals-shell is-hidden" data-panel="rivals">
+      <article class="summary-panel">
+        <div class="meta">Rivals snapshot</div>
+        <div id="rivals-kpis" class="kpis"></div>
+        <div id="rivals-highlights" class="cycle-highlights"></div>
+      </article>
+
+      <article class="leaderboard-panel">
+        <div class="panel-title-row">
+          <h2>Rivals Leaderboard</h2>
+          <span id="rivals-range-pill" class="range-pill">Closest gaps</span>
+        </div>
+        <div id="rivals-leaderboard" class="rows"></div>
       </article>
     </section>
 

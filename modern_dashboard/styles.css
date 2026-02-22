@@ -32,7 +32,8 @@ body {
 
 .mycycle-shell,
 .season-shell,
-.tilt-shell { display: grid; grid-template-columns: 280px 1fr; gap: 10px; min-height: 76vh; }
+.tilt-shell,
+.rivals-shell { display: grid; grid-template-columns: 280px 1fr; gap: 10px; min-height: 76vh; }
 .summary-panel, .leaderboard-panel {
   border-radius: 12px;
   border: 1px solid rgba(126, 169, 245, .25);
