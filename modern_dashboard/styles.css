@@ -89,6 +89,31 @@ body {
 .panel-title-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
 .panel-title-row h2 { margin: 0; font-size: .95rem; color: #7fd8ff; text-transform: uppercase; letter-spacing: .08em; }
 .range-pill { font-size: .78rem; color: #b8cdf5; border: 1px solid rgba(127,216,255,.3); border-radius: 999px; padding: 3px 9px; }
+
+.tilt-sort-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.sort-select {
+  border-radius: 999px;
+  border: 1px solid rgba(127,216,255,.3);
+  background: rgba(255,255,255,.06);
+  color: #d4e4ff;
+  padding: 4px 8px;
+  font-size: .72rem;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 .rows { overflow: auto; display: grid; gap: 5px; max-height: calc(76vh - 36px); }
 .row {
   border: 1px solid rgba(255,255,255,.08);

@@ -70,7 +70,25 @@
       <article class="leaderboard-panel">
         <div class="panel-title-row">
           <h2>Tilt Leaderboard</h2>
-          <span id="tilt-range-pill" class="range-pill">Community Meta</span>
+          <div class="tilt-sort-controls">
+            <label for="tilt-sort-by" class="sr-only">Sort tilt leaderboard by</label>
+            <select id="tilt-sort-by" class="sort-select">
+              <option value="pressure_score">Pressure</option>
+              <option value="name">Name</option>
+              <option value="tilt_points">Tilt Points</option>
+              <option value="tilt_levels">Tilt Levels</option>
+              <option value="tilt_top_tiltee">Top Tiltees</option>
+              <option value="deaths">Death Count</option>
+              <option value="death_rate">Death Rate</option>
+              <option value="consistency">Consistency</option>
+            </select>
+            <label for="tilt-sort-order" class="sr-only">Sort order</label>
+            <select id="tilt-sort-order" class="sort-select">
+              <option value="desc">Desc</option>
+              <option value="asc">Asc</option>
+            </select>
+            <span id="tilt-range-pill" class="range-pill">Community Meta</span>
+          </div>
         </div>
         <div id="tilt-leaderboard" class="rows"></div>
       </article>
