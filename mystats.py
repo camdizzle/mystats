@@ -2099,7 +2099,17 @@ def _overlay_data_sources(data_dir):
 
 def _overlay_recent_race_payload(race_file):
     if not race_file:
-        return {'rows': [], 'top3_rows': [], 'race_key': None, 'race_type': None, 'race_timestamp': None, 'is_recent': False}
+        return {
+            'rows': [],
+            'top3_rows': [],
+            'race_key': None,
+            'race_type': None,
+            'race_timestamp': None,
+            'is_recent': False,
+            'is_record_race': False,
+            'record_holder_name': None,
+            'record_delta_seconds': 0.0,
+        }
 
     race_groups = []
     groups_by_key = {}
@@ -2130,8 +2140,20 @@ def _overlay_recent_race_payload(race_file):
                         'race_type': race_type,
                         'parsed_ts': _parse_overlay_timestamp(race_timestamp),
                         'rows': [],
+                        'is_record_race': False,
+                        'record_holder_name': None,
+                        'record_delta_seconds': 0.0,
                     }
                     race_groups.append(groups_by_key[race_key])
+
+                is_record_row = len(row) > 11 and str(row[11]).strip() == '1'
+                if is_record_row:
+                    groups_by_key[race_key]['is_record_race'] = True
+                    groups_by_key[race_key]['record_holder_name'] = _overlay_display_name(row[2], row[1])
+                    try:
+                        groups_by_key[race_key]['record_delta_seconds'] = max(0.0, float((row[8] if len(row) > 8 else 0) or 0))
+                    except (TypeError, ValueError):
+                        groups_by_key[race_key]['record_delta_seconds'] = 0.0
 
                 groups_by_key[race_key]['rows'].append({
                     'placement': placement,
@@ -2140,10 +2162,30 @@ def _overlay_recent_race_payload(race_file):
                     'finished': not (len(row) >= 8 and str(row[7]).strip().lower() == 'true'),
                 })
     except Exception:
-        return {'rows': [], 'top3_rows': [], 'race_key': None, 'race_type': None, 'race_timestamp': None, 'is_recent': False}
+        return {
+            'rows': [],
+            'top3_rows': [],
+            'race_key': None,
+            'race_type': None,
+            'race_timestamp': None,
+            'is_recent': False,
+            'is_record_race': False,
+            'record_holder_name': None,
+            'record_delta_seconds': 0.0,
+        }
 
     if not race_groups:
-        return {'rows': [], 'top3_rows': [], 'race_key': None, 'race_type': None, 'race_timestamp': None, 'is_recent': False}
+        return {
+            'rows': [],
+            'top3_rows': [],
+            'race_key': None,
+            'race_type': None,
+            'race_timestamp': None,
+            'is_recent': False,
+            'is_record_race': False,
+            'record_holder_name': None,
+            'record_delta_seconds': 0.0,
+        }
 
     latest_group = race_groups[-1]
     latest_rows = sorted(latest_group['rows'], key=lambda r: r['placement'])
@@ -2170,6 +2212,9 @@ def _overlay_recent_race_payload(race_file):
         'race_type': latest_group['race_type'] or None,
         'race_timestamp': latest_group['race_timestamp'] or None,
         'is_recent': is_recent,
+        'is_record_race': latest_group['is_record_race'],
+        'record_holder_name': latest_group['record_holder_name'],
+        'record_delta_seconds': latest_group['record_delta_seconds'],
     }
 
 
@@ -2196,6 +2241,7 @@ def _build_overlay_top3_payload():
             'id': 'previous',
             'title': 'Top 10 Previous Race',
             'rows': recent_race['rows'],
+            'is_record_race': recent_race['is_record_race'],
         })
 
     return {
@@ -2208,6 +2254,9 @@ def _build_overlay_top3_payload():
             'race_key': recent_race['race_key'],
             'race_type': recent_race['race_type'],
             'race_timestamp': recent_race['race_timestamp'],
+            'is_record_race': recent_race['is_record_race'],
+            'record_holder_name': recent_race['record_holder_name'],
+            'record_delta_seconds': recent_race['record_delta_seconds'],
         },
         'header_stats': _build_overlay_header_stats(data_dir),
         'settings': _build_overlay_settings_payload(),
