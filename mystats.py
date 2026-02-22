@@ -6069,6 +6069,21 @@ class Bot(commands.Bot):
         )
 
 
+    @commands.command(name='xp')
+    async def xp_command(self, ctx):
+        last_level_xp = get_int_setting('tilt_last_level_xp', 0)
+        last_run_xp = get_int_setting('tilt_previous_run_xp', 0)
+        today_xp = get_int_setting('tilt_total_xp_today', 0)
+        season_xp = get_int_setting('tilt_lifetime_expertise', 0) + get_int_setting('tilt_lifetime_base_xp', 0)
+
+        await send_chat_message(
+            ctx.channel,
+            f"Expertise Stats | Last Level XP: {last_level_xp:,} | Last Run XP: {last_run_xp:,} | "
+            f"Today's XP: {today_xp:,} | Season XP: {season_xp:,}",
+            category="mystats"
+        )
+
+
     @commands.command(name='toptiltees')
     async def toptiltees_command(self, ctx):
         season_points_by_player = defaultdict(int)
