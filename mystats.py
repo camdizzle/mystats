@@ -5377,42 +5377,119 @@ def show_windows_toast(title, message, duration=6):
         logger.warning(f"Toast notification failed: {exc}")
 
 
-def _start_installer_and_exit(installer_path):
+def is_minimized_to_tray():
+    return tray_icon is not None and root is not None and root.winfo_exists() and not root.winfo_viewable()
+
+
+def _create_update_progress_dialog(version_label):
+    progress_window = tk.Toplevel(root)
+    progress_window.title("Downloading Update")
+    progress_window.geometry("420x160")
+    progress_window.transient(root)
+
+    root_x = root.winfo_x()
+    root_y = root.winfo_y()
+    root_width = root.winfo_width()
+    root_height = root.winfo_height()
+    pos_x = root_x + (root_width // 2) - 210
+    pos_y = root_y + (root_height // 2) - 80
+    progress_window.geometry(f"420x160+{pos_x}+{pos_y}")
+
+    ttk.Label(
+        progress_window,
+        text=f"Downloading MyStats {version_label}...",
+        style="Small.TLabel"
+    ).pack(anchor='w', padx=16, pady=(14, 8))
+
+    progress_var = tk.DoubleVar(value=0.0)
+    progress_bar = ttk.Progressbar(progress_window, mode='determinate', maximum=100, variable=progress_var)
+    progress_bar.pack(fill='x', padx=16)
+
+    percent_var = tk.StringVar(value="0%")
+    ttk.Label(progress_window, textvariable=percent_var).pack(anchor='e', padx=16, pady=(8, 0))
+
+    status_var = tk.StringVar(value="Preparing download...")
+    ttk.Label(progress_window, textvariable=status_var, style="Small.TLabel").pack(anchor='w', padx=16, pady=(6, 10))
+
+    progress_window.protocol("WM_DELETE_WINDOW", lambda: None)
+    return progress_window, progress_var, percent_var, status_var
+
+
+def _start_installer_and_exit(installer_path, silent_mode=True):
+    command = [installer_path]
+    if silent_mode:
+        command.extend(["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS"])
+
     try:
-        subprocess.Popen([installer_path], shell=True)
+        subprocess.Popen(command, shell=False)
         force_exit_application()
     except Exception as exc:
         messagebox.showerror("Update Failed", f"Could not start installer: {exc}")
 
 
-def download_and_install_update(download_url, version_label):
+def download_and_install_update(download_url, version_label, silent_mode=True):
     if not download_url:
         messagebox.showerror("Update Failed", "No download URL was provided by the update service.")
         return
 
+    toast_on_progress = is_minimized_to_tray()
     show_windows_toast("MyStats Update", f"Downloading MyStats {version_label} update...")
+
+    progress_window, progress_var, percent_var, status_var = _create_update_progress_dialog(version_label)
+    last_toast_bucket = {'value': -1}
+
+    def update_progress(downloaded, total_bytes):
+        if total_bytes <= 0:
+            status_var.set(f"Downloaded {downloaded / (1024 * 1024):.2f} MB")
+            return
+
+        percent = min(100, int((downloaded / total_bytes) * 100))
+        progress_var.set(percent)
+        percent_var.set(f"{percent}%")
+        status_var.set(f"{downloaded / (1024 * 1024):.2f} MB / {total_bytes / (1024 * 1024):.2f} MB")
+
+        if toast_on_progress:
+            bucket = percent // 25
+            if bucket > last_toast_bucket['value'] and percent not in (0, 100):
+                last_toast_bucket['value'] = bucket
+                show_windows_toast("MyStats Update", f"Download progress: {percent}%")
 
     def worker():
         installer_path = None
         try:
             response = requests.get(download_url, stream=True, timeout=60)
             response.raise_for_status()
+            total_bytes = int(response.headers.get('content-length') or 0)
+            downloaded = 0
 
             with tempfile.NamedTemporaryFile(delete=False, suffix='.exe', prefix='mystats_update_') as tmp_file:
                 installer_path = tmp_file.name
-                for chunk in response.iter_content(chunk_size=8192):
-                    if chunk:
-                        tmp_file.write(chunk)
+                for chunk in response.iter_content(chunk_size=1024 * 128):
+                    if not chunk:
+                        continue
+                    tmp_file.write(chunk)
+                    downloaded += len(chunk)
+                    root.after(0, lambda d=downloaded, t=total_bytes: update_progress(d, t))
 
+            root.after(0, lambda: progress_var.set(100))
+            root.after(0, lambda: percent_var.set("100%"))
+            root.after(0, lambda: status_var.set("Download complete. Launching installer..."))
             root.after(0, lambda: show_windows_toast("MyStats Update", "Download complete. Launching installer..."))
-            root.after(0, lambda: _start_installer_and_exit(installer_path))
+            root.after(350, lambda: progress_window.destroy() if progress_window.winfo_exists() else None)
+            root.after(500, lambda: _start_installer_and_exit(installer_path, silent_mode=silent_mode))
         except Exception as exc:
             if installer_path and os.path.exists(installer_path):
                 try:
                     os.remove(installer_path)
                 except OSError:
                     pass
-            root.after(0, lambda: messagebox.showerror("Update Failed", f"Could not download/install update: {exc}"))
+
+            def fail():
+                if progress_window.winfo_exists():
+                    progress_window.destroy()
+                messagebox.showerror("Update Failed", f"Could not download/install update: {exc}")
+
+            root.after(0, fail)
 
     threading.Thread(target=worker, daemon=True).start()
 
@@ -5421,7 +5498,7 @@ def show_update_message(versioncheck, download_url):
     # Create a custom popup window
     popup = tk.Toplevel(root)
     popup.title("Update Available")
-    popup.geometry("420x320")
+    popup.geometry("560x320")
 
     # Center the popup window on the main window
     root_x = root.winfo_x()
@@ -5429,7 +5506,7 @@ def show_update_message(versioncheck, download_url):
     root_width = root.winfo_width()
     root_height = root.winfo_height()
 
-    popup_width = 420
+    popup_width = 560
     popup_height = 320
 
     pos_x = root_x + (root_width // 2) - (popup_width // 2)
@@ -5469,8 +5546,14 @@ def show_update_message(versioncheck, download_url):
 
     ttk.Button(
         button_frame,
-        text="Update Now",
-        command=lambda: [popup.destroy(), download_and_install_update(download_url, versioncheck)]
+        text="One-Click Update",
+        command=lambda: [popup.destroy(), download_and_install_update(download_url, versioncheck, silent_mode=True)]
+    ).pack(side='left', padx=6)
+
+    ttk.Button(
+        button_frame,
+        text="Update (Wizard)",
+        command=lambda: [popup.destroy(), download_and_install_update(download_url, versioncheck, silent_mode=False)]
     ).pack(side='left', padx=6)
 
     ttk.Button(button_frame, text="Later", command=popup.destroy).pack(side='left', padx=6)
