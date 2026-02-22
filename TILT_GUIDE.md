@@ -122,20 +122,6 @@ This is separate from expertise, and is meant to rank “impact” in live stand
 
 ---
 
-## Coverage check: does this guide now match what Tilt is doing?
-
-Yes—this guide now maps to the major Tilt systems currently in the codebase:
-
-- Local web routes for dashboard and overlays.
-- API endpoints those pages poll.
-- Per-level/run/daily/lifetime expertise update logic.
-- Pressure-score dashboard ranking logic.
-- Operational setup steps for dashboard and OBS URL wiring.
-
-If additional Tilt mechanics are added later (new milestone triggers, new formulas, or payload fields), this guide should be updated in the same release.
-
----
-
 ## TL;DR
 
 - Use `http://127.0.0.1:<port>/dashboard` for operator monitoring.
