@@ -7,7 +7,7 @@
   --text-scale: 1;
   --overlay-frame-gap: 12px;
   --overlay-frame-width: min(680px, calc(100vw - (var(--overlay-frame-gap) * 2)));
-  --overlay-frame-height: min(560px, calc(100vh - (var(--overlay-frame-gap) * 2)));
+  --overlay-frame-height: min(520px, calc(100vh - (var(--overlay-frame-gap) * 2)));
 }
 
 * { box-sizing: border-box; }
@@ -22,7 +22,7 @@ body {
 
 .card {
   width: var(--overlay-frame-width);
-  height: auto;
+  height: var(--overlay-frame-height);
   max-height: var(--overlay-frame-height);
   margin: var(--overlay-frame-gap) auto;
   padding: 12px;
@@ -38,7 +38,7 @@ body {
 h1 {
   margin: 0;
   text-align: center;
-  font-size: calc(1.55rem * var(--text-scale));
+  font-size: calc(1.66rem * var(--text-scale));
 }
 
 .status-bar {
@@ -228,7 +228,7 @@ h1 {
   border: 1px solid rgba(122, 250, 255, 0.42);
   font-weight: 800;
   letter-spacing: 0.08em;
-  font-size: calc(0.98rem * var(--text-scale));
+  font-size: calc(0.9rem * var(--text-scale));
 }
 
 .level-overlay__title {
@@ -236,9 +236,10 @@ h1 {
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  font-size: calc(2.5rem * var(--text-scale));
+  font-size: calc(2.32rem * var(--text-scale));
   line-height: 1.05;
   max-width: 14ch;
+  text-align: center;
   text-shadow: 0 0 12px rgba(127, 216, 255, 0.35);
 }
 
@@ -293,7 +294,7 @@ h1 {
   border: 1px solid rgba(255, 208, 125, 0.45);
   font-weight: 800;
   letter-spacing: 0.08em;
-  font-size: calc(0.98rem * var(--text-scale));
+  font-size: calc(0.9rem * var(--text-scale));
 }
 
 .run-overlay__title {
@@ -301,9 +302,10 @@ h1 {
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  font-size: calc(2.4rem * var(--text-scale));
+  font-size: calc(2.24rem * var(--text-scale));
   line-height: 1.05;
   max-width: 14ch;
+  text-align: center;
 }
 
 .run-overlay__subtitle {
@@ -325,6 +327,7 @@ h1 {
   display: grid;
   grid-template-columns: auto 1fr auto;
   align-items: center;
+  justify-items: center;
   gap: 10px;
   padding: 11px 14px;
   border-radius: 14px;
@@ -353,10 +356,11 @@ h1 {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-align: center;
 }
 
 .run-overlay__points {
-  text-align: right;
+  text-align: center;
   white-space: nowrap;
 }
 
@@ -414,7 +418,7 @@ h1 {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
-  text-align: left;
+  text-align: center;
 }
 
 .overlay-metric {

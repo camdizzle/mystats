@@ -383,6 +383,20 @@ function renderRunCompletionOverlay(lastRun = {}, shouldDisplay = true) {
   lastRunOverlayKey = runKey;
 
   const standings = Array.isArray(lastRun.standings) ? lastRun.standings.slice(0, 3) : [];
+  const runDeaths = Number(
+    lastRun.deaths
+    ?? lastRun.run_deaths
+    ?? lastRun.total_deaths
+    ?? lastRun.total_deaths_today
+    ?? 0
+  );
+  const runDeathRateRaw = Number(
+    lastRun.death_rate
+    ?? lastRun.run_death_rate
+    ?? 0
+  );
+  const runDeathRate = runDeathRateRaw.toFixed(1);
+
   title.textContent = `Run Complete • Level ${fmt(lastRun.ended_level)}`;
   subtitle.textContent = `${lastRun.elapsed_time || '0:00'} total • ${fmt(lastRun.run_xp)} XP gained`;
 
@@ -404,7 +418,8 @@ function renderRunCompletionOverlay(lastRun = {}, shouldDisplay = true) {
     <div class="overlay-pill-row">
       <div class="overlay-pill">🏆 ${fmt(lastRun.run_points)} pts</div>
       <div class="overlay-pill">✨ ${fmt(lastRun.run_xp)} XP</div>
-      <div class="overlay-pill">💀 ${fmt(lastRun.total_deaths_today)} deaths</div>
+      <div class="overlay-pill">💀 ${fmt(runDeaths)} deaths</div>
+      <div class="overlay-pill">📉 ${runDeathRate}% death rate</div>
       <div class="overlay-pill">🔥 Best ${fmt(lastRun.best_run_xp_today)} XP</div>
     </div>
   `;
