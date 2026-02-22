@@ -201,7 +201,7 @@ function renderSeasonQuestRows(data) {
           <span>Race HS: ${escapeHtml(fmt(row.race_hs))}</span>
           <span>BR HS: ${escapeHtml(fmt(row.br_hs))}</span>
           <span>Tilt Levels: ${escapeHtml(fmt(row.tilt_levels))}</span>
-          <span>Top Tiltees: ${escapeHtml(fmt(row.tilt_top_tiltee))}</span>
+          <span>Top Tiltees: ${escapeHtml(fmt(getTopTilteeCount(row)))}</span>
           <span>Tilt Points: ${escapeHtml(fmt(row.tilt_points))}</span>
         </div>
       </div>
@@ -210,6 +210,13 @@ function renderSeasonQuestRows(data) {
 }
 
 
+
+function getTopTilteeCount(row = {}) {
+  if (row == null || typeof row !== 'object') return 0;
+  if (row.tilt_top_tiltee != null && row.tilt_top_tiltee !== '') return Number(row.tilt_top_tiltee || 0);
+  return Number(row.tilt_tops || 0);
+}
+
 function renderTiltKpis(rows = [], data = {}) {
   const host = el('tilt-kpis');
   if (!host) return;
@@ -217,8 +224,10 @@ function renderTiltKpis(rows = [], data = {}) {
   const totals = data?.tilt?.totals || {};
   const deathsToday = Number(data?.tilt?.deaths_today || 0);
   const totalLevels = Number(totals.levels || 0);
+  const totalTopTiltees = Number(totals.top_tiltees ?? totals.tilt_tops ?? 0);
   const totalPoints = Number(totals.points || 0);
-  const deathRate = totalLevels > 0 ? ((deathsToday / totalLevels) * 100) : 0;
+  const totalDeaths = Math.max(0, totalLevels - totalTopTiltees);
+  const deathRate = totalLevels > 0 ? ((totalDeaths / totalLevels) * 100) : 0;
 
   host.innerHTML = [
     { label: 'Tilt Competitors', value: fmt(uniqueParticipantCount(rows)) },
@@ -245,7 +254,7 @@ function compareTiltRows(a, b, sortBy = 'tilt_points', sortOrder = 'desc') {
   }
 
   if (Number(b.tilt_points || 0) !== Number(a.tilt_points || 0)) return Number(b.tilt_points || 0) - Number(a.tilt_points || 0);
-  if (Number(b.tilt_top_tiltee || 0) !== Number(a.tilt_top_tiltee || 0)) return Number(b.tilt_top_tiltee || 0) - Number(a.tilt_top_tiltee || 0);
+  if (getTopTilteeCount(b) !== getTopTilteeCount(a)) return getTopTilteeCount(b) - getTopTilteeCount(a);
   return String(a.display_name || a.username || '').localeCompare(String(b.display_name || b.username || ''));
 }
 
@@ -263,16 +272,16 @@ function renderTiltHighlights(rows = [], data = {}) {
     if (Number(row.tilt_points || 0) !== Number(best.tilt_points || 0)) {
       return Number(row.tilt_points || 0) > Number(best.tilt_points || 0) ? row : best;
     }
-    if (Number(row.tilt_top_tiltee || 0) !== Number(best.tilt_top_tiltee || 0)) {
-      return Number(row.tilt_top_tiltee || 0) > Number(best.tilt_top_tiltee || 0) ? row : best;
+    if (getTopTilteeCount(row) !== getTopTilteeCount(best)) {
+      return getTopTilteeCount(row) > getTopTilteeCount(best) ? row : best;
     }
     return String(row.display_name || row.username || '').localeCompare(String(best.display_name || best.username || '')) < 0 ? row : best;
   }, null);
 
   const topTiltee = rows.reduce((best, row) => {
     if (!best) return row;
-    if (Number(row.tilt_top_tiltee || 0) !== Number(best.tilt_top_tiltee || 0)) {
-      return Number(row.tilt_top_tiltee || 0) > Number(best.tilt_top_tiltee || 0) ? row : best;
+    if (getTopTilteeCount(row) !== getTopTilteeCount(best)) {
+      return getTopTilteeCount(row) > getTopTilteeCount(best) ? row : best;
     }
     return Number(row.tilt_points || 0) > Number(best.tilt_points || 0) ? row : best;
   }, null);
@@ -282,7 +291,7 @@ function renderTiltHighlights(rows = [], data = {}) {
 
   host.innerHTML = [
     `<div class="highlight-card"><div class="highlight-title">Points Leader</div><div class="highlight-main">${escapeHtml(leaderName)}</div><div class="highlight-detail">${escapeHtml(`${fmt(pointsLeader?.tilt_points || 0)} tilt points`)}</div></div>`,
-    `<div class="highlight-card"><div class="highlight-title">Top Tiltee Legend</div><div class="highlight-main">${escapeHtml(topTilteeName)}</div><div class="highlight-detail">${escapeHtml(`${fmt(topTiltee?.tilt_top_tiltee || 0)} top-tiltee finishes`)}</div></div>`,
+    `<div class="highlight-card"><div class="highlight-title">Top Tiltee Legend</div><div class="highlight-main">${escapeHtml(topTilteeName)}</div><div class="highlight-detail">${escapeHtml(`${fmt(getTopTilteeCount(topTiltee))} top-tiltee finishes`)}</div></div>`,
   ].join('');
 }
 
@@ -299,13 +308,15 @@ function renderTiltRows(data) {
     .filter((row) => Number(row.tilt_levels || 0) > 0 || Number(row.tilt_points || 0) > 0)
     .map((row) => {
       const tiltLevels = Number(row.tilt_levels || 0);
-      const deaths = Math.max(0, tiltLevels - Number(row.tilt_top_tiltee || 0));
+      const topTiltees = getTopTilteeCount(row);
+      const deaths = Math.max(0, tiltLevels - topTiltees);
       const deathRate = tiltLevels > 0 ? (deaths / tiltLevels) * 100 : 0;
-      const pressureScore = (Number(row.tilt_points || 0) * 1.5) + (Number(row.tilt_top_tiltee || 0) * 25) - (deaths * 8);
+      const pressureScore = (Number(row.tilt_points || 0) * 1.5) + (topTiltees * 25) - (deaths * 8);
       const consistency = Math.max(0, 100 - deathRate);
 
       return {
         ...row,
+        tilt_top_tiltee: topTiltees,
         deaths,
         death_rate: deathRate,
         pressure_score: pressureScore,
@@ -334,7 +345,7 @@ function renderTiltRows(data) {
         <div class="quest-metrics">
           <span>Tilt Points: ${escapeHtml(fmt(row.tilt_points))}</span>
           <span>Tilt Levels: ${escapeHtml(fmt(row.tilt_levels))}</span>
-          <span>Top Tiltees: ${escapeHtml(fmt(row.tilt_top_tiltee))}</span>
+          <span>Top Tiltees: ${escapeHtml(fmt(getTopTilteeCount(row)))}</span>
           <span>Death Count: ${escapeHtml(fmt(row.deaths))}</span>
           <span>Death Rate: ${escapeHtml(`${row.death_rate.toFixed(1)}%`)}</span>
           <span>Consistency: ${escapeHtml(`${row.consistency.toFixed(1)}%`)}</span>
