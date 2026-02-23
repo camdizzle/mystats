@@ -3774,7 +3774,14 @@ def test_audio_playback():
 
 def on_close():
     if not is_forced_exit:
-        minimize_to_tray()
+        confirm_exit = messagebox.askyesno(
+            "Exit MyStats",
+            "Are you sure you want to exit MyStats?"
+        )
+        if not confirm_exit:
+            return
+
+        force_exit_application()
         return
 
     # Disable the root window to prevent interaction
