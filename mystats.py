@@ -48,6 +48,7 @@ import logging
 import queue
 import tempfile
 import subprocess
+import warnings
 
 try:
     import ttkbootstrap as ttkbootstrap_module
@@ -60,7 +61,13 @@ except ImportError:
     pystray = None
 
 try:
-    from win10toast import ToastNotifier
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=r"pkg_resources is deprecated as an API.*",
+            category=UserWarning,
+        )
+        from win10toast import ToastNotifier
 except ImportError:
     ToastNotifier = None
 
@@ -89,6 +96,7 @@ tray_thread = None
 tray_queue = queue.Queue()
 is_forced_exit = False
 win_toaster = ToastNotifier() if ToastNotifier is not None else None
+is_hiding_to_tray = False
 
 logging.basicConfig(
     level=logging.INFO,
@@ -121,6 +129,8 @@ def _drain_tray_queue():
 
         if command == "show":
             restore_from_tray()
+        elif command == "dashboard":
+            open_dashboard()
         elif command == "exit":
             force_exit_application()
 
@@ -129,6 +139,10 @@ def _drain_tray_queue():
 
 def _on_tray_open(icon, item):
     tray_queue.put("show")
+
+
+def _on_tray_dashboard(icon, item):
+    tray_queue.put("dashboard")
 
 
 def _on_tray_exit(icon, item):
@@ -143,6 +157,7 @@ def start_system_tray_icon():
 
     menu = pystray.Menu(
         pystray.MenuItem("Open MyStats", _on_tray_open),
+        pystray.MenuItem("Open Dashboard", _on_tray_dashboard),
         pystray.MenuItem("Exit", _on_tray_exit),
     )
 
@@ -160,7 +175,14 @@ def stop_system_tray_icon():
         tray_thread = None
 
 
+def _set_hiding_to_tray(value):
+    global is_hiding_to_tray
+    is_hiding_to_tray = value
+
+
 def minimize_to_tray():
+    global is_hiding_to_tray
+
     if not root or not root.winfo_exists():
         return
 
@@ -168,8 +190,22 @@ def minimize_to_tray():
         root.iconify()
         return
 
+    is_hiding_to_tray = True
     root.withdraw()
     start_system_tray_icon()
+    show_windows_toast("MyStats", "👋 Hi, MyStats is down here now.")
+    root.after(300, lambda: _set_hiding_to_tray(False))
+
+
+def handle_root_minimize(event=None):
+    if not root or not root.winfo_exists() or is_forced_exit:
+        return
+
+    if is_hiding_to_tray:
+        return
+
+    if str(root.state()) == "iconic":
+        minimize_to_tray()
 
 
 def restore_from_tray():
@@ -4161,6 +4197,10 @@ def refresh_main_leaderboards():
     if not root or not root.winfo_exists():
         return
 
+    if 'config' not in globals() or config is None:
+        root.after(15000, refresh_main_leaderboards)
+        return
+
     try:
         if season_quest_tree and season_quest_tree.winfo_exists():
             season_quest_tree.delete(*season_quest_tree.get_children())
@@ -4210,6 +4250,7 @@ def initialize_main_window():
     root_window.option_add("*Button.highlightThickness", 0)
 
     root_window.protocol("WM_DELETE_WINDOW", on_close)
+    root_window.bind("<Unmap>", handle_root_minimize)
     root_window.title("MyStats - Marbles On Stream Companion Application")
 
     window_width = 1040
@@ -5568,28 +5609,30 @@ def show_update_message(versioncheck, download_url):
     button_frame = ttk.Frame(popup)
     button_frame.pack(pady=16)
 
+    update_now_requested = {'value': False}
+
+    def start_update():
+        update_now_requested['value'] = True
+        popup.destroy()
+        download_and_install_update(download_url, versioncheck, silent_mode=True)
+
     ttk.Button(
         button_frame,
         text="One-Click Update",
-        command=lambda: [popup.destroy(), download_and_install_update(download_url, versioncheck, silent_mode=True)]
+        command=start_update
     ).pack(side='left', padx=6)
 
-    later_clicks = _get_update_later_clicks(versioncheck)
+    ttk.Button(
+        button_frame,
+        text="Remind Me Later",
+        command=popup.destroy,
+    ).pack(side='left', padx=6)
 
-    later_button = ttk.Button(button_frame, text="Later")
-    if later_clicks >= 3:
-        later_button.state(["disabled"])
-        later_button.configure(text="Later (Disabled)")
-    else:
-        later_button.configure(
-            text=f"Later ({3 - later_clicks} left)",
-            command=lambda: [_register_update_later_click(versioncheck), popup.destroy()]
-        )
-    later_button.pack(side='left', padx=6)
-
+    popup.protocol("WM_DELETE_WINDOW", popup.destroy)
     popup.transient(root)
     popup.grab_set()
     root.wait_window(popup)
+    return update_now_requested['value']
 
 
 def close_application(popup):
@@ -5649,6 +5692,7 @@ def ver_season_only():
                         print(f"An update is available. Current Version: {version} | New Version: {versioncheck}")
                         show_windows_toast("MyStats Update Available", f"New version {versioncheck} is ready to install.")
                         show_update_message(versioncheck, download_url)
+                        return season
                 else:
                     print("API call failed with status code:", response.status_code)
                     print("Error message:", response.text)
