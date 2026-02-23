@@ -5463,6 +5463,59 @@ def open_url(url):
     webbrowser.open_new(url)
 
 
+def _show_windows_balloon_tip(title, message, duration=6):
+    if sys.platform != "win32":
+        return False
+
+    script = f"""
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+$notify = New-Object System.Windows.Forms.NotifyIcon
+$notify.Icon = [System.Drawing.SystemIcons]::Information
+$notify.BalloonTipTitle = @"
+{title}
+"@
+$notify.BalloonTipText = @"
+{message}
+"@
+$notify.Visible = $true
+$notify.ShowBalloonTip({max(1, int(duration)) * 1000})
+Start-Sleep -Milliseconds {max(1, int(duration)) * 1000 + 600}
+$notify.Dispose()
+"""
+
+    try:
+        encoded = base64.b64encode(script.encode('utf-16-le')).decode('ascii')
+        startup_info = None
+        creation_flags = 0
+
+        if hasattr(subprocess, "STARTUPINFO"):
+            startup_info = subprocess.STARTUPINFO()
+            startup_info.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+
+        if hasattr(subprocess, "CREATE_NO_WINDOW"):
+            creation_flags = subprocess.CREATE_NO_WINDOW
+
+        subprocess.Popen(
+            [
+                "powershell",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-EncodedCommand",
+                encoded,
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            startupinfo=startup_info,
+            creationflags=creation_flags,
+        )
+        return True
+    except Exception as exc:
+        logger.warning(f"Toast notification failed via PowerShell balloon tip: {exc}")
+        return False
+
+
 def show_windows_toast(title, message, duration=6):
     if win_toaster is not None:
         try:
@@ -5470,6 +5523,9 @@ def show_windows_toast(title, message, duration=6):
             return
         except Exception as exc:
             logger.warning(f"Toast notification failed via win10toast: {exc}")
+
+    if _show_windows_balloon_tip(title, message, duration=duration):
+        return
 
     if tray_icon is not None:
         try:
