@@ -49,6 +49,7 @@ import queue
 import tempfile
 import subprocess
 import warnings
+import html
 
 try:
     import ttkbootstrap as ttkbootstrap_module
@@ -5463,6 +5464,69 @@ def open_url(url):
     webbrowser.open_new(url)
 
 
+def _launch_hidden_powershell(script_text):
+    encoded = base64.b64encode(script_text.encode('utf-16-le')).decode('ascii')
+    startup_info = None
+    creation_flags = 0
+
+    if hasattr(subprocess, "STARTUPINFO"):
+        startup_info = subprocess.STARTUPINFO()
+        startup_info.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+
+    if hasattr(subprocess, "CREATE_NO_WINDOW"):
+        creation_flags = subprocess.CREATE_NO_WINDOW
+
+    subprocess.Popen(
+        [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-EncodedCommand",
+            encoded,
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        startupinfo=startup_info,
+        creationflags=creation_flags,
+    )
+
+
+def _show_windows_native_toast(title, message):
+    if sys.platform != "win32":
+        return False
+
+    title_xml = html.escape(str(title), quote=False)
+    message_xml = html.escape(str(message), quote=False)
+
+    script = f"""
+[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
+[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null
+$xmlTemplate = @"
+<toast>
+  <visual>
+    <binding template='ToastGeneric'>
+      <text>{title_xml}</text>
+      <text>{message_xml}</text>
+    </binding>
+  </visual>
+</toast>
+"@
+$xmlDoc = New-Object Windows.Data.Xml.Dom.XmlDocument
+$xmlDoc.LoadXml($xmlTemplate)
+$toast = [Windows.UI.Notifications.ToastNotification]::new($xmlDoc)
+$notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('MyStats')
+$notifier.Show($toast)
+"""
+
+    try:
+        _launch_hidden_powershell(script)
+        return True
+    except Exception as exc:
+        logger.warning(f"Toast notification failed via native WinRT toast: {exc}")
+        return False
+
+
 def _show_windows_balloon_tip(title, message, duration=6):
     if sys.platform != "win32":
         return False
@@ -5485,31 +5549,7 @@ $notify.Dispose()
 """
 
     try:
-        encoded = base64.b64encode(script.encode('utf-16-le')).decode('ascii')
-        startup_info = None
-        creation_flags = 0
-
-        if hasattr(subprocess, "STARTUPINFO"):
-            startup_info = subprocess.STARTUPINFO()
-            startup_info.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-
-        if hasattr(subprocess, "CREATE_NO_WINDOW"):
-            creation_flags = subprocess.CREATE_NO_WINDOW
-
-        subprocess.Popen(
-            [
-                "powershell",
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-EncodedCommand",
-                encoded,
-            ],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            startupinfo=startup_info,
-            creationflags=creation_flags,
-        )
+        _launch_hidden_powershell(script)
         return True
     except Exception as exc:
         logger.warning(f"Toast notification failed via PowerShell balloon tip: {exc}")
@@ -5523,6 +5563,9 @@ def show_windows_toast(title, message, duration=6):
             return
         except Exception as exc:
             logger.warning(f"Toast notification failed via win10toast: {exc}")
+
+    if _show_windows_native_toast(title, message):
+        return
 
     if _show_windows_balloon_tip(title, message, duration=duration):
         return
