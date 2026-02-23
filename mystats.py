@@ -49,6 +49,7 @@ import queue
 import tempfile
 import subprocess
 import warnings
+import html
 
 try:
     import ttkbootstrap as ttkbootstrap_module
@@ -5463,14 +5464,180 @@ def open_url(url):
     webbrowser.open_new(url)
 
 
-def show_windows_toast(title, message, duration=6):
-    if win_toaster is None:
-        return
+def _launch_hidden_powershell(script_text):
+    encoded = base64.b64encode(script_text.encode('utf-16-le')).decode('ascii')
+    startup_info = None
+    creation_flags = 0
+
+    if hasattr(subprocess, "STARTUPINFO"):
+        startup_info = subprocess.STARTUPINFO()
+        startup_info.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+
+    if hasattr(subprocess, "CREATE_NO_WINDOW"):
+        creation_flags = subprocess.CREATE_NO_WINDOW
+
+    subprocess.Popen(
+        [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-EncodedCommand",
+            encoded,
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        startupinfo=startup_info,
+        creationflags=creation_flags,
+    )
+
+
+def _show_windows_native_toast(title, message):
+    if sys.platform != "win32":
+        return False
+
+    title_xml = html.escape(str(title), quote=False)
+    message_xml = html.escape(str(message), quote=False)
+
+    script = f"""
+[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
+[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null
+$xmlTemplate = @"
+<toast>
+  <visual>
+    <binding template='ToastGeneric'>
+      <text>{title_xml}</text>
+      <text>{message_xml}</text>
+    </binding>
+  </visual>
+</toast>
+"@
+$xmlDoc = New-Object Windows.Data.Xml.Dom.XmlDocument
+$xmlDoc.LoadXml($xmlTemplate)
+$toast = [Windows.UI.Notifications.ToastNotification]::new($xmlDoc)
+$notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('MyStats')
+$notifier.Show($toast)
+"""
 
     try:
-        win_toaster.show_toast(title, message, duration=duration, threaded=True)
+        _launch_hidden_powershell(script)
+        return True
     except Exception as exc:
-        logger.warning(f"Toast notification failed: {exc}")
+        logger.warning(f"Toast notification failed via native WinRT toast: {exc}")
+        return False
+
+
+def _show_windows_balloon_tip(title, message, duration=6):
+    if sys.platform != "win32":
+        return False
+
+    script = f"""
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+$notify = New-Object System.Windows.Forms.NotifyIcon
+$notify.Icon = [System.Drawing.SystemIcons]::Information
+$notify.BalloonTipTitle = @"
+{title}
+"@
+$notify.BalloonTipText = @"
+{message}
+"@
+$notify.Visible = $true
+$notify.ShowBalloonTip({max(1, int(duration)) * 1000})
+Start-Sleep -Milliseconds {max(1, int(duration)) * 1000 + 600}
+$notify.Dispose()
+"""
+
+    try:
+        _launch_hidden_powershell(script)
+        return True
+    except Exception as exc:
+        logger.warning(f"Toast notification failed via PowerShell balloon tip: {exc}")
+        return False
+
+
+
+
+def _show_in_app_toast(title, message, duration=6):
+    if root is None or not root.winfo_exists():
+        return False
+
+    def _render_toast():
+        try:
+            toast = tk.Toplevel(root)
+            toast.overrideredirect(True)
+            toast.attributes('-topmost', True)
+            toast.configure(bg='#1e1e1e')
+
+            frame = tk.Frame(toast, bg='#1e1e1e', bd=1, relief='solid')
+            frame.pack(fill='both', expand=True)
+
+            tk.Label(
+                frame,
+                text=title,
+                bg='#1e1e1e',
+                fg='white',
+                font=('Segoe UI', 10, 'bold'),
+                anchor='w',
+                padx=10,
+                pady=(8, 2),
+            ).pack(fill='x')
+
+            tk.Label(
+                frame,
+                text=message,
+                bg='#1e1e1e',
+                fg='white',
+                font=('Segoe UI', 9),
+                justify='left',
+                wraplength=320,
+                anchor='w',
+                padx=10,
+                pady=(0, 8),
+            ).pack(fill='x')
+
+            toast.update_idletasks()
+            width = max(260, min(380, toast.winfo_reqwidth()))
+            height = max(90, min(220, toast.winfo_reqheight()))
+            screen_w = toast.winfo_screenwidth()
+            screen_h = toast.winfo_screenheight()
+            x = screen_w - width - 20
+            y = screen_h - height - 60
+            toast.geometry(f"{width}x{height}+{x}+{y}")
+
+            toast.after(max(2000, int(duration) * 1000), toast.destroy)
+        except Exception as exc:
+            logger.warning(f"Toast notification failed via in-app popup: {exc}")
+
+    try:
+        root.after(0, _render_toast)
+        return True
+    except Exception as exc:
+        logger.warning(f"Toast notification failed scheduling in-app popup: {exc}")
+        return False
+
+def show_windows_toast(title, message, duration=6):
+    if win_toaster is not None:
+        try:
+            win_toaster.show_toast(title, message, duration=duration, threaded=True)
+            return
+        except Exception as exc:
+            logger.warning(f"Toast notification failed via win10toast: {exc}")
+
+    if _show_windows_native_toast(title, message):
+        return
+
+    if _show_windows_balloon_tip(title, message, duration=duration):
+        return
+
+    if tray_icon is not None:
+        try:
+            tray_icon.notify(message, title)
+            return
+        except Exception as exc:
+            logger.warning(f"Toast notification failed via tray icon: {exc}")
+
+    _show_in_app_toast(title, message, duration=duration)
 
 
 def is_minimized_to_tray():
