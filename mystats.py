@@ -5476,7 +5476,7 @@ def _launch_hidden_powershell(script_text):
     if hasattr(subprocess, "CREATE_NO_WINDOW"):
         creation_flags = subprocess.CREATE_NO_WINDOW
 
-    subprocess.Popen(
+    process = subprocess.Popen(
         [
             "powershell",
             "-NoProfile",
@@ -5491,6 +5491,8 @@ def _launch_hidden_powershell(script_text):
         creationflags=creation_flags,
     )
 
+    return process
+
 
 def _show_windows_native_toast(title, message):
     if sys.platform != "win32":
@@ -5500,6 +5502,7 @@ def _show_windows_native_toast(title, message):
     message_xml = html.escape(str(message), quote=False)
 
     script = f"""
+$ErrorActionPreference = 'Stop'
 [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
 [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null
 $xmlTemplate = @"
@@ -5520,7 +5523,13 @@ $notifier.Show($toast)
 """
 
     try:
-        _launch_hidden_powershell(script)
+        process = _launch_hidden_powershell(script)
+        exit_code = process.wait(timeout=4)
+
+        if exit_code != 0:
+            logger.warning(f"Toast notification failed via native WinRT toast: PowerShell exited with code {exit_code}")
+            return False
+
         return True
     except Exception as exc:
         logger.warning(f"Toast notification failed via native WinRT toast: {exc}")
