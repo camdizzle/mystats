@@ -5626,12 +5626,22 @@ def _show_in_app_toast(title, message, duration=6):
         return False
 
 def show_windows_toast(title, message, duration=6):
+    is_frozen_build = bool(getattr(sys, "frozen", False))
+
     if win_toaster is not None:
         try:
             win_toaster.show_toast(title, message, duration=duration, threaded=True)
-            return
+            if not is_frozen_build:
+                return
         except Exception as exc:
             logger.warning(f"Toast notification failed via win10toast: {exc}")
+
+    if is_frozen_build:
+        # In PyInstaller builds, WinRT toast APIs can report success without displaying
+        # anything if the app identity/shortcut registration is missing. Prefer a
+        # balloon tip first because it works for unpackaged desktop executables.
+        if _show_windows_balloon_tip(title, message, duration=duration):
+            return
 
     if _show_windows_native_toast(title, message):
         return
