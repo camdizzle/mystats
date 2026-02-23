@@ -98,6 +98,11 @@ tray_queue = queue.Queue()
 is_forced_exit = False
 win_toaster = ToastNotifier() if ToastNotifier is not None else None
 is_hiding_to_tray = False
+tray_hint_toast_shown = False
+
+TRAY_MINIMIZE_TOAST_MESSAGE = (
+    "The app is running in the system tray. Double-click the icon to reopen."
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -218,8 +223,12 @@ def _set_hiding_to_tray(value):
     is_hiding_to_tray = value
 
 
+def is_minimize_to_tray_enabled():
+    return str(config.get_setting("minimize_to_tray") or "False").strip().lower() == "true"
+
+
 def minimize_to_tray():
-    global is_hiding_to_tray
+    global is_hiding_to_tray, tray_hint_toast_shown
 
     if not root or not root.winfo_exists():
         return
@@ -230,7 +239,10 @@ def minimize_to_tray():
 
     is_hiding_to_tray = True
     root.withdraw()
-    show_windows_toast("MyStats", "👋 Hi, MyStats is down here now.")
+    if not tray_hint_toast_shown:
+        show_windows_toast("MyStats", TRAY_MINIMIZE_TOAST_MESSAGE)
+        tray_hint_toast_shown = True
+        config.set_setting("tray_hint_toast_shown", "True", persistent=True)
 
     try:
         start_system_tray_icon()
@@ -249,8 +261,9 @@ def handle_root_minimize(event=None):
     if is_hiding_to_tray:
         return
 
-    if str(root.state()) == "iconic":
+    if str(root.state()) == "iconic" and is_minimize_to_tray_enabled():
         minimize_to_tray()
+
 
 
 def restore_from_tray():
@@ -3154,10 +3167,16 @@ def open_settings_window():
 
     ttk.Separator(general_tab, orient="horizontal").grid(row=4, column=0, columnspan=2, sticky="ew", pady=8)
 
-    ttk.Label(general_tab, text="Mystats Directory").grid(row=5, column=0, sticky="w", pady=(0, 4))
+    minimize_to_tray_var = tk.BooleanVar(value=is_minimize_to_tray_enabled())
+    tray_support_text = "Minimize to system tray (double-click tray icon to reopen)"
+    if not supports_system_tray():
+        tray_support_text += " [pystray not available]"
+    ttk.Checkbutton(general_tab, text=tray_support_text, variable=minimize_to_tray_var).grid(row=5, column=0, columnspan=2, sticky="w", pady=(0, 4))
+
+    ttk.Label(general_tab, text="Mystats Directory").grid(row=7, column=0, sticky="w", pady=(0, 4))
     directory_value = os.path.expandvars(r"%localappdata%/mystats/")
     directory_entry = ttk.Entry(general_tab, width=55)
-    directory_entry.grid(row=6, column=0, sticky="ew", pady=(0, 4), columnspan=2)
+    directory_entry.grid(row=8, column=0, sticky="ew", pady=(0, 4), columnspan=2)
     directory_entry.insert(0, directory_value)
     directory_entry.config(state="readonly")
 
@@ -3168,7 +3187,7 @@ def open_settings_window():
         else:
             messagebox.showerror("Error", "Directory path does not exist.")
 
-    ttk.Button(general_tab, text="Open Location", command=open_directory).grid(row=7, column=0, sticky="w", pady=(4, 0))
+    ttk.Button(general_tab, text="Open Location", command=open_directory).grid(row=9, column=0, sticky="w", pady=(4, 0))
     general_tab.grid_columnconfigure(0, weight=1)
 
     # --- Audio tab ---
@@ -3635,6 +3654,7 @@ def open_settings_window():
         chunk_alert_var.set(True)
         announce_delay_var.set(False)
         reset_audio_var.set(False)
+        minimize_to_tray_var.set(False)
         chat_br_results_var.set(True)
         chat_race_results_var.set(True)
         chat_tilt_results_var.set(True)
@@ -3727,6 +3747,7 @@ def open_settings_window():
 
     def save_settings_and_close():
         config.set_setting("CHANNEL", channel_entry.get(), persistent=True)
+        config.set_setting("minimize_to_tray", str(minimize_to_tray_var.get()), persistent=True)
         config.set_setting("chunk_alert", str(chunk_alert_var.get()), persistent=True)
         config.set_setting("chunk_alert_value", chunk_alert_trigger_entry.get(), persistent=True)
         config.set_setting("announcedelay", str(announce_delay_var.get()), persistent=True)
@@ -4802,7 +4823,7 @@ class ConfigManager:
                                 'overlay_compact_rows', 'overlay_horizontal_layout', 'overlay_server_port', 'tilt_lifetime_base_xp',
                                 'tilt_overlay_theme', 'tilt_scroll_step_px', 'tilt_scroll_interval_ms',
                                 'tilt_scroll_pause_ms', 'tiltsurvivors_min_levels', 'tiltdeath_min_levels',
-                                'update_later_clicks', 'update_later_version'}
+                                'update_later_clicks', 'update_later_version', 'minimize_to_tray', 'tray_hint_toast_shown'}
         self.transient_keys = set([])
         self.defaults = {
             'chat_br_results': 'True',
@@ -4826,6 +4847,8 @@ class ConfigManager:
             'race_narrative_alert_min_lead_change_points': '500',
             'race_narrative_alert_max_items': '3',
             'chat_max_names': '25',
+            'minimize_to_tray': 'False',
+            'tray_hint_toast_shown': 'False',
             'season_quests_enabled': 'True',
             'season_quest_target_races': '1000',
             'season_quest_target_points': '500000',
@@ -4954,6 +4977,7 @@ class ConfigManager:
 
 
 config = ConfigManager()
+tray_hint_toast_shown = str(config.get_setting("tray_hint_toast_shown") or "False").strip().lower() == "true"
 
 
 class TimeManager:
