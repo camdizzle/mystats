@@ -5476,7 +5476,7 @@ def _launch_hidden_powershell(script_text):
     if hasattr(subprocess, "CREATE_NO_WINDOW"):
         creation_flags = subprocess.CREATE_NO_WINDOW
 
-    subprocess.Popen(
+    process = subprocess.Popen(
         [
             "powershell",
             "-NoProfile",
@@ -5491,6 +5491,8 @@ def _launch_hidden_powershell(script_text):
         creationflags=creation_flags,
     )
 
+    return process
+
 
 def _show_windows_native_toast(title, message):
     if sys.platform != "win32":
@@ -5500,6 +5502,7 @@ def _show_windows_native_toast(title, message):
     message_xml = html.escape(str(message), quote=False)
 
     script = f"""
+$ErrorActionPreference = 'Stop'
 [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
 [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null
 $xmlTemplate = @"
@@ -5520,7 +5523,13 @@ $notifier.Show($toast)
 """
 
     try:
-        _launch_hidden_powershell(script)
+        process = _launch_hidden_powershell(script)
+        exit_code = process.wait(timeout=4)
+
+        if exit_code != 0:
+            logger.warning(f"Toast notification failed via native WinRT toast: PowerShell exited with code {exit_code}")
+            return False
+
         return True
     except Exception as exc:
         logger.warning(f"Toast notification failed via native WinRT toast: {exc}")
@@ -5617,12 +5626,22 @@ def _show_in_app_toast(title, message, duration=6):
         return False
 
 def show_windows_toast(title, message, duration=6):
+    is_frozen_build = bool(getattr(sys, "frozen", False))
+
     if win_toaster is not None:
         try:
             win_toaster.show_toast(title, message, duration=duration, threaded=True)
-            return
+            if not is_frozen_build:
+                return
         except Exception as exc:
             logger.warning(f"Toast notification failed via win10toast: {exc}")
+
+    if is_frozen_build:
+        # In PyInstaller builds, WinRT toast APIs can report success without displaying
+        # anything if the app identity/shortcut registration is missing. Prefer a
+        # balloon tip first because it works for unpackaged desktop executables.
+        if _show_windows_balloon_tip(title, message, duration=duration):
+            return
 
     if _show_windows_native_toast(title, message):
         return
