@@ -1,13 +1,11 @@
-# MyStats Major Release Notes (Last ~150 PRs)
-
-This document is a high-level “What’s New” guide that summarizes the major functionality that remains in the product after the last ~150 pull requests. It intentionally groups iterative UI/style passes into feature themes instead of listing every tweak.
+# MyStats Major Release Notes 
 
 ## Platform, App Runtime, and Reliability
 
 - Added a built-in local Flask service as a first-class part of the app so overlays and dashboards are served directly from MyStats endpoints.
 - Improved startup/runtime reliability around threaded logging, Flask integration, and UI-safe log piping.
 - Improved Twitch auth resilience by handling invalid/expired token scenarios with fallback behavior instead of hard-failing app startup.
-- Added updater improvements including download progress UX, install flow updates, and safer “Later” behavior limits.
+- Added In-Place updater including download progress UX, install flow updates, and safer “Later” behavior limits. No more download/full reinstalls.
 - Added minimize-to-tray behavior with tray menu controls so the app can keep running cleanly in the background.
 
 ## Overlay System (OBS Browser Source)
@@ -21,6 +19,7 @@ This document is a high-level “What’s New” guide that summarizes the major
 - Added richer theme customization (including new theme variants) and readability passes for pills, labels, spacing, and text scale.
 - Added world-record celebration behavior and visual highlighting for standout race outcomes.
 - Consolidated numerous “style-only” iterations into a cleaner, more legible overlay UX while retaining core data visibility.
+- http://127.0.0.1:5000/overlay
 
 ## Tilt Overlay and Tilt Run Recap Experience
 
@@ -28,6 +27,7 @@ This document is a high-level “What’s New” guide that summarizes the major
 - Improved overlay state handling so stale recap screens do not flash on startup and active-run transitions are correctly gated.
 - Added continuous standings auto-scroll and stronger state persistence across refresh cycles.
 - Refined completion overlays (run complete / level complete) with better layout hierarchy, stat presentation, and consistent pill formatting.
+- http://127.0.0.1:5000/overlay/tilt
 
 ## Dashboards and Analytics Surface
 
@@ -37,6 +37,7 @@ This document is a high-level “What’s New” guide that summarizes the major
 - Added a Rivals dashboard and then refactored it toward head-to-head metrics for clearer competition tracking.
 - Added a Season Quest dashboard path and integrated payload targets for seasonal progress workflows.
 - Improved dashboard density, navigation naming, and table readability to better support stream/operator workflows.
+- http://127.0.0.1:5000/dashboard
 
 ## Commands and Chat Features
 
@@ -49,21 +50,9 @@ This document is a high-level “What’s New” guide that summarizes the major
 
 - Expanded and reorganized settings UX:
   - Dedicated Tilt settings tab.
-  - Scrollable settings sections for larger option sets.
   - Better button visibility/layout consistency.
   - Relocated relevant alert controls into more intuitive tabs.
 - Added/expanded overlay controls for timing, spacing, text scaling, theme, opacity, and layout behavior.
-
-## Data Quality and Metric Correctness
-
-- Fixed multiple tilt parsing and export-format compatibility issues (including column-shape differences and top-tiltee derivation).
-- Improved consistency of death-rate, survivability, and top-tiltee calculations in both overlays and dashboards.
-- Corrected KPI data behavior such as unique participant counting and points-leader display logic.
-
-## Documentation and User Guidance
-
-- Substantially expanded the Tilt guide and README guidance with formulas, setup flow, command behavior, and API/URL usage.
-- Updated docs to reflect current in-app workflows and removed outdated legacy guidance.
 
 ## Session/Workflow Utility Improvements
 
