@@ -5556,6 +5556,66 @@ $notify.Dispose()
         return False
 
 
+
+
+def _show_in_app_toast(title, message, duration=6):
+    if root is None or not root.winfo_exists():
+        return False
+
+    def _render_toast():
+        try:
+            toast = tk.Toplevel(root)
+            toast.overrideredirect(True)
+            toast.attributes('-topmost', True)
+            toast.configure(bg='#1e1e1e')
+
+            frame = tk.Frame(toast, bg='#1e1e1e', bd=1, relief='solid')
+            frame.pack(fill='both', expand=True)
+
+            tk.Label(
+                frame,
+                text=title,
+                bg='#1e1e1e',
+                fg='white',
+                font=('Segoe UI', 10, 'bold'),
+                anchor='w',
+                padx=10,
+                pady=(8, 2),
+            ).pack(fill='x')
+
+            tk.Label(
+                frame,
+                text=message,
+                bg='#1e1e1e',
+                fg='white',
+                font=('Segoe UI', 9),
+                justify='left',
+                wraplength=320,
+                anchor='w',
+                padx=10,
+                pady=(0, 8),
+            ).pack(fill='x')
+
+            toast.update_idletasks()
+            width = max(260, min(380, toast.winfo_reqwidth()))
+            height = max(90, min(220, toast.winfo_reqheight()))
+            screen_w = toast.winfo_screenwidth()
+            screen_h = toast.winfo_screenheight()
+            x = screen_w - width - 20
+            y = screen_h - height - 60
+            toast.geometry(f"{width}x{height}+{x}+{y}")
+
+            toast.after(max(2000, int(duration) * 1000), toast.destroy)
+        except Exception as exc:
+            logger.warning(f"Toast notification failed via in-app popup: {exc}")
+
+    try:
+        root.after(0, _render_toast)
+        return True
+    except Exception as exc:
+        logger.warning(f"Toast notification failed scheduling in-app popup: {exc}")
+        return False
+
 def show_windows_toast(title, message, duration=6):
     if win_toaster is not None:
         try:
@@ -5576,6 +5636,8 @@ def show_windows_toast(title, message, duration=6):
             return
         except Exception as exc:
             logger.warning(f"Toast notification failed via tray icon: {exc}")
+
+    _show_in_app_toast(title, message, duration=duration)
 
 
 def is_minimized_to_tray():
