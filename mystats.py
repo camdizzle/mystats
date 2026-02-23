@@ -5464,13 +5464,19 @@ def open_url(url):
 
 
 def show_windows_toast(title, message, duration=6):
-    if win_toaster is None:
-        return
+    if win_toaster is not None:
+        try:
+            win_toaster.show_toast(title, message, duration=duration, threaded=True)
+            return
+        except Exception as exc:
+            logger.warning(f"Toast notification failed via win10toast: {exc}")
 
-    try:
-        win_toaster.show_toast(title, message, duration=duration, threaded=True)
-    except Exception as exc:
-        logger.warning(f"Toast notification failed: {exc}")
+    if tray_icon is not None:
+        try:
+            tray_icon.notify(message, title)
+            return
+        except Exception as exc:
+            logger.warning(f"Toast notification failed via tray icon: {exc}")
 
 
 def is_minimized_to_tray():
