@@ -72,7 +72,7 @@ except ImportError:
     ToastNotifier = None
 
 # Global Variables
-version = '6.0.1'
+version = '6.1.0'
 text_widget = None
 bot = None
 GLOBAL_SOCKET = None
