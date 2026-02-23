@@ -48,6 +48,7 @@ import logging
 import queue
 import tempfile
 import subprocess
+import warnings
 
 try:
     import ttkbootstrap as ttkbootstrap_module
@@ -60,7 +61,13 @@ except ImportError:
     pystray = None
 
 try:
-    from win10toast import ToastNotifier
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=r"pkg_resources is deprecated as an API.*",
+            category=UserWarning,
+        )
+        from win10toast import ToastNotifier
 except ImportError:
     ToastNotifier = None
 
@@ -122,6 +129,8 @@ def _drain_tray_queue():
 
         if command == "show":
             restore_from_tray()
+        elif command == "dashboard":
+            open_dashboard()
         elif command == "exit":
             force_exit_application()
 
@@ -130,6 +139,10 @@ def _drain_tray_queue():
 
 def _on_tray_open(icon, item):
     tray_queue.put("show")
+
+
+def _on_tray_dashboard(icon, item):
+    tray_queue.put("dashboard")
 
 
 def _on_tray_exit(icon, item):
@@ -144,6 +157,7 @@ def start_system_tray_icon():
 
     menu = pystray.Menu(
         pystray.MenuItem("Open MyStats", _on_tray_open),
+        pystray.MenuItem("Open Dashboard", _on_tray_dashboard),
         pystray.MenuItem("Exit", _on_tray_exit),
     )
 
@@ -179,6 +193,7 @@ def minimize_to_tray():
     is_hiding_to_tray = True
     root.withdraw()
     start_system_tray_icon()
+    show_windows_toast("MyStats", "👋 Hi, MyStats is down here now.")
     root.after(300, lambda: _set_hiding_to_tray(False))
 
 
@@ -4180,6 +4195,10 @@ def _render_home_mycycle_leaderboard():
 
 def refresh_main_leaderboards():
     if not root or not root.winfo_exists():
+        return
+
+    if 'config' not in globals() or config is None:
+        root.after(15000, refresh_main_leaderboards)
         return
 
     try:
