@@ -109,7 +109,44 @@ def supports_system_tray():
     return pystray is not None
 
 
+def _get_app_icon_path():
+    candidates = []
+
+    if getattr(sys, "frozen", False):
+        candidates.append(os.path.dirname(os.path.abspath(sys.executable)))
+
+    candidates.append(os.path.dirname(os.path.abspath(__file__)))
+    candidates.append(os.getcwd())
+
+    for base_dir in candidates:
+        icon_path = os.path.join(base_dir, "circle1.ico")
+        if os.path.exists(icon_path):
+            return icon_path
+
+    return None
+
+
+def _apply_window_icon(window):
+    icon_path = _get_app_icon_path()
+
+    if not icon_path:
+        return
+
+    try:
+        window.iconbitmap(icon_path)
+    except Exception:
+        logger.warning("Unable to apply window icon from %s", icon_path)
+
+
 def _build_tray_image():
+    icon_path = _get_app_icon_path()
+
+    if icon_path:
+        try:
+            return Image.open(icon_path)
+        except Exception:
+            logger.warning("Unable to load tray icon from %s", icon_path)
+
     image = Image.new('RGBA', (64, 64), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
     draw.rounded_rectangle((6, 6, 58, 58), radius=12, fill=(20, 20, 20, 255))
@@ -156,7 +193,7 @@ def start_system_tray_icon():
         return
 
     menu = pystray.Menu(
-        pystray.MenuItem("Open MyStats", _on_tray_open),
+        pystray.MenuItem("Open MyStats", _on_tray_open, default=True),
         pystray.MenuItem("Open Dashboard", _on_tray_dashboard),
         pystray.MenuItem("Exit", _on_tray_exit),
     )
@@ -192,8 +229,15 @@ def minimize_to_tray():
 
     is_hiding_to_tray = True
     root.withdraw()
-    start_system_tray_icon()
     show_windows_toast("MyStats", "👋 Hi, MyStats is down here now.")
+
+    try:
+        start_system_tray_icon()
+    except Exception as exc:
+        logger.warning("Failed to initialize system tray icon: %s", exc)
+        root.deiconify()
+        root.iconify()
+
     root.after(300, lambda: _set_hiding_to_tray(False))
 
 
@@ -256,6 +300,7 @@ def create_root_window():
         available_themes = style.theme_names()
         style.theme_use(initial_theme if initial_theme in available_themes else "clam")
 
+    _apply_window_icon(root_window)
     return root_window, style
 
 
