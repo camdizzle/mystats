@@ -597,6 +597,10 @@ body.horizontal-layout #leaderboard {
   scrollbar-width: none;
 }
 
+body.horizontal-layout #leaderboard > li {
+  flex: 0 0 auto;
+}
+
 body.horizontal-layout #leaderboard::-webkit-scrollbar {
   display: none;
 }
