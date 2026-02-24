@@ -52,6 +52,9 @@ import subprocess
 import warnings
 import html
 
+if sys.platform == "win32":
+    import ctypes
+
 try:
     import ttkbootstrap as ttkbootstrap_module
 except ImportError:
@@ -317,6 +320,32 @@ def create_root_window():
 
     _apply_window_icon(root_window)
     return root_window, style
+
+
+def configure_dpi_awareness():
+    """Opt into modern DPI handling so window dimensions match scaled text."""
+    if sys.platform != "win32":
+        return
+
+    try:
+        # Windows 10 creators update and newer (best behavior).
+        ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))
+        return
+    except Exception:
+        pass
+
+    try:
+        # Windows 8.1 fallback.
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+        return
+    except Exception:
+        pass
+
+    try:
+        # Legacy fallback.
+        ctypes.windll.user32.SetProcessDPIAware()
+    except Exception:
+        pass
 
 
 def apply_ui_styles(style):
@@ -4331,6 +4360,8 @@ def refresh_main_leaderboards():
 def initialize_main_window():
     global app_style, root
 
+    configure_dpi_awareness()
+
     root_window, app_style = create_root_window()
     apply_ui_styles(app_style)
 
@@ -4347,10 +4378,16 @@ def initialize_main_window():
     window_height = 650
     screen_width = root_window.winfo_screenwidth()
     screen_height = root_window.winfo_screenheight()
+
+    # Ensure the default size remains usable across high-DPI scaling levels.
+    window_width = min(window_width, int(screen_width * 0.94))
+    window_height = min(window_height, int(screen_height * 0.9))
+
     pos_x = (screen_width // 2) - (window_width // 2)
     pos_y = (screen_height // 2) - (window_height // 2)
     root_window.geometry(f"{window_width}x{window_height}+{pos_x}+{pos_y}")
-    root_window.resizable(False, False)
+    root_window.minsize(920, 560)
+    root_window.resizable(True, True)
 
     root_window.grid_rowconfigure(1, weight=1)
     root_window.grid_columnconfigure(1, weight=1)
