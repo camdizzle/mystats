@@ -2155,17 +2155,18 @@ def _build_overlay_header_stats(data_dir):
                 for row in csv.reader(f):
                     if len(row) < 5:
                         continue
+                    racer = (row[2] or '').strip() or (row[1] or '').strip()
+                    if racer:
+                        season_unique.add(racer.lower())
                     points = _safe_int(row[3])
                     if points == 0:
                         continue
-                    racer = (row[2] or '').strip() or (row[1] or '').strip()
                     if not racer:
                         continue
                     season_points += points
                     season_entries += 1
                     if _is_first_place_row(row):
                         season_races += 1
-                    season_unique.add(racer.lower())
         except Exception:
             continue
 
@@ -2180,17 +2181,18 @@ def _build_overlay_header_stats(data_dir):
                 for row in csv.reader(f):
                     if len(row) < 5:
                         continue
+                    racer = (row[2] or '').strip() or (row[1] or '').strip()
+                    if racer:
+                        today_unique.add(racer.lower())
                     points = _safe_int(row[3])
                     if points == 0:
                         continue
-                    racer = (row[2] or '').strip() or (row[1] or '').strip()
                     if not racer:
                         continue
                     today_points += points
                     today_entries += 1
                     if _is_first_place_row(row):
                         today_races += 1
-                    today_unique.add(racer.lower())
         except Exception:
             pass
 
@@ -6794,8 +6796,7 @@ class Bot(commands.Bot):
 
         await send_chat_message(
             ctx.channel,
-            f"{winnersdisplayname}: Today: {counts['winstoday']} {wins_str}, {pointstoday_formatted} points, {racestoday_formatted} races. "
-            f"PPR: {today_avg_points_formatted} | Season total: {output_msg}",
+            output_msg,
             category="mystats"
         )
 
