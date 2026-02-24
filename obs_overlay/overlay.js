@@ -467,11 +467,26 @@ function renderCombinedRows(views) {
     return `${gap}${sectionTitleMarkup}${rowMarkup}`;
   }).join('');
 
-  const loopMessageMarkup = '<li class="leaderboard-loop-message">!mystats, !commands</li>';
+  const loopMessageMarkup = '<li class="leaderboard-loop-message">!mystats !commands</li>';
   const firstCycleMarkup = `${markup}<li class="leaderboard-gap" aria-hidden="true"></li>${loopMessageMarkup}`;
-  leaderboard.innerHTML = settings.horizontalLayout
-    ? `${firstCycleMarkup}<li class="leaderboard-loop-boundary" aria-hidden="true"></li>${firstCycleMarkup}`
-    : `${markup}<li class="leaderboard-end-spacer" aria-hidden="true"></li>`;
+  if (settings.horizontalLayout) {
+    const renderHorizontalCycles = (count) => {
+      const loopBlock = firstCycleMarkup.repeat(count);
+      leaderboard.innerHTML = `${loopBlock}<li class="leaderboard-loop-boundary" aria-hidden="true"></li>${loopBlock}`;
+    };
+
+    renderHorizontalCycles(1);
+    syncEndSpacerHeight();
+    syncHorizontalLoopWidth();
+
+    if (horizontalLoopWidth > 0 && horizontalLoopWidth <= leaderboard.clientWidth + 8) {
+      const targetWidth = leaderboard.clientWidth + 80;
+      const repeatCount = Math.min(8, Math.max(2, Math.ceil(targetWidth / horizontalLoopWidth) + 1));
+      renderHorizontalCycles(repeatCount);
+    }
+  } else {
+    leaderboard.innerHTML = `${markup}<li class="leaderboard-end-spacer" aria-hidden="true"></li>`;
+  }
 
   syncEndSpacerHeight();
   syncHorizontalLoopWidth();
