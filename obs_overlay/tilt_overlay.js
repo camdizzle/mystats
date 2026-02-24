@@ -415,7 +415,7 @@ function renderRunCompletionOverlay(lastRun = {}, shouldDisplay = true) {
       <div class="overlay-hero__label">Top Tiltee</div>
       <div class="overlay-hero__value">${lastRun.top_tiltee || 'None'}</div>
     </div>
-    <div class="overlay-pill-row">
+    <div class="overlay-pill-row overlay-pill-row--run">
       <div class="overlay-pill">🏆 ${fmt(lastRun.run_points)} pts</div>
       <div class="overlay-pill">✨ ${fmt(lastRun.run_xp)} XP</div>
       <div class="overlay-pill">💀 ${fmt(runDeaths)} deaths</div>
