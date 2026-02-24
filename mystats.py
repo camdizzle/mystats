@@ -16,6 +16,7 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from gspread.exceptions import SpreadsheetNotFound, WorksheetNotFound
 import requests
+import re
 import tkinter.simpledialog as simpledialog
 from PIL import Image, ImageTk, ImageDraw
 from twitchio.ext import commands
@@ -686,10 +687,25 @@ def get_int_setting(setting_key, default=0):
     if raw_value is None or raw_value == '':
         return default
 
-    normalized = str(raw_value).strip().replace(',', '')
+    normalized = str(raw_value).strip()
+
+    # Accept locale-formatted group separators (e.g. "14.503,472" or "14,503,472").
+    if re.fullmatch(r'[+-]?\d{1,3}(?:[.,]\d{3})+', normalized):
+        normalized = normalized.replace('.', '').replace(',', '')
+        try:
+            return int(normalized)
+        except (TypeError, ValueError):
+            return default
+
+    # Fall back to float-style parsing for values like "12.8" / "12,8".
+    float_candidate = normalized
+    if ',' in float_candidate and '.' not in float_candidate:
+        float_candidate = float_candidate.replace(',', '.')
+    else:
+        float_candidate = float_candidate.replace(',', '')
 
     try:
-        return int(float(normalized))
+        return int(float(float_candidate))
     except (TypeError, ValueError):
         return default
 
@@ -2496,8 +2512,6 @@ def _build_tilt_overlay_payload():
     current_top_tiltee = str(config.get_setting('tilt_current_top_tiltee') or 'None')
     current_top_tiltee_count = get_int_setting('tilt_current_top_tiltee_count', 0)
 
-    lifetime_base_xp = get_int_setting('tilt_lifetime_base_xp', 0)
-
     current_summary = {
         'run_id': current_run_id,
         'run_short_id': current_run_id[:6] if current_run_id else '',
@@ -2511,7 +2525,7 @@ def _build_tilt_overlay_payload():
         'best_run_xp_today': get_int_setting('tilt_best_run_xp_today', 0),
         'total_xp_today': get_int_setting('tilt_total_xp_today', 0),
         'total_deaths_today': get_int_setting('tilt_total_deaths_today', 0),
-        'lifetime_expertise': get_int_setting('tilt_lifetime_expertise', 0) + lifetime_base_xp,
+        'lifetime_expertise': get_int_setting('tilt_lifetime_expertise', 0),
         'leader': {'name': sorted_run[0][0], 'points': sorted_run[0][1]} if sorted_run else None,
         'standings': [{'name': name, 'points': points} for name, points in sorted_run],
     }
@@ -6885,7 +6899,7 @@ class Bot(commands.Bot):
         last_level_xp = get_int_setting('tilt_last_level_xp', 0)
         last_run_xp = get_int_setting('tilt_previous_run_xp', 0)
         today_xp = get_int_setting('tilt_total_xp_today', 0)
-        season_xp = get_int_setting('tilt_lifetime_expertise', 0) + get_int_setting('tilt_lifetime_base_xp', 0)
+        season_xp = get_int_setting('tilt_lifetime_expertise', 0)
 
         await send_chat_message(
             ctx.channel,
@@ -7735,7 +7749,22 @@ async def tilted(bot):
 
             lifetime_expertise = get_int_setting('tilt_lifetime_expertise', 0)
             lifetime_base_xp = get_int_setting('tilt_lifetime_base_xp', 0)
-            adjusted_total_xp = total_xp + lifetime_base_xp
+
+            # Some Tilt sources report total expertise including historical baseline,
+            # while others report only in-app progression. Normalize to an absolute
+            # lifetime total so we never add the configured baseline twice.
+            adjusted_total_xp = total_xp if (lifetime_base_xp > 0 and total_xp >= lifetime_base_xp) else (total_xp + lifetime_base_xp)
+
+            # Repair legacy inflated values created by older baseline math
+            # (stored ~= adjusted_total + lifetime_base).
+            if (
+                lifetime_base_xp > 0
+                and adjusted_total_xp > 0
+                and lifetime_expertise > adjusted_total_xp
+                and abs(lifetime_expertise - (adjusted_total_xp + lifetime_base_xp)) <= 5000
+            ):
+                lifetime_expertise = adjusted_total_xp
+
             if adjusted_total_xp > lifetime_expertise:
                 lifetime_expertise = adjusted_total_xp
             lifetime_expertise += earned_xp
