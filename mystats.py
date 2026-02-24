@@ -707,6 +707,12 @@ def write_tilt_output_files(values):
             logger.warning(f"Failed writing tilt output file '{filename}': {e}")
 
 
+def get_tilt_best_floor_level_num(setting_key):
+    """Read a user-entered best level (1-based) and convert to internal 0-based level."""
+    configured_level = get_int_setting(setting_key, 1)
+    return max(0, configured_level - 1)
+
+
 def get_int_setting(setting_key, default=0):
     cfg = globals().get("config")
     if cfg is None:
@@ -3672,26 +3678,36 @@ def open_settings_window():
     tilt_lifetime_base_entry.grid(row=0, column=1, sticky="w", padx=(0, 10), pady=(8, 4))
     tilt_lifetime_base_entry.insert(0, config.get_setting("tilt_lifetime_base_xp") or "0")
 
-    ttk.Label(tilt_overlay_frame, text="Tilt Theme", style="Small.TLabel").grid(row=1, column=0, sticky="w", padx=(10, 8), pady=4)
-    tilt_overlay_theme_var = tk.StringVar(value=(config.get_setting("tilt_overlay_theme") or config.get_setting("overlay_theme") or "midnight"))
-    ttk.Combobox(tilt_overlay_frame, textvariable=tilt_overlay_theme_var, values=["midnight", "ocean", "sunset", "forest", "mono", "violethearts"], width=18, state="readonly").grid(row=1, column=1, sticky="w", padx=(0, 10), pady=4)
+    ttk.Label(tilt_overlay_frame, text="Season Best Level", style="Small.TLabel").grid(row=1, column=0, sticky="w", padx=(10, 8), pady=4)
+    tilt_season_best_entry = ttk.Entry(tilt_overlay_frame, width=12, justify='center')
+    tilt_season_best_entry.grid(row=1, column=1, sticky="w", padx=(0, 10), pady=4)
+    tilt_season_best_entry.insert(0, config.get_setting("tilt_season_best_level") or "1")
 
-    ttk.Label(tilt_overlay_frame, text="Scroll Step (px)", style="Small.TLabel").grid(row=2, column=0, sticky="w", padx=(10, 8), pady=4)
+    ttk.Label(tilt_overlay_frame, text="Personal Best Level", style="Small.TLabel").grid(row=2, column=0, sticky="w", padx=(10, 8), pady=4)
+    tilt_personal_best_entry = ttk.Entry(tilt_overlay_frame, width=12, justify='center')
+    tilt_personal_best_entry.grid(row=2, column=1, sticky="w", padx=(0, 10), pady=4)
+    tilt_personal_best_entry.insert(0, config.get_setting("tilt_personal_best_level") or "1")
+
+    ttk.Label(tilt_overlay_frame, text="Tilt Theme", style="Small.TLabel").grid(row=3, column=0, sticky="w", padx=(10, 8), pady=4)
+    tilt_overlay_theme_var = tk.StringVar(value=(config.get_setting("tilt_overlay_theme") or config.get_setting("overlay_theme") or "midnight"))
+    ttk.Combobox(tilt_overlay_frame, textvariable=tilt_overlay_theme_var, values=["midnight", "ocean", "sunset", "forest", "mono", "violethearts"], width=18, state="readonly").grid(row=3, column=1, sticky="w", padx=(0, 10), pady=4)
+
+    ttk.Label(tilt_overlay_frame, text="Scroll Step (px)", style="Small.TLabel").grid(row=4, column=0, sticky="w", padx=(10, 8), pady=4)
     tilt_scroll_step_entry = ttk.Entry(tilt_overlay_frame, width=12, justify='center')
-    tilt_scroll_step_entry.grid(row=2, column=1, sticky="w", padx=(0, 10), pady=4)
+    tilt_scroll_step_entry.grid(row=4, column=1, sticky="w", padx=(0, 10), pady=4)
     tilt_scroll_step_entry.insert(0, config.get_setting("tilt_scroll_step_px") or "1")
 
-    ttk.Label(tilt_overlay_frame, text="Scroll Tick (ms)", style="Small.TLabel").grid(row=3, column=0, sticky="w", padx=(10, 8), pady=4)
+    ttk.Label(tilt_overlay_frame, text="Scroll Tick (ms)", style="Small.TLabel").grid(row=5, column=0, sticky="w", padx=(10, 8), pady=4)
     tilt_scroll_interval_entry = ttk.Entry(tilt_overlay_frame, width=12, justify='center')
-    tilt_scroll_interval_entry.grid(row=3, column=1, sticky="w", padx=(0, 10), pady=4)
+    tilt_scroll_interval_entry.grid(row=5, column=1, sticky="w", padx=(0, 10), pady=4)
     tilt_scroll_interval_entry.insert(0, config.get_setting("tilt_scroll_interval_ms") or "40")
 
-    ttk.Label(tilt_overlay_frame, text="Edge Pause (ms)", style="Small.TLabel").grid(row=4, column=0, sticky="w", padx=(10, 8), pady=(4, 8))
+    ttk.Label(tilt_overlay_frame, text="Edge Pause (ms)", style="Small.TLabel").grid(row=6, column=0, sticky="w", padx=(10, 8), pady=(4, 8))
     tilt_scroll_pause_entry = ttk.Entry(tilt_overlay_frame, width=12, justify='center')
-    tilt_scroll_pause_entry.grid(row=4, column=1, sticky="w", padx=(0, 10), pady=(4, 8))
+    tilt_scroll_pause_entry.grid(row=6, column=1, sticky="w", padx=(0, 10), pady=(4, 8))
     tilt_scroll_pause_entry.insert(0, config.get_setting("tilt_scroll_pause_ms") or "900")
 
-    ttk.Label(tilt_overlay_frame, text="Tip: Starting Lifetime XP lets you align totals with existing channel progress.", style="Small.TLabel").grid(row=5, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 8))
+    ttk.Label(tilt_overlay_frame, text="Tip: Best level settings are minimum floors for Season/Personal Best output files.", style="Small.TLabel").grid(row=7, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 8))
     ttk.Label(overlay_tab, text="Restart MyStats after changing port. Visual changes apply on next refresh.", style="Small.TLabel").grid(row=12, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
 
@@ -3777,6 +3793,10 @@ def open_settings_window():
         overlay_horizontal_layout_var.set(False)
         tilt_lifetime_base_entry.delete(0, tk.END)
         tilt_lifetime_base_entry.insert(0, "0")
+        tilt_season_best_entry.delete(0, tk.END)
+        tilt_season_best_entry.insert(0, "1")
+        tilt_personal_best_entry.delete(0, tk.END)
+        tilt_personal_best_entry.insert(0, "1")
         tilt_overlay_theme_var.set("midnight")
         tilt_scroll_step_entry.delete(0, tk.END)
         tilt_scroll_step_entry.insert(0, "1")
@@ -3851,6 +3871,8 @@ def open_settings_window():
         config.set_setting("overlay_compact_rows", str(overlay_compact_rows_var.get()), persistent=True)
         config.set_setting("overlay_horizontal_layout", str(overlay_horizontal_layout_var.get()), persistent=True)
         config.set_setting("tilt_lifetime_base_xp", tilt_lifetime_base_entry.get(), persistent=True)
+        config.set_setting("tilt_season_best_level", tilt_season_best_entry.get(), persistent=True)
+        config.set_setting("tilt_personal_best_level", tilt_personal_best_entry.get(), persistent=True)
         config.set_setting("tilt_overlay_theme", tilt_overlay_theme_var.get(), persistent=True)
         config.set_setting("tilt_scroll_step_px", tilt_scroll_step_entry.get(), persistent=True)
         config.set_setting("tilt_scroll_interval_ms", tilt_scroll_interval_entry.get(), persistent=True)
@@ -4874,7 +4896,7 @@ class ConfigManager:
                                 'overlay_rotation_seconds', 'overlay_refresh_seconds', 'overlay_theme',
                                 'overlay_card_opacity', 'overlay_text_scale', 'overlay_show_medals',
                                 'overlay_compact_rows', 'overlay_horizontal_layout', 'overlay_server_port', 'tilt_lifetime_base_xp',
-                                'tilt_overlay_theme', 'tilt_scroll_step_px', 'tilt_scroll_interval_ms',
+                                'tilt_season_best_level', 'tilt_personal_best_level', 'tilt_overlay_theme', 'tilt_scroll_step_px', 'tilt_scroll_interval_ms',
                                 'tilt_scroll_pause_ms', 'tiltsurvivors_min_levels', 'tiltdeath_min_levels',
                                 'update_later_clicks', 'update_later_version', 'minimize_to_tray', 'tray_hint_toast_shown'}
         self.transient_keys = set([])
@@ -4941,6 +4963,8 @@ class ConfigManager:
             'overlay_compact_rows': 'False',
             'overlay_horizontal_layout': 'False',
             'tilt_lifetime_base_xp': '0',
+            'tilt_season_best_level': '1',
+            'tilt_personal_best_level': '1',
             'tilt_overlay_theme': 'midnight',
             'tilt_scroll_step_px': '1',
             'tilt_scroll_interval_ms': '40',
@@ -5006,6 +5030,7 @@ class ConfigManager:
                    "mycycle_min_place", "mycycle_max_place",
                    "overlay_rotation_seconds", "overlay_refresh_seconds", "overlay_card_opacity",
                    "overlay_text_scale", "overlay_server_port", "tilt_lifetime_base_xp",
+                   "tilt_season_best_level", "tilt_personal_best_level",
                    "tilt_scroll_step_px", "tilt_scroll_interval_ms", "tilt_scroll_pause_ms",
                    "tiltsurvivors_min_levels", "tiltdeath_min_levels"}:
             if isinstance(value, int) or (isinstance(value, str) and value.isdigit()):
@@ -7764,16 +7789,19 @@ async def tilted(bot):
             if best_run_xp_today != get_int_setting('tilt_best_run_xp_today', 0):
                 config.set_setting('tilt_best_run_xp_today', str(best_run_xp_today), persistent=False)
 
+            season_best_floor_level_num = get_tilt_best_floor_level_num('tilt_season_best_level')
+            personal_best_floor_level_num = get_tilt_best_floor_level_num('tilt_personal_best_level')
+
             if survivors:
                 highest_level_points_today = max(get_int_setting('tilt_highest_level_points_today', 0), level_points)
                 highest_level_reached_num = max(get_int_setting('tilt_highest_level_reached_num', 0), current_level)
-                season_best_level_num = max(get_int_setting('tilt_season_best_level_num', 0), current_level)
-                personal_best_level_num = max(get_int_setting('tilt_personal_best_level_num', 0), current_level)
+                season_best_level_num = max(get_int_setting('tilt_season_best_level_num', 0), current_level, season_best_floor_level_num)
+                personal_best_level_num = max(get_int_setting('tilt_personal_best_level_num', 0), current_level, personal_best_floor_level_num)
             else:
                 highest_level_points_today = get_int_setting('tilt_highest_level_points_today', 0)
                 highest_level_reached_num = get_int_setting('tilt_highest_level_reached_num', 0)
-                season_best_level_num = get_int_setting('tilt_season_best_level_num', 0)
-                personal_best_level_num = get_int_setting('tilt_personal_best_level_num', 0)
+                season_best_level_num = max(get_int_setting('tilt_season_best_level_num', 0), season_best_floor_level_num)
+                personal_best_level_num = max(get_int_setting('tilt_personal_best_level_num', 0), personal_best_floor_level_num)
 
             config.set_setting('tilt_run_xp', str(run_xp), persistent=False)
             config.set_setting('tilt_run_points', str(run_points), persistent=False)
@@ -7783,6 +7811,17 @@ async def tilted(bot):
             config.set_setting('tilt_highest_level_reached_num', str(highest_level_reached_num), persistent=False)
             config.set_setting('tilt_season_best_level_num', str(season_best_level_num), persistent=False)
             config.set_setting('tilt_personal_best_level_num', str(personal_best_level_num), persistent=False)
+
+            season_best_setting_level = get_int_setting('tilt_season_best_level', 1)
+            personal_best_setting_level = get_int_setting('tilt_personal_best_level', 1)
+            updated_season_best_setting_level = max(season_best_setting_level, season_best_level_num + 1)
+            updated_personal_best_setting_level = max(personal_best_setting_level, personal_best_level_num + 1)
+
+            if updated_season_best_setting_level != season_best_setting_level:
+                config.set_setting('tilt_season_best_level', str(updated_season_best_setting_level), persistent=True)
+            if updated_personal_best_setting_level != personal_best_setting_level:
+                config.set_setting('tilt_personal_best_level', str(updated_personal_best_setting_level), persistent=True)
+
             config.set_setting('tilt_run_ledger', json.dumps(run_ledger), persistent=False)
 
             lifetime_expertise = get_int_setting('tilt_lifetime_expertise', 0)
