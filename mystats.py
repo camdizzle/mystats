@@ -7801,6 +7801,9 @@ async def tilted(bot):
                 else:
                     deaths_this_level += 1
 
+            terminal_run_death = 1 if (not level_passed and 1 <= len(survivors) <= 2) else 0
+            deaths_this_level += terminal_run_death
+
             earned_xp = int(math.floor(len(survivors) * get_tilt_multiplier(current_level)))
             run_xp = get_int_setting('tilt_run_xp', 0) + earned_xp
             run_points = get_int_setting('tilt_run_points', 0) + (level_points if survivors else 0)
