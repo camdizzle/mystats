@@ -6872,16 +6872,19 @@ class Bot(commands.Bot):
             target_name = username.split()[0].lstrip('@')
             display_name = target_name
 
-        points_today = 0
-        points_season = 0
-        run_max_levels_season = defaultdict(int)
-        run_max_levels_today = defaultdict(int)
-        player_run_levels_season = defaultdict(set)
-        player_run_levels_today = defaultdict(set)
-        last_passed_level = 0
-
         _, _, _, adjusted_time = time_manager.get_adjusted_time()
         today_date = adjusted_time.strftime("%Y-%m-%d")
+
+        points_today = 0
+        points_season = 0
+        points_run = 0
+        deaths_today = 0
+        deaths_season = 0
+        deaths_run = 0
+        last_completed_level = 0
+
+        current_run_id = (config.get_setting('tilt_current_run_id') or '').strip()
+        latest_run_by_user = None
 
         for tilts_file in sorted(glob.glob(os.path.join(config.get_setting('directory'), "tilts_*.csv"))):
             try:
@@ -6895,41 +6898,69 @@ class Bot(commands.Bot):
                     reader = csv.reader(f)
                     for row in reader:
                         parsed = parse_tilt_result_row(row)
-                        if parsed is None or len(row) < 2:
+                        if parsed is None:
                             continue
 
                         racer, points, run_id = parsed
-                        try:
-                            level_number = int(''.join(ch for ch in str(row[1]).strip() if ch.isdigit()) or '0')
-                        except (TypeError, ValueError):
-                            level_number = 0
-
-                        if level_number > 0:
-                            run_max_levels_season[run_id] = max(run_max_levels_season[run_id], level_number)
-                            if file_date == today_date:
-                                run_max_levels_today[run_id] = max(run_max_levels_today[run_id], level_number)
-
                         if racer.lower() != target_name.lower():
                             continue
 
+                        latest_run_by_user = run_id
                         points_season += points
-                        if level_number > 0:
-                            player_run_levels_season[run_id].add(level_number)
-                            last_passed_level = level_number
+                        if points <= 0:
+                            deaths_season += 1
 
                         if file_date == today_date:
                             points_today += points
-                            if level_number > 0:
-                                run_max_levels_today[run_id] = max(run_max_levels_today[run_id], level_number)
-                                player_run_levels_today[run_id].add(level_number)
+                            if points <= 0:
+                                deaths_today += 1
 
+                        if len(row) > 1:
+                            try:
+                                level_number = int(''.join(ch for ch in str(row[1]).strip() if ch.isdigit()) or '0')
+                            except (TypeError, ValueError):
+                                level_number = 0
+                            if points > 0 and level_number > last_completed_level:
+                                last_completed_level = level_number
+
+                        run_match = bool(current_run_id) and run_id == current_run_id
+                        if run_match:
+                            points_run += points
+                            if points <= 0:
+                                deaths_run += 1
 
             except FileNotFoundError:
                 continue
             except Exception as e:
                 print(e)
 
-        if points_season == 0 and not player_run_levels_season:
+        if not current_run_id and latest_run_by_user:
+            current_run_id = latest_run_by_user
+            points_run = 0
+            deaths_run = 0
+            for tilts_file in sorted(glob.glob(os.path.join(config.get_setting('directory'), "tilts_*.csv"))):
+                try:
+                    with open(tilts_file, 'rb') as f:
+                        raw_data = f.read()
+                    result = chardet.detect(raw_data)
+                    encoding = result['encoding'] if result['encoding'] else 'utf-8'
+
+                    with open(tilts_file, 'r', encoding=encoding, errors='ignore') as f:
+                        reader = csv.reader(f)
+                        for row in reader:
+                            parsed = parse_tilt_result_row(row)
+                            if parsed is None:
+                                continue
+                            racer, points, run_id = parsed
+                            if racer.lower() != target_name.lower() or run_id != current_run_id:
+                                continue
+                            points_run += points
+                            if points <= 0:
+                                deaths_run += 1
+                except Exception:
+                    continue
+
+        if points_season == 0 and deaths_season == 0:
             await send_chat_message(
                 ctx.channel,
                 f"{display_name}: No tilt data found this season.",
@@ -6937,22 +6968,12 @@ class Bot(commands.Bot):
             )
             return
 
-        deaths_season = 0
-        for run_id, levels_survived in player_run_levels_season.items():
-            run_max = run_max_levels_season.get(run_id, 0)
-            if run_max > 0 and levels_survived and max(levels_survived) < run_max:
-                deaths_season += 1
-
-        deaths_today = 0
-        for run_id, levels_survived in player_run_levels_today.items():
-            run_max = run_max_levels_today.get(run_id, 0)
-            if run_max > 0 and levels_survived and max(levels_survived) < run_max:
-                deaths_today += 1
-
         await send_chat_message(
             ctx.channel,
-            f"{display_name} Stats | Today: {points_today:,} pts, {deaths_today:,} deaths | "
-            f"Season: {points_season:,} pts, {deaths_season:,} deaths | Last Passed: Level {last_passed_level:,}",
+            f"{display_name} Tilt Stats | Run: {points_run:,} pts, {deaths_run:,} deaths | "
+            f"Today: {points_today:,} pts, {deaths_today:,} deaths | "
+            f"Season: {points_season:,} pts, {deaths_season:,} deaths | "
+            f"Last Level Completed: {last_completed_level:,}",
             category="mystats"
         )
 
@@ -7744,7 +7765,7 @@ async def tilted(bot):
             tilt_rows = safe_read_csv_rows(tilt_player_file)
             player_data_rows = tilt_rows[1:] if len(tilt_rows) > 1 else []
 
-            active_users = []
+            active_players = []
             survivors = []
             deaths_this_level = 0
 
@@ -7767,11 +7788,12 @@ async def tilted(bot):
                 if player_level != current_level:
                     continue
 
-                active_users.append(username)
                 try:
                     player_points = int(float(points_raw))
                 except (TypeError, ValueError):
                     player_points = 0
+
+                active_players.append((username, player_points, row))
 
                 if player_points > 0:
                     survivors.append((username, player_points, row))
@@ -7862,23 +7884,24 @@ async def tilted(bot):
                     create_results_files()
                     tilts_results_file = config.get_setting('tilts_results_file')
 
-                try:
-                    with open(tilts_results_file, 'a', newline='', encoding='utf-8') as tilts_file:
-                        writer = csv.writer(tilts_file)
-                        event_ids_tmp = config.get_setting('active_event_ids')
-                        if event_ids_tmp is not None:
-                            event_ids_tmp = event_ids_tmp.strip("[]").split(",")
-                            event_ids = [int(event_id.strip().replace('"', '')) for event_id in event_ids_tmp if event_id.strip().replace('"', '').isdigit()]
-                        else:
-                            event_ids = [0]
+                if is_level_live:
+                    try:
+                        with open(tilts_results_file, 'a', newline='', encoding='utf-8') as tilts_file:
+                            writer = csv.writer(tilts_file)
+                            event_ids_tmp = config.get_setting('active_event_ids')
+                            if event_ids_tmp is not None:
+                                event_ids_tmp = event_ids_tmp.strip("[]").split(",")
+                                event_ids = [int(event_id.strip().replace('"', '')) for event_id in event_ids_tmp if event_id.strip().replace('"', '').isdigit()]
+                            else:
+                                event_ids = [0]
 
-                        normalized_top_tiltee = normalize_tilt_player_name(top_tiltee)
-                        for _, _, row in survivors:
-                            is_top_tiltee = normalize_tilt_player_name(row[0]) == normalized_top_tiltee
-                            data_to_write = [run_id, current_level] + row + [str(is_top_tiltee), event_ids]
-                            writer.writerow(data_to_write)
-                except Exception as e:
-                    print(f"Error opening/writing to tilts_results_file: {e}")
+                            normalized_top_tiltee = normalize_tilt_player_name(top_tiltee)
+                            for username, _, row in active_players:
+                                is_top_tiltee = normalize_tilt_player_name(username) == normalized_top_tiltee
+                                data_to_write = [run_id, current_level] + row + [str(is_top_tiltee), event_ids]
+                                writer.writerow(data_to_write)
+                    except Exception as e:
+                        print(f"Error opening/writing to tilts_results_file: {e}")
 
                 narrative_messages = []
                 if is_chat_response_enabled("chat_narrative_alerts"):
