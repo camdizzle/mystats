@@ -610,6 +610,7 @@ def parse_tilt_result_row(row):
     return username, points, run_id
 
 
+
 def parse_tilt_result_detail(row):
     """Parse a tilt results row and return details used by tilt analytics and chat commands."""
     parsed = parse_tilt_result_row(row)
