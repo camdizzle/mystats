@@ -173,7 +173,11 @@ CHAT_TEXT = {
 
 
 def get_ui_language():
-    language = str(config.get_setting('app_language') or 'en').strip().lower()
+    config_manager = globals().get('config')
+    if config_manager is None:
+        return 'en'
+
+    language = str(config_manager.get_setting('app_language') or 'en').strip().lower()
     return language if language in SUPPORTED_UI_LANGUAGES else 'en'
 
 
