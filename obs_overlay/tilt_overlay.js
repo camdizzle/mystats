@@ -1,6 +1,19 @@
 const $ = (id) => document.getElementById(id);
 const fmt = (n) => new Intl.NumberFormat().format(Number(n || 0));
 
+let currentLanguage = 'en';
+const I18N = {
+  en: {},
+  es: {
+    'MyStats Tilt Run Tracker': 'MyStats Seguimiento de Tilt',
+    'Active': 'Activo',
+    'Idle': 'Inactivo',
+    'No active run standings yet.': 'Aún no hay posiciones de la partida activa.',
+    'No completed tilt run yet.': 'Aún no hay una partida tilt completada.',
+  },
+};
+const t = (key) => I18N[currentLanguage]?.[key] || key;
+
 const defaultSettings = {
   refresh_seconds: 3,
   theme: 'midnight',
@@ -74,7 +87,8 @@ function loadOverlaySnapshot() {
 }
 
 function renderSnapshot(snapshot = {}) {
-  $('overlay-title').textContent = snapshot.title || 'MyStats Tilt Run Tracker';
+  currentLanguage = String(snapshot?.settings?.language || currentLanguage || 'en').toLowerCase();
+  $('overlay-title').textContent = t(snapshot.title || 'MyStats Tilt Run Tracker');
   applyTheme(snapshot.settings || {});
   renderCurrentRun(snapshot.current_run || {});
   renderLastRun(snapshot.last_run || {});
@@ -260,7 +274,7 @@ function renderStandings(listId, standings, emptyText) {
 
 function renderCurrentRun(run = {}) {
   const isActive = run.status === 'active';
-  $('run-status-value').textContent = isActive ? 'Active' : 'Idle';
+  $('run-status-value').textContent = isActive ? t('Active') : t('Idle');
   $('run-status').classList.toggle('pill--active', isActive);
   $('run-level-value').textContent = fmt(run.level);
   $('run-elapsed-value').textContent = run.elapsed_time || '0:00';
@@ -279,7 +293,7 @@ function renderCurrentRun(run = {}) {
   $('total-deaths-today').textContent = fmt(run.total_deaths_today);
   $('lifetime-xp').textContent = fmt(run.lifetime_expertise);
 
-  renderStandings('current-standings', run.standings, 'No active run standings yet.');
+  renderStandings('current-standings', run.standings, t('No active run standings yet.'));
 }
 
 function renderLastRun(lastRun = {}) {
@@ -293,7 +307,7 @@ function renderLastRun(lastRun = {}) {
   }
 
   if (!hasRun) {
-    summary.textContent = 'No completed tilt run yet.';
+    summary.textContent = t('No completed tilt run yet.');
     return;
   }
 
@@ -447,7 +461,8 @@ async function refresh() {
 
     const payload = await response.json();
     saveOverlaySnapshot(payload);
-    $('overlay-title').textContent = payload.title || 'MyStats Tilt Run Tracker';
+    currentLanguage = String(payload?.settings?.language || currentLanguage || 'en').toLowerCase();
+    $('overlay-title').textContent = t(payload.title || 'MyStats Tilt Run Tracker');
 
     const currentRun = payload.current_run || {};
     const currentStatus = currentRun.status === 'active' ? 'active' : 'idle';

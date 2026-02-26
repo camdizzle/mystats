@@ -114,6 +114,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger("mystats")
 
+SUPPORTED_UI_LANGUAGES = {'en', 'es', 'fr', 'de', 'pt'}
+
+
+def get_ui_language():
+    language = str(config.get_setting('app_language') or 'en').strip().lower()
+    return language if language in SUPPORTED_UI_LANGUAGES else 'en'
+
 
 def supports_system_tray():
     return pystray is not None
@@ -2256,6 +2263,7 @@ def _build_overlay_settings_payload():
         'tilt_scroll_step_px': _safe_int(config.get_setting('tilt_scroll_step_px') or 1) or 1,
         'tilt_scroll_interval_ms': _safe_int(config.get_setting('tilt_scroll_interval_ms') or 40) or 40,
         'tilt_scroll_pause_ms': _safe_int(config.get_setting('tilt_scroll_pause_ms') or 900) or 900,
+        'language': get_ui_language(),
     }
 
 
@@ -2670,6 +2678,9 @@ def _build_main_dashboard_payload():
             'totals': tilt_totals,
             'deaths_today': get_int_setting('tilt_total_deaths_today', 0),
             'participants': len(tilt_users),
+        },
+        'settings': {
+            'language': get_ui_language(),
         },
     }
 
@@ -3214,21 +3225,25 @@ def open_settings_window():
     ttk.Label(general_tab, text="Marble Day").grid(row=2, column=0, sticky="w", pady=(0, 4))
     ttk.Label(general_tab, text=config.get_setting("marble_day") or "-").grid(row=2, column=1, sticky="w", pady=(0, 4))
 
-    ttk.Label(general_tab, text="Season").grid(row=3, column=0, sticky="w", pady=(0, 8))
-    ttk.Label(general_tab, text=config.get_setting("season") or "-").grid(row=3, column=1, sticky="w", pady=(0, 8))
+    ttk.Label(general_tab, text="Season").grid(row=3, column=0, sticky="w", pady=(0, 4))
+    ttk.Label(general_tab, text=config.get_setting("season") or "-").grid(row=3, column=1, sticky="w", pady=(0, 4))
 
-    ttk.Separator(general_tab, orient="horizontal").grid(row=4, column=0, columnspan=2, sticky="ew", pady=8)
+    ttk.Label(general_tab, text="Language").grid(row=4, column=0, sticky="w", pady=(0, 8))
+    app_language_var = tk.StringVar(value=get_ui_language())
+    ttk.Combobox(general_tab, textvariable=app_language_var, values=["en", "es", "fr", "de", "pt"], width=10, state="readonly").grid(row=4, column=1, sticky="w", pady=(0, 8))
+
+    ttk.Separator(general_tab, orient="horizontal").grid(row=5, column=0, columnspan=2, sticky="ew", pady=8)
 
     minimize_to_tray_var = tk.BooleanVar(value=is_minimize_to_tray_enabled())
     tray_support_text = "Minimize to system tray (double-click tray icon to reopen)"
     if not supports_system_tray():
         tray_support_text += " [pystray not available]"
-    ttk.Checkbutton(general_tab, text=tray_support_text, variable=minimize_to_tray_var).grid(row=5, column=0, columnspan=2, sticky="w", pady=(0, 4))
+    ttk.Checkbutton(general_tab, text=tray_support_text, variable=minimize_to_tray_var).grid(row=6, column=0, columnspan=2, sticky="w", pady=(0, 4))
 
-    ttk.Label(general_tab, text="Mystats Directory").grid(row=7, column=0, sticky="w", pady=(0, 4))
+    ttk.Label(general_tab, text="Mystats Directory").grid(row=8, column=0, sticky="w", pady=(0, 4))
     directory_value = os.path.expandvars(r"%localappdata%/mystats/")
     directory_entry = ttk.Entry(general_tab, width=55)
-    directory_entry.grid(row=8, column=0, sticky="ew", pady=(0, 4), columnspan=2)
+    directory_entry.grid(row=9, column=0, sticky="ew", pady=(0, 4), columnspan=2)
     directory_entry.insert(0, directory_value)
     directory_entry.config(state="readonly")
 
@@ -3239,7 +3254,7 @@ def open_settings_window():
         else:
             messagebox.showerror("Error", "Directory path does not exist.")
 
-    ttk.Button(general_tab, text="Open Location", command=open_directory).grid(row=9, column=0, sticky="w", pady=(4, 0))
+    ttk.Button(general_tab, text="Open Location", command=open_directory).grid(row=10, column=0, sticky="w", pady=(4, 0))
     general_tab.grid_columnconfigure(0, weight=1)
 
     # --- Audio tab ---
@@ -3717,6 +3732,7 @@ def open_settings_window():
         announce_delay_var.set(False)
         reset_audio_var.set(False)
         minimize_to_tray_var.set(False)
+        app_language_var.set('en')
         chat_br_results_var.set(True)
         chat_race_results_var.set(True)
         chat_tilt_results_var.set(True)
@@ -3813,6 +3829,7 @@ def open_settings_window():
 
     def save_settings_and_close():
         config.set_setting("CHANNEL", channel_entry.get(), persistent=True)
+        config.set_setting("app_language", app_language_var.get(), persistent=True)
         config.set_setting("minimize_to_tray", str(minimize_to_tray_var.get()), persistent=True)
         config.set_setting("chunk_alert", str(chunk_alert_var.get()), persistent=True)
         config.set_setting("chunk_alert_value", chunk_alert_trigger_entry.get(), persistent=True)
@@ -4899,7 +4916,7 @@ class ConfigManager:
                                 'overlay_compact_rows', 'overlay_horizontal_layout', 'overlay_server_port', 'tilt_lifetime_base_xp',
                                 'tilt_season_best_level', 'tilt_personal_best_level', 'tilt_overlay_theme', 'tilt_scroll_step_px', 'tilt_scroll_interval_ms',
                                 'tilt_scroll_pause_ms', 'tiltsurvivors_min_levels', 'tiltdeath_min_levels',
-                                'update_later_clicks', 'update_later_version', 'minimize_to_tray', 'tray_hint_toast_shown'}
+                                'update_later_clicks', 'update_later_version', 'minimize_to_tray', 'tray_hint_toast_shown', 'app_language'}
         self.transient_keys = set([])
         self.defaults = {
             'chat_br_results': 'True',
@@ -4925,6 +4942,7 @@ class ConfigManager:
             'chat_max_names': '25',
             'minimize_to_tray': 'False',
             'tray_hint_toast_shown': 'False',
+            'app_language': 'en',
             'season_quests_enabled': 'True',
             'season_quest_target_races': '1000',
             'season_quest_target_points': '500000',
