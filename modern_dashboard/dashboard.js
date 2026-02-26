@@ -5,6 +5,43 @@ let raceDashboardFilter = 'both';
 let tiltSortBy = 'tilt_points';
 let tiltSortOrder = 'desc';
 
+const I18N = {
+  en: {},
+  es: {
+    'Tracked Racers': 'Corredores seguidos',
+    'Total Cycles Completed': 'Ciclos completados',
+    'Within 2 Positions': 'A 2 posiciones',
+    'Cycle Highlights': 'Resumen de ciclos',
+    'No cycle completions yet': 'Aún no hay ciclos completados',
+    'Top Cycler': 'Mejor ciclista',
+    'Newest Cycler': 'Ciclista más reciente',
+    'cycles completed': 'ciclos completados',
+    'No active session': 'Sin sesión activa',
+    'Session': 'Sesión',
+    'No MyCycle race data yet.': 'Aún no hay datos de carreras MyCycle.',
+    'positions': 'posiciones',
+    'Missing': 'Faltan',
+    'None': 'Ninguna',
+    'Current races': 'Carreras actuales',
+    'Last cycle': 'Último ciclo',
+    'No season quest data yet.': 'Aún no hay datos de misiones de temporada.',
+    'complete': 'completado',
+    'Disabled': 'Desactivado',
+    'No tilt competitors yet.': 'Aún no hay competidores de tilt.',
+    'Death Rate': 'Tasa de muertes',
+    'Deaths Today': 'Muertes hoy',
+    'Total Tilt Points': 'Puntos Tilt totales',
+    'No rivals found. Lower minimum races or increase max point gap in settings.': 'No se encontraron rivales. Baja el mínimo de carreras o aumenta la brecha máxima en ajustes.',
+    'No competitors found for this filter.': 'No se encontraron competidores para este filtro.',
+    'Updated now': 'Actualizado ahora',
+    'Updated': 'Actualizado',
+    'Unable to load MyCycle data.': 'No se pudieron cargar los datos de MyCycle.',
+  }
+};
+
+let currentLanguage = 'en';
+const t = (key) => I18N[currentLanguage]?.[key] || key;
+
 function fmt(n) {
   const x = Number(n || 0);
   return Number.isFinite(x) ? x.toLocaleString() : '0';
@@ -36,9 +73,9 @@ function renderKpis(rows = []) {
   const nearComplete = rows.filter((row) => Number(row.progress_total || 0) - Number(row.progress_hits || 0) <= 2).length;
 
   kpiHost.innerHTML = [
-    { label: 'Tracked Racers', value: fmt(racers) },
-    { label: 'Total Cycles Completed', value: fmt(cycles) },
-    { label: 'Within 2 Positions', value: fmt(nearComplete) },
+    { label: t('Tracked Racers'), value: fmt(racers) },
+    { label: t('Total Cycles Completed'), value: fmt(cycles) },
+    { label: t('Within 2 Positions'), value: fmt(nearComplete) },
   ].map((kpi) => (
     `<div class="kpi"><div class="kpi-label">${escapeHtml(kpi.label)}</div><div class="kpi-value">${escapeHtml(kpi.value)}</div></div>`
   )).join('');
@@ -50,7 +87,7 @@ function renderCycleHighlights(rows = []) {
   if (!host) return;
 
   if (!rows.length) {
-    host.innerHTML = '<div class="highlight-card"><div class="highlight-title">Cycle Highlights</div><div class="highlight-main">No cycle completions yet</div></div>';
+    host.innerHTML = `<div class="highlight-card"><div class="highlight-title">${escapeHtml(t('Cycle Highlights'))}</div><div class="highlight-main">${escapeHtml(t('No cycle completions yet'))}</div></div>`;
     return;
   }
 
@@ -69,11 +106,11 @@ function renderCycleHighlights(rows = []) {
   const topName = topCycler?.display_name || topCycler?.username || '—';
   const topCycles = Number(topCycler?.cycles_completed || 0);
   const newestName = newestCycler?.display_name || newestCycler?.username || '—';
-  const newestWhen = newestCycler?.last_cycle_completed_at || 'No completed cycles yet';
+  const newestWhen = newestCycler?.last_cycle_completed_at || t('No cycle completions yet');
 
   host.innerHTML = [
-    `<div class="highlight-card"><div class="highlight-title">Top Cycler</div><div class="highlight-main">${escapeHtml(topName)}</div><div class="highlight-detail">${escapeHtml(`${fmt(topCycles)} cycles completed`)}</div></div>`,
-    `<div class="highlight-card"><div class="highlight-title">Newest Cycler</div><div class="highlight-main">${escapeHtml(newestName)}</div><div class="highlight-detail">${escapeHtml(newestWhen)}</div></div>`,
+    `<div class="highlight-card"><div class="highlight-title">${escapeHtml(t('Top Cycler'))}</div><div class="highlight-main">${escapeHtml(topName)}</div><div class="highlight-detail">${escapeHtml(`${fmt(topCycles)} ${t('cycles completed')}`)}</div></div>`,
+    `<div class="highlight-card"><div class="highlight-title">${escapeHtml(t('Newest Cycler'))}</div><div class="highlight-main">${escapeHtml(newestName)}</div><div class="highlight-detail">${escapeHtml(newestWhen)}</div></div>`,
   ].join('');
 }
 
@@ -89,13 +126,13 @@ function renderMyCycleRows(data) {
   for (let place = minPlace; place <= maxPlace; place += 1) placementRange.push(place);
 
   el('range-pill').textContent = `Positions ${minPlace}-${maxPlace}`;
-  const sessionName = data?.mycycle?.session?.name || 'No active session';
-  el('mycycle-meta').textContent = `Session: ${sessionName}`;
+  const sessionName = data?.mycycle?.session?.name || t('No active session');
+  el('mycycle-meta').textContent = `${t('Session')}: ${sessionName}`;
   renderKpis(rows);
   renderCycleHighlights(rows);
 
   if (!rows.length) {
-    rowsHost.innerHTML = '<div class="empty">No MyCycle race data yet.</div>';
+    rowsHost.innerHTML = `<div class="empty">${escapeHtml(t('No MyCycle race data yet.'))}</div>`;
     return;
   }
 
@@ -120,7 +157,7 @@ function renderMyCycleRows(data) {
         </div>
         <div class="progress-bar"><div class="progress-fill" style="width:${percent}%"></div></div>
         <div class="positions">${chips}</div>
-        <div class="subline">${escapeHtml(`${completed}/${total} positions • Missing: ${missing.length ? missing.join(', ') : 'None'} • Current races: ${fmt(row.current_cycle_races)} • Last cycle: ${fmt(row.last_cycle_races)}`)}</div>
+        <div class="subline">${escapeHtml(`${completed}/${total} ${t('positions')} • ${t('Missing')}: ${missing.length ? missing.join(', ') : t('None')} • ${t('Current races')}: ${fmt(row.current_cycle_races)} • ${t('Last cycle')}: ${fmt(row.last_cycle_races)}`)}</div>
       </div>
     `;
   }).join('');
@@ -135,7 +172,7 @@ function renderSeasonKpis(rows = []) {
   const totalCompleted = rows.reduce((acc, row) => acc + Number(row.completed || 0), 0);
 
   host.innerHTML = [
-    { label: 'Tracked Racers', value: fmt(racers) },
+    { label: t('Tracked Racers'), value: fmt(racers) },
     { label: 'All Quests Complete', value: fmt(completedAll) },
     { label: 'Total Quest Clears', value: fmt(totalCompleted) },
   ].map((kpi) => (
@@ -161,7 +198,7 @@ function renderSeasonTargets(data) {
 
   host.innerHTML = questCards.map(([label, value]) => {
     const enabled = Number(value || 0) > 0;
-    return `<div class="quest-target ${enabled ? '' : 'quest-target--disabled'}"><span>${escapeHtml(label)}</span><strong>${enabled ? escapeHtml(fmt(value)) : 'Disabled'}</strong></div>`;
+    return `<div class="quest-target ${enabled ? '' : 'quest-target--disabled'}"><span>${escapeHtml(label)}</span><strong>${enabled ? escapeHtml(fmt(value)) : t('Disabled')}</strong></div>`;
   }).join('');
 }
 
@@ -177,7 +214,7 @@ function renderSeasonQuestRows(data) {
   renderSeasonTargets(data);
 
   if (!rows.length) {
-    rowsHost.innerHTML = '<div class="empty">No season quest data yet.</div>';
+    rowsHost.innerHTML = `<div class="empty">${escapeHtml(t('No season quest data yet.'))}</div>`;
     return;
   }
 
@@ -192,7 +229,7 @@ function renderSeasonQuestRows(data) {
         <div class="row-head">
           <span class="rank">#${idx + 1}</span>
           <span class="name">${escapeHtml(row.display_name || row.username || '-')}</span>
-          <span class="stat">${escapeHtml(`${completedText} complete`)}</span>
+          <span class="stat">${escapeHtml(`${completedText} ${t('complete')}`)}</span>
         </div>
         <div class="progress-bar"><div class="progress-fill" style="width:${percent}%"></div></div>
         <div class="quest-metrics">
@@ -231,9 +268,9 @@ function renderTiltKpis(rows = [], data = {}) {
 
   host.innerHTML = [
     { label: 'Tilt Competitors', value: fmt(uniqueParticipantCount(rows)) },
-    { label: 'Deaths Today', value: fmt(deathsToday) },
-    { label: 'Death Rate', value: `${deathRate.toFixed(1)}%` },
-    { label: 'Total Tilt Points', value: fmt(totalPoints) },
+    { label: t('Deaths Today'), value: fmt(deathsToday) },
+    { label: t('Death Rate'), value: `${deathRate.toFixed(1)}%` },
+    { label: t('Total Tilt Points'), value: fmt(totalPoints) },
   ].map((kpi) => (
     `<div class="kpi"><div class="kpi-label">${escapeHtml(kpi.label)}</div><div class="kpi-value">${escapeHtml(kpi.value)}</div></div>`
   )).join('');
@@ -329,7 +366,7 @@ function renderTiltRows(data) {
   renderTiltHighlights(rows, data);
 
   if (!rows.length) {
-    rowsHost.innerHTML = '<div class="empty">No tilt competitors yet.</div>';
+    rowsHost.innerHTML = `<div class="empty">${escapeHtml(t('No tilt competitors yet.'))}</div>`;
     return;
   }
 
@@ -427,7 +464,7 @@ function renderRivalsRows(data) {
   renderRivalsHighlights(rows);
 
   if (!rows.length) {
-    rowsHost.innerHTML = '<div class="empty">No rivals found. Lower minimum races or increase max point gap in settings.</div>';
+    rowsHost.innerHTML = `<div class="empty">${escapeHtml(t('No rivals found. Lower minimum races or increase max point gap in settings.'))}</div>`;
     return;
   }
 
@@ -568,7 +605,7 @@ function renderRaceDashboardRows(data) {
   el('races-range-pill').textContent = `${modeLabel} • Top ${Math.min(200, rows.length)}`;
 
   if (!rows.length) {
-    rowsHost.innerHTML = '<div class="empty">No competitors found for this filter.</div>';
+    rowsHost.innerHTML = `<div class="empty">${escapeHtml(t('No competitors found for this filter.'))}</div>`;
     return;
   }
 
@@ -646,7 +683,8 @@ async function refresh() {
   try {
     const resp = await fetch('/api/dashboard/main', { cache: 'no-store' });
     const data = await resp.json();
-    el('updated-at').textContent = data.updated_at ? `Updated ${data.updated_at}` : 'Updated now';
+    currentLanguage = data?.settings?.language || currentLanguage || 'en';
+    el('updated-at').textContent = data.updated_at ? `${t('Updated')} ${data.updated_at}` : t('Updated now');
     renderMyCycleRows(data);
     renderSeasonQuestRows(data);
     renderTiltRows(data);
@@ -655,7 +693,7 @@ async function refresh() {
   } catch (error) {
     console.error('dashboard refresh failed', error);
     const node = el('mycycle');
-    if (node) node.innerHTML = '<div class="empty">Unable to load MyCycle data.</div>';
+    if (node) node.innerHTML = `<div class="empty">${escapeHtml(t('Unable to load MyCycle data.'))}</div>`;
   }
 }
 

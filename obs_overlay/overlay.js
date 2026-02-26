@@ -12,6 +12,29 @@ const headerPills = [
 ];
 const fmt = n => new Intl.NumberFormat().format(n || 0);
 
+let currentLanguage = 'en';
+const I18N = {
+  en: {},
+  es: {
+    'MyStats Live Results': 'MyStats Resultados en vivo',
+    'MyStats Tilt Run Tracker': 'MyStats Seguimiento de Tilt',
+    'WORLD RECORD!': '¡RÉCORD MUNDIAL!',
+    'Avg Points Today': 'Promedio hoy',
+    'All Racers Today': 'Todos hoy',
+    'Total Races Today': 'Carreras hoy',
+    'Avg Points Season': 'Promedio temporada',
+    'All Racers Season': 'Todos temporada',
+    'Total Races Season': 'Carreras temporada',
+    'set a new world record!': 'logró un nuevo récord mundial!',
+    'Beat previous by': 'Superó al anterior por',
+    'Active': 'Activo',
+    'Idle': 'Inactivo',
+    'No active run standings yet.': 'Aún no hay posiciones de la partida activa.',
+    'No completed tilt run yet.': 'Aún no hay una partida tilt completada.',
+  },
+};
+const t = (k) => I18N[currentLanguage]?.[k] || k;
+
 const defaultSettings = {
   rotationSeconds: 10,
   refreshSeconds: 3,
@@ -83,10 +106,10 @@ function showRecordOverlay(top3View = {}) {
   const beatBy = formatDurationDelta(top3View?.record_delta_seconds);
 
   if (recordOverlayMessage) {
-    recordOverlayMessage.textContent = `${holderName} set a new world record!`;
+    recordOverlayMessage.textContent = `${holderName} ${t('set a new world record!')}`;
   }
   if (recordOverlayDelta) {
-    recordOverlayDelta.textContent = `Beat previous by ${beatBy}`;
+    recordOverlayDelta.textContent = `${t('Beat previous by')} ${beatBy}`;
   }
   if (boardShell) boardShell.classList.add('is-hidden');
   if (recordOverlay) {
@@ -547,6 +570,7 @@ function applyTheme() {
 }
 
 function applyServerSettings(raw = {}) {
+  currentLanguage = String(raw.language || currentLanguage || 'en').toLowerCase();
   const next = {
     rotationSeconds: clampNumber(raw.rotation_seconds, 3, 120, defaultSettings.rotationSeconds),
     refreshSeconds: clampNumber(raw.refresh_seconds, 1, 60, defaultSettings.refreshSeconds),
@@ -596,7 +620,8 @@ async function refresh() {
     const r = await fetch('/api/overlay/top3', { cache: 'no-store' });
     const p = await r.json();
 
-    $('overlay-title').textContent = p.title || 'MyStats Live Results';
+    currentLanguage = (p?.settings?.language || 'en').toLowerCase();
+    $('overlay-title').textContent = t(p.title || 'MyStats Live Results');
     applyServerSettings(p.settings || {});
     updateHeaderStats(p.header_stats || {});
     const shouldShowPreviousRace = Array.isArray(p.top10_previous_race)
@@ -653,3 +678,17 @@ renderPillPage();
 refresh();
 startRefreshTimer();
 startPillRotationTimer();
+
+
+(function applyStaticTranslations(){
+  const title = document.querySelector('.record-overlay__title');
+  if (title) title.textContent = t('WORLD RECORD!');
+  const mapping = {
+    'stat-avg-today':'Avg Points Today','stat-uniq-today':'All Racers Today','stat-races-today':'Total Races Today',
+    'stat-avg-season':'Avg Points Season','stat-uniq-season':'All Racers Season','stat-races-season':'Total Races Season'
+  };
+  Object.entries(mapping).forEach(([id,key]) => {
+    const n = document.querySelector(`#${id} .pill-title`);
+    if (n) n.textContent = t(key);
+  });
+})();

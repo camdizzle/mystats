@@ -114,6 +114,85 @@ logging.basicConfig(
 )
 logger = logging.getLogger("mystats")
 
+SUPPORTED_UI_LANGUAGES = {'en', 'es', 'fr', 'de', 'pt'}
+
+LANGUAGE_DISPLAY_NAMES = {
+    'en': 'English',
+    'es': 'Español',
+    'fr': 'Français',
+    'de': 'Deutsch',
+    'pt': 'Português',
+}
+
+UI_TEXT = {
+    'en': {},
+    'de': {
+        'Settings': 'Einstellungen',
+        'General': 'Allgemein',
+        'Audio': 'Audio',
+        'Chat': 'Chat',
+        'Season Quests': 'Saison-Quests',
+        'Rivals': 'Rivalen',
+        'MyCycle': 'MyCycle',
+        'Appearance': 'Darstellung',
+        'Overlay': 'Overlay',
+        'Tilt': 'Tilt',
+        'Core app settings': 'Kern-App-Einstellungen',
+        'Channel': 'Kanal',
+        'Marble Day': 'Marble-Tag',
+        'Season': 'Saison',
+        'Language': 'Sprache',
+        'Mystats Directory': 'MyStats-Verzeichnis',
+        'Open Location': 'Ort öffnen',
+        'Reset Defaults': 'Standards zurücksetzen',
+        'Save and Close': 'Speichern und schließen',
+        'MyStats - Marbles On Stream Companion Application': 'MyStats - Marbles On Stream Begleit-App',
+    },
+}
+
+CHAT_TEXT = {
+    'de': {
+        'Race winner': 'Rennsieger',
+        'won the race': 'hat das Rennen gewonnen',
+        'points': 'Punkte',
+        'season': 'Saison',
+        'today': 'heute',
+        'top 3': 'Top 3',
+        'high score': 'Highscore',
+        'new high score': 'neuer Highscore',
+        'leaderboard': 'Bestenliste',
+        'event': 'Event',
+        'completed': 'abgeschlossen',
+        'current': 'aktuell',
+        'average': 'Durchschnitt',
+        'total': 'gesamt',
+        'deaths': 'Tode',
+        'levels': 'Level',
+    },
+}
+
+
+def get_ui_language():
+    language = str(config.get_setting('app_language') or 'en').strip().lower()
+    return language if language in SUPPORTED_UI_LANGUAGES else 'en'
+
+
+def tr(text):
+    language = get_ui_language()
+    return UI_TEXT.get(language, {}).get(text, text)
+
+
+def translate_chat_message(message):
+    language = get_ui_language()
+    if language == 'en':
+        return message
+
+    translated = str(message)
+    replacements = CHAT_TEXT.get(language, {})
+    for source, target in sorted(replacements.items(), key=lambda item: len(item[0]), reverse=True):
+        translated = re.sub(re.escape(source), target, translated, flags=re.IGNORECASE)
+    return translated
+
 
 def supports_system_tray():
     return pystray is not None
@@ -1986,7 +2065,7 @@ async def send_chat_message(channel, message, category=None, apply_delay=False):
             await asyncio.sleep(0)
 
     try:
-        await channel.send(message)
+        await channel.send(translate_chat_message(message))
         return True
     except Exception as e:
         logger.exception(f"Failed to send chat message ({category}): {e}")
@@ -2256,6 +2335,7 @@ def _build_overlay_settings_payload():
         'tilt_scroll_step_px': _safe_int(config.get_setting('tilt_scroll_step_px') or 1) or 1,
         'tilt_scroll_interval_ms': _safe_int(config.get_setting('tilt_scroll_interval_ms') or 40) or 40,
         'tilt_scroll_pause_ms': _safe_int(config.get_setting('tilt_scroll_pause_ms') or 900) or 900,
+        'language': get_ui_language(),
     }
 
 
@@ -2670,6 +2750,9 @@ def _build_main_dashboard_payload():
             'totals': tilt_totals,
             'deaths_today': get_int_setting('tilt_total_deaths_today', 0),
             'participants': len(tilt_users),
+        },
+        'settings': {
+            'language': get_ui_language(),
         },
     }
 
@@ -3166,7 +3249,7 @@ def play_audio_file(filename, device_name=None):
 
 def open_settings_window():
     settings_window = tk.Toplevel(root)
-    settings_window.title("Settings")
+    settings_window.title(tr("Settings"))
     settings_window.transient(root)
     settings_window.attributes('-topmost', False)
 
@@ -3193,42 +3276,48 @@ def open_settings_window():
     appearance_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
     overlay_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
 
-    notebook.add(general_tab, text="General")
-    notebook.add(audio_tab, text="Audio")
-    notebook.add(chat_tab, text="Chat")
-    notebook.add(season_quests_tab, text="Season Quests")
-    notebook.add(rivals_tab, text="Rivals")
-    notebook.add(mycycle_tab, text="MyCycle")
-    notebook.add(appearance_tab, text="Appearance")
-    notebook.add(overlay_tab, text="Overlay")
-    notebook.add(tilt_tab, text="Tilt")
+    notebook.add(general_tab, text=tr("General"))
+    notebook.add(audio_tab, text=tr("Audio"))
+    notebook.add(chat_tab, text=tr("Chat"))
+    notebook.add(season_quests_tab, text=tr("Season Quests"))
+    notebook.add(rivals_tab, text=tr("Rivals"))
+    notebook.add(mycycle_tab, text=tr("MyCycle"))
+    notebook.add(appearance_tab, text=tr("Appearance"))
+    notebook.add(overlay_tab, text=tr("Overlay"))
+    notebook.add(tilt_tab, text=tr("Tilt"))
 
     # --- General tab ---
-    ttk.Label(general_tab, text="Core app settings", style="Small.TLabel").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
+    ttk.Label(general_tab, text=tr("Core app settings"), style="Small.TLabel").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
 
-    ttk.Label(general_tab, text="Channel").grid(row=1, column=0, sticky="w", pady=(0, 4))
+    ttk.Label(general_tab, text=tr("Channel")).grid(row=1, column=0, sticky="w", pady=(0, 4))
     channel_entry = ttk.Entry(general_tab, width=28)
     channel_entry.grid(row=1, column=1, sticky="w", pady=(0, 4))
     channel_entry.insert(0, config.get_setting("CHANNEL") or "")
 
-    ttk.Label(general_tab, text="Marble Day").grid(row=2, column=0, sticky="w", pady=(0, 4))
+    ttk.Label(general_tab, text=tr("Marble Day")).grid(row=2, column=0, sticky="w", pady=(0, 4))
     ttk.Label(general_tab, text=config.get_setting("marble_day") or "-").grid(row=2, column=1, sticky="w", pady=(0, 4))
 
-    ttk.Label(general_tab, text="Season").grid(row=3, column=0, sticky="w", pady=(0, 8))
-    ttk.Label(general_tab, text=config.get_setting("season") or "-").grid(row=3, column=1, sticky="w", pady=(0, 8))
+    ttk.Label(general_tab, text=tr("Season")).grid(row=3, column=0, sticky="w", pady=(0, 4))
+    ttk.Label(general_tab, text=config.get_setting("season") or "-").grid(row=3, column=1, sticky="w", pady=(0, 4))
 
-    ttk.Separator(general_tab, orient="horizontal").grid(row=4, column=0, columnspan=2, sticky="ew", pady=8)
+    ttk.Label(general_tab, text=tr("Language")).grid(row=4, column=0, sticky="w", pady=(0, 8))
+    app_language_code_to_name = {code: LANGUAGE_DISPLAY_NAMES.get(code, code) for code in SUPPORTED_UI_LANGUAGES}
+    app_language_name_to_code = {name: code for code, name in app_language_code_to_name.items()}
+    app_language_var = tk.StringVar(value=app_language_code_to_name.get(get_ui_language(), LANGUAGE_DISPLAY_NAMES['en']))
+    ttk.Combobox(general_tab, textvariable=app_language_var, values=[app_language_code_to_name[c] for c in sorted(app_language_code_to_name.keys())], width=16, state="readonly").grid(row=4, column=1, sticky="w", pady=(0, 8))
+
+    ttk.Separator(general_tab, orient="horizontal").grid(row=5, column=0, columnspan=2, sticky="ew", pady=8)
 
     minimize_to_tray_var = tk.BooleanVar(value=is_minimize_to_tray_enabled())
     tray_support_text = "Minimize to system tray (double-click tray icon to reopen)"
     if not supports_system_tray():
         tray_support_text += " [pystray not available]"
-    ttk.Checkbutton(general_tab, text=tray_support_text, variable=minimize_to_tray_var).grid(row=5, column=0, columnspan=2, sticky="w", pady=(0, 4))
+    ttk.Checkbutton(general_tab, text=tray_support_text, variable=minimize_to_tray_var).grid(row=6, column=0, columnspan=2, sticky="w", pady=(0, 4))
 
-    ttk.Label(general_tab, text="Mystats Directory").grid(row=7, column=0, sticky="w", pady=(0, 4))
+    ttk.Label(general_tab, text=tr("Mystats Directory")).grid(row=8, column=0, sticky="w", pady=(0, 4))
     directory_value = os.path.expandvars(r"%localappdata%/mystats/")
     directory_entry = ttk.Entry(general_tab, width=55)
-    directory_entry.grid(row=8, column=0, sticky="ew", pady=(0, 4), columnspan=2)
+    directory_entry.grid(row=9, column=0, sticky="ew", pady=(0, 4), columnspan=2)
     directory_entry.insert(0, directory_value)
     directory_entry.config(state="readonly")
 
@@ -3239,7 +3328,7 @@ def open_settings_window():
         else:
             messagebox.showerror("Error", "Directory path does not exist.")
 
-    ttk.Button(general_tab, text="Open Location", command=open_directory).grid(row=9, column=0, sticky="w", pady=(4, 0))
+    ttk.Button(general_tab, text=tr("Open Location"), command=open_directory).grid(row=10, column=0, sticky="w", pady=(4, 0))
     general_tab.grid_columnconfigure(0, weight=1)
 
     # --- Audio tab ---
@@ -3717,6 +3806,7 @@ def open_settings_window():
         announce_delay_var.set(False)
         reset_audio_var.set(False)
         minimize_to_tray_var.set(False)
+        app_language_var.set(LANGUAGE_DISPLAY_NAMES['en'])
         chat_br_results_var.set(True)
         chat_race_results_var.set(True)
         chat_tilt_results_var.set(True)
@@ -3809,10 +3899,12 @@ def open_settings_window():
     footer = ttk.Frame(settings_window, style="App.TFrame")
     footer.grid(row=1, column=0, sticky="ew", padx=20, pady=10)
 
-    ttk.Button(footer, text="Reset Defaults", command=reset_settings_defaults).pack(side="left")
+    ttk.Button(footer, text=tr("Reset Defaults"), command=reset_settings_defaults).pack(side="left")
 
     def save_settings_and_close():
         config.set_setting("CHANNEL", channel_entry.get(), persistent=True)
+        selected_language_name = app_language_var.get()
+        config.set_setting("app_language", app_language_name_to_code.get(selected_language_name, "en"), persistent=True)
         config.set_setting("minimize_to_tray", str(minimize_to_tray_var.get()), persistent=True)
         config.set_setting("chunk_alert", str(chunk_alert_var.get()), persistent=True)
         config.set_setting("chunk_alert_value", chunk_alert_trigger_entry.get(), persistent=True)
@@ -3880,7 +3972,7 @@ def open_settings_window():
         config.set_setting("tilt_scroll_pause_ms", tilt_scroll_pause_entry.get(), persistent=True)
         settings_window.destroy()
 
-    ttk.Button(footer, text="Save and Close", command=save_settings_and_close, style="Primary.TButton").pack(side="right")
+    ttk.Button(footer, text=tr("Save and Close"), command=save_settings_and_close, style="Primary.TButton").pack(side="right")
 
 def test_chunkaudio_playback():
     """
@@ -4066,9 +4158,9 @@ def build_main_content(parent):
     mycycle_tab = ttk.Frame(notebook, style="App.TFrame")
 
     notebook.add(console_tab, text="Console")
-    notebook.add(season_quests_tab, text="Season Quests")
-    notebook.add(rivals_tab, text="Rivals")
-    notebook.add(mycycle_tab, text="MyCycle")
+    notebook.add(season_quests_tab, text=tr("Season Quests"))
+    notebook.add(rivals_tab, text=tr("Rivals"))
+    notebook.add(mycycle_tab, text=tr("MyCycle"))
 
     console_tab.grid_rowconfigure(0, weight=1)
     console_tab.grid_columnconfigure(0, weight=1)
@@ -4395,7 +4487,7 @@ def initialize_main_window():
 
     root_window.protocol("WM_DELETE_WINDOW", on_close)
     root_window.bind("<Unmap>", handle_root_minimize)
-    root_window.title("MyStats - Marbles On Stream Companion Application")
+    root_window.title(tr("MyStats - Marbles On Stream Companion Application"))
 
     window_width = 1040
     window_height = 650
@@ -4899,7 +4991,7 @@ class ConfigManager:
                                 'overlay_compact_rows', 'overlay_horizontal_layout', 'overlay_server_port', 'tilt_lifetime_base_xp',
                                 'tilt_season_best_level', 'tilt_personal_best_level', 'tilt_overlay_theme', 'tilt_scroll_step_px', 'tilt_scroll_interval_ms',
                                 'tilt_scroll_pause_ms', 'tiltsurvivors_min_levels', 'tiltdeath_min_levels',
-                                'update_later_clicks', 'update_later_version', 'minimize_to_tray', 'tray_hint_toast_shown'}
+                                'update_later_clicks', 'update_later_version', 'minimize_to_tray', 'tray_hint_toast_shown', 'app_language'}
         self.transient_keys = set([])
         self.defaults = {
             'chat_br_results': 'True',
@@ -4925,6 +5017,7 @@ class ConfigManager:
             'chat_max_names': '25',
             'minimize_to_tray': 'False',
             'tray_hint_toast_shown': 'False',
+            'app_language': 'en',
             'season_quests_enabled': 'True',
             'season_quest_target_races': '1000',
             'season_quest_target_points': '500000',
