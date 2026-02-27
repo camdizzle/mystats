@@ -5,6 +5,15 @@ const { parseSettings, updateSetting, ensureDefaults } = require('../lib/setting
 const { TwitchIrcBot } = require('../lib/twitch_bot');
 
 const ROOT = path.resolve(__dirname, '..');
+// Harden Electron startup for headless/root/dev environments.
+// This avoids Chromium sandbox/zygote startup crashes that can surface as ICU fd errors.
+if (process.platform === 'linux') {
+  app.commandLine.appendSwitch('no-sandbox');
+  app.commandLine.appendSwitch('disable-setuid-sandbox');
+  app.commandLine.appendSwitch('disable-gpu');
+  app.disableHardwareAcceleration();
+}
+
 const settingsPath = process.env.MYSTATS_SETTINGS || path.join(ROOT, 'settings.txt');
 const defaults = {
   overlay_server_port: '5000',
@@ -92,4 +101,12 @@ app.whenReady().then(createWindow);
 app.on('window-all-closed', () => {
   bot.stop();
   if (process.platform !== 'darwin') app.quit();
+});
+
+process.on('uncaughtException', (err) => {
+  emitLog(`Fatal error: ${err?.stack || err}`);
+});
+
+process.on('unhandledRejection', (reason) => {
+  emitLog(`Unhandled rejection: ${reason}`);
 });

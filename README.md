@@ -147,3 +147,4 @@ Output is generated in `dist/` as a portable `.exe`.
 - Port conflict: change `overlay_server_port` in Settings and restart app.
 - No data: verify `directory` points to data output folder.
 - Twitch bot: ensure `TWITCH_USERNAME`, `CHANNEL`, and token are configured.
+- Linux Chromium/ICU startup error (`Invalid file descriptor to ICU data`): run via `npm start` (now launches Electron with `--no-sandbox`), avoid partial/copy-only `node_modules`, and reinstall dependencies with `npm install` if needed.
