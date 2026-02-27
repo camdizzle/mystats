@@ -230,7 +230,7 @@ body.top3-active .header-stats {
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--accent);
-  background: transparent;
+  background: rgba(8, 13, 26, 0.92);
   border: 1px solid rgba(127, 216, 255, 0.2);
   text-align: center;
   line-height: 1.2;
@@ -301,7 +301,7 @@ body.top3-active .board-shell {
 body.top3-active .board-title {
   color: #ffe6a8;
   border-color: rgba(255, 207, 107, 0.4);
-  background: transparent;
+  background: rgba(40, 20, 8, 0.92);
 }
 
 
@@ -309,7 +309,7 @@ body.top3-active #leaderboard li.leaderboard-section-title,
 #leaderboard.is-top3-mode li.leaderboard-section-title {
   color: #ffe6a8;
   border-color: rgba(255, 207, 107, 0.4);
-  background: transparent;
+  background: rgba(40, 20, 8, 0.92);
   position: static;
   padding: 4px 8px;
   font-size: calc(0.96rem * var(--text-scale));
