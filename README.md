@@ -88,3 +88,62 @@ Overlay settings are controlled from the desktop app (Settings → Overlay) and 
 - Text scale
 - Top-3 medal emote visibility
 - Compact row spacing
+
+## Node.js Runtime (Windows Desktop App)
+MyStats now runs as a **windowed desktop app** using Electron + Node (no Python runtime required).
+
+### What this app includes (Tkinter-style parity target)
+- Home screen controls
+- Console log window
+- Twitch bot connect/disconnect/send message
+- Settings manager with category tabs
+- Score summary panel
+- Dashboard/Overlay launch buttons
+
+The desktop app window is implemented in:
+- `desktop_app/index.html`
+- `desktop_app/renderer.js`
+- `desktop_app/styles.css`
+
+Electron bootstrap is in:
+- `electron/main.js`
+- `electron/preload.js`
+
+## Setup (Windows)
+1. Install Node.js LTS from https://nodejs.org
+2. Open PowerShell and verify:
+   - `node -v`
+   - `npm -v`
+3. In project folder run:
+   - `npm install`
+4. Start desktop app:
+   - `npm start`
+
+## Build Windows executable
+From project folder:
+```powershell
+npm install
+npm run package:win
+```
+Output is generated in `dist/` as a portable `.exe`.
+
+## Optional CLI modes
+- Server only: `npm run server`
+- Console-only mode: `npm run cli`
+
+## URLs launched by desktop app
+- Dashboard: `http://127.0.0.1:<overlay_server_port>/dashboard`
+- Overlay: `http://127.0.0.1:<overlay_server_port>/overlay`
+- Tilt overlay: `http://127.0.0.1:<overlay_server_port>/overlay/tilt`
+
+## Settings + data
+- Settings are stored in `settings.txt`
+- Data files are read from `directory=<path>` (`allraces_*.csv`, `tilts_*.csv`, `mycycle_data.json`)
+- Settings API remains available:
+  - `GET /api/settings`
+  - `POST /api/settings`
+
+## Troubleshooting
+- Port conflict: change `overlay_server_port` in Settings and restart app.
+- No data: verify `directory` points to data output folder.
+- Twitch bot: ensure `TWITCH_USERNAME`, `CHANNEL`, and token are configured.

@@ -1,0 +1,17 @@
+:root { color-scheme: dark; }
+* { box-sizing: border-box; font-family: Segoe UI, Arial, sans-serif; }
+body { margin: 0; background: #0b1120; color: #e6efff; }
+.app-shell { display: grid; grid-template-columns: 230px 1fr; min-height: 100vh; }
+.sidebar { border-right: 1px solid rgba(255,255,255,.12); padding: 12px; background: #101a33; display: grid; gap: 6px; align-content: start; }
+.sidebar h1 { margin: 0 0 8px; font-size: 1.2rem; }
+.tab { text-align: left; border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.04); color: #d6e8ff; padding: 8px 10px; border-radius: 8px; }
+.tab.active { border-color: rgba(90,200,255,.6); color: #89dcff; }
+.content { padding: 14px; }
+header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+button { border-radius: 8px; border: 1px solid rgba(255,255,255,.2); background: rgba(255,255,255,.06); color: #d6e8ff; padding: 7px 10px; }
+.panel { display: none; border: 1px solid rgba(255,255,255,.13); background: rgba(255,255,255,.03); border-radius: 10px; padding: 12px; }
+.panel.active { display: block; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(230px,1fr)); gap: 10px; }
+label { display: grid; gap: 5px; font-size: .86rem; color: #b6cdf0; }
+input { border-radius: 8px; border: 1px solid rgba(255,255,255,.18); background: #0b1730; color: #e6efff; padding: 7px 8px; }
+#status { margin-top: 12px; color: #84f0b7; }

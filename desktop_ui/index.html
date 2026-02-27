@@ -1,0 +1,133 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MyStats Control Center</title>
+  <link rel="stylesheet" href="/app/styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <h1>MyStats</h1>
+      <button class="tab active" data-tab="general">General</button>
+      <button class="tab" data-tab="audio">Audio</button>
+      <button class="tab" data-tab="chat">Chat</button>
+      <button class="tab" data-tab="season">Season Quests</button>
+      <button class="tab" data-tab="rivals">Rivals</button>
+      <button class="tab" data-tab="mycycle">MyCycle</button>
+      <button class="tab" data-tab="appearance">Appearance</button>
+      <button class="tab" data-tab="overlay">Overlay</button>
+      <button class="tab" data-tab="tilt">Tilt</button>
+      <button class="tab" data-tab="console">Console</button>
+    </aside>
+    <main class="content">
+      <header>
+        <h2 id="tab-title">General</h2>
+        <div>
+          <button id="refresh">Reload</button>
+          <button id="save">Save Settings</button>
+        </div>
+      </header>
+
+      <section class="panel active" id="panel-general">
+        <div class="grid">
+          <label>Channel<input data-key="CHANNEL" /></label>
+          <label>Season<input data-key="season" /></label>
+          <label>Marble Day<input data-key="marble_day" /></label>
+          <label>Data Directory<input data-key="directory" /></label>
+          <label>Language<input data-key="app_language" /></label>
+        </div>
+      </section>
+
+      <section class="panel" id="panel-audio">
+        <div class="grid">
+          <label>Audio Enabled<input data-key="audio_enabled" /></label>
+          <label>Win Sound<input data-key="win_sound_file" /></label>
+          <label>Volume<input data-key="audio_volume" /></label>
+        </div>
+      </section>
+
+      <section class="panel" id="panel-chat">
+        <div class="grid">
+          <label>Twitch Username<input data-key="TWITCH_USERNAME" /></label>
+          <label>Twitch OAuth<input data-key="TWITCH_OAUTH" /></label>
+          <label>Chat Enabled<input data-key="chat_enabled" /></label>
+        </div>
+      </section>
+
+      <section class="panel" id="panel-season">
+        <div class="grid">
+          <label>Target Races<input data-key="season_quest_target_races" /></label>
+          <label>Target Points<input data-key="season_quest_target_points" /></label>
+          <label>Target Race HS<input data-key="season_quest_target_race_hs" /></label>
+          <label>Target BR HS<input data-key="season_quest_target_br_hs" /></label>
+          <label>Target Tilt Levels<input data-key="season_quest_target_tilt_levels" /></label>
+          <label>Target Top Tiltees<input data-key="season_quest_target_tilt_tops" /></label>
+          <label>Target Tilt Points<input data-key="season_quest_target_tilt_points" /></label>
+        </div>
+      </section>
+
+      <section class="panel" id="panel-rivals">
+        <div class="grid">
+          <label>Min Races<input data-key="rivals_min_races" /></label>
+          <label>Max Point Gap<input data-key="rivals_max_point_gap" /></label>
+          <label>Pair Count<input data-key="rivals_pair_count" /></label>
+        </div>
+      </section>
+
+      <section class="panel" id="panel-mycycle">
+        <div class="grid">
+          <label>Enabled<input data-key="mycycle_enabled" /></label>
+          <label>Announce<input data-key="mycycle_announcements_enabled" /></label>
+          <label>Include BR<input data-key="mycycle_include_br" /></label>
+          <label>Min Place<input data-key="mycycle_min_place" /></label>
+          <label>Max Place<input data-key="mycycle_max_place" /></label>
+        </div>
+      </section>
+
+      <section class="panel" id="panel-appearance">
+        <div class="grid">
+          <label>UI Theme<input data-key="ui_theme" /></label>
+          <label>Text Scale<input data-key="overlay_text_scale" /></label>
+        </div>
+      </section>
+
+      <section class="panel" id="panel-overlay">
+        <div class="grid">
+          <label>Server Port<input data-key="overlay_server_port" /></label>
+          <label>Rotation Seconds<input data-key="overlay_rotation_seconds" /></label>
+          <label>Refresh Seconds<input data-key="overlay_refresh_seconds" /></label>
+          <label>Theme<input data-key="overlay_theme" /></label>
+          <label>Card Opacity<input data-key="overlay_card_opacity" /></label>
+          <label>Show Medals<input data-key="overlay_show_medals" /></label>
+          <label>Compact Rows<input data-key="overlay_compact_rows" /></label>
+          <label>Horizontal Layout<input data-key="overlay_horizontal_layout" /></label>
+        </div>
+      </section>
+
+      <section class="panel" id="panel-tilt">
+        <div class="grid">
+          <label>Tilt Theme<input data-key="tilt_overlay_theme" /></label>
+          <label>Scroll Step Px<input data-key="tilt_scroll_step_px" /></label>
+          <label>Scroll Interval Ms<input data-key="tilt_scroll_interval_ms" /></label>
+          <label>Scroll Pause Ms<input data-key="tilt_scroll_pause_ms" /></label>
+          <label>Total Deaths Today<input data-key="tilt_total_deaths_today" /></label>
+        </div>
+      </section>
+
+      <section class="panel" id="panel-console">
+        <p>Server is active. Use quick links:</p>
+        <ul>
+          <li><a href="/dashboard" target="_blank">Open Dashboard</a></li>
+          <li><a href="/overlay" target="_blank">Open Overlay</a></li>
+          <li><a href="/overlay/tilt" target="_blank">Open Tilt Overlay</a></li>
+          <li><a href="/api/dashboard/main" target="_blank">Open API Payload</a></li>
+        </ul>
+        <div id="status"></div>
+      </section>
+    </main>
+  </div>
+  <script src="/app/ui.js"></script>
+</body>
+</html>

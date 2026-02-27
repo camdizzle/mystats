@@ -1,0 +1,21 @@
+:root { color-scheme: dark; }
+* { box-sizing: border-box; font-family: Segoe UI, Arial, sans-serif; }
+body { margin: 0; background: #0a1020; color: #e7efff; }
+.shell { padding: 12px; display: grid; gap: 10px; }
+.top { display: flex; justify-content: space-between; align-items: center; }
+.top h1 { margin: 0; }
+.actions { display: flex; gap: 8px; }
+button { border: 1px solid rgba(255,255,255,.2); color: #deebff; background: rgba(255,255,255,.06); border-radius: 8px; padding: 7px 10px; }
+.card { border: 1px solid rgba(255,255,255,.12); border-radius: 10px; background: rgba(255,255,255,.04); padding: 10px; }
+.home-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.btns, .inline { display: flex; gap: 8px; margin-top: 8px; }
+.inline input { flex: 1; min-width: 0; border: 1px solid rgba(255,255,255,.2); background: #0c1732; color: #e7efff; border-radius: 8px; padding: 7px; }
+.settings-shell { display: grid; grid-template-columns: 220px 1fr; gap: 10px; }
+.tabs { border: 1px solid rgba(255,255,255,.12); border-radius: 10px; background: rgba(255,255,255,.04); padding: 8px; display: grid; gap: 6px; align-content: start; max-height: 420px; overflow: auto; }
+.tab.active { border-color: rgba(95,220,255,.7); color: #8adfff; }
+.settings-panel { border: 1px solid rgba(255,255,255,.12); border-radius: 10px; background: rgba(255,255,255,.04); padding: 10px; }
+.fields { display: grid; grid-template-columns: repeat(3,minmax(180px,1fr)); gap: 8px; margin-bottom: 10px; }
+label { display: grid; gap: 4px; font-size: .82rem; color: #bfd3f5; }
+label input { border: 1px solid rgba(255,255,255,.2); background: #0c1732; color: #e7efff; border-radius: 8px; padding: 7px; }
+.console pre { background: #081227; border: 1px solid rgba(255,255,255,.1); border-radius: 8px; padding: 8px; height: 170px; overflow: auto; margin: 0; }
+.summary { font-size: .9rem; color: #9fe7bf; }
