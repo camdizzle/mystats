@@ -147,6 +147,14 @@ UI_TEXT = {
         'Reset Defaults': 'Standards zurücksetzen',
         'Save and Close': 'Speichern und schließen',
         'MyStats - Marbles On Stream Companion Application': 'MyStats - Marbles On Stream Begleit-App',
+        'About': 'Über',
+        'Mystats Application': 'Mystats-Anwendung',
+        'Version': 'Version',
+        'Close': 'Schließen',
+        'Developed by\nCamWOW': 'Entwickelt von\nCamWOW',
+        'Contact Information\nDiscord: https://discord.gg/camwow\nWebsite: https://www.camwow.tv': 'Kontaktinformationen\nDiscord: https://discord.gg/camwow\nWebsite: https://www.camwow.tv',
+        'Acknowledgments\nA heartfelt thank you to Vibblez for his incredible contributions, ideas, and unwavering support. His creative vision and technical expertise have been instrumental not only in shaping the MyStats application, but more specifically in elevating the website to new heights. From conceptualizing unique features to refining the user experience, his efforts have left an indelible mark on this project.': 'Danksagung\nEin herzliches Dankeschön an Vibblez für seine unglaublichen Beiträge, Ideen und unermüdliche Unterstützung. Seine kreative Vision und technische Expertise waren nicht nur für die Entwicklung der MyStats-Anwendung entscheidend, sondern insbesondere auch dafür, die Website auf ein neues Niveau zu heben. Von der Konzeption einzigartiger Funktionen bis zur Verfeinerung der Benutzererfahrung hat er dieses Projekt nachhaltig geprägt.',
+        'The application is a companion tool for Marbles On Stream, designed to enhance user engagement and streamline data management. It tracks and processes race data in real-time, handles event management, and posts automated race results to Twitch chat. Key features include Battle Royale crown win tracking, checkpoint processing, event status toggling, and seamless integration with the Twitch API for authenticating users and dynamically updating relevant stats and events. The application provides a user-friendly interface built with Tkinter, ensuring that race results, event statuses, and other critical information are easily accessible to both streamers and their viewers.': 'Die Anwendung ist ein Begleittool für Marbles On Stream, das die Nutzerinteraktion verbessert und das Datenmanagement vereinfacht. Sie verfolgt und verarbeitet Renndaten in Echtzeit, verwaltet Events und veröffentlicht automatische Rennergebnisse im Twitch-Chat. Zu den Kernfunktionen gehören die Verfolgung von Battle-Royale-Kronensiegen, Checkpoint-Verarbeitung, das Umschalten von Event-Status sowie die nahtlose Integration der Twitch-API zur Authentifizierung und dynamischen Aktualisierung relevanter Statistiken und Events. Die Anwendung bietet eine benutzerfreundliche Tkinter-Oberfläche, sodass Rennergebnisse, Event-Status und andere wichtige Informationen für Streamer und Zuschauer leicht zugänglich sind.',
     },
 }
 
@@ -3004,7 +3012,7 @@ def verify_token(token):
 # Function to handle menu actions
 def show_about_window():
     about_window = tk.Toplevel()
-    about_window.title("About")
+    about_window.title(tr("About"))
     about_window.resizable(False, False)
 
     # Set the window icon (optional)
@@ -3050,36 +3058,27 @@ def show_about_window():
         logo_label.pack(pady=(0, 10))
 
     # Application Name and Version
-    app_name_label = ttk.Label(content_frame, text="Mystats Application", font=("Arial", 14, "bold"))
+    app_name_label = ttk.Label(content_frame, text=tr("Mystats Application"), font=("Arial", 14, "bold"))
     app_name_label.pack()
 
-    version_label = ttk.Label(content_frame, text="Version " + str(version), font=("Arial", 9))
+    version_label = ttk.Label(content_frame, text=f"{tr('Version')} {version}", font=("Arial", 9))
     version_label.pack(pady=(0, 10))
 
     # Short Description
-    description_text = (
-        "The application is a companion tool for Marbles On Stream, designed to enhance user "
-        "engagement and streamline data management. It tracks and processes race data in real-time, "
-        "handles event management, and posts automated race results to Twitch chat. Key features "
-        "include Battle Royale crown win tracking, checkpoint processing, event status toggling, "
-        "and seamless integration with the Twitch API for authenticating users and dynamically updating "
-        "relevant stats and events. The application provides a user-friendly interface built with Tkinter, "
-        "ensuring that race results, event statuses, and other critical information are easily accessible "
-        "to both streamers and their viewers."
-    )
+    description_text = tr("The application is a companion tool for Marbles On Stream, designed to enhance user engagement and streamline data management. It tracks and processes race data in real-time, handles event management, and posts automated race results to Twitch chat. Key features include Battle Royale crown win tracking, checkpoint processing, event status toggling, and seamless integration with the Twitch API for authenticating users and dynamically updating relevant stats and events. The application provides a user-friendly interface built with Tkinter, ensuring that race results, event statuses, and other critical information are easily accessible to both streamers and their viewers.")
 
     description_label = ttk.Label(content_frame, text=description_text, font=("Arial", 8),
                                   wraplength=380, justify="center")
     description_label.pack(pady=(0, 10))
 
     # Author Names
-    authors_label = ttk.Label(content_frame, text="Developed by:\nCamWOW", font=("Arial", 10), justify="center")
+    authors_label = ttk.Label(content_frame, text=tr("Developed by\nCamWOW"), font=("Arial", 10), justify="center")
     authors_label.pack(pady=(0, 10))
 
     # Contact Information
     contact_label = ttk.Label(
         content_frame,
-        text="Contact Information:\nDiscord: https://discord.gg/camwow\nWebsite: https://www.camwow.tv",
+        text=tr("Contact Information\nDiscord: https://discord.gg/camwow\nWebsite: https://www.camwow.tv"),
         font=("Arial", 9),
         justify="center"
     )
@@ -3088,11 +3087,7 @@ def show_about_window():
     # Acknowledgments or Credits
     credits_label = ttk.Label(
         content_frame,
-        text="Acknowledgments:\nA heartfelt thank you to Vibblez for his incredible contributions, ideas, "
-             "and unwavering support. His creative vision and technical expertise have been instrumental "
-             "not only in shaping the MyStats application, but more specifically in elevating the website "
-             "to new heights. From conceptualizing unique features to refining the user experience, his "
-             "efforts have left an indelible mark on this project.",
+        text=tr("Acknowledgments\nA heartfelt thank you to Vibblez for his incredible contributions, ideas, and unwavering support. His creative vision and technical expertise have been instrumental not only in shaping the MyStats application, but more specifically in elevating the website to new heights. From conceptualizing unique features to refining the user experience, his efforts have left an indelible mark on this project."),
         font=("Arial", 8),
         justify="center",
         wraplength=380
@@ -3101,7 +3096,7 @@ def show_about_window():
     credits_label.pack(pady=(0, 10))
 
     # Close Button
-    close_button = ttk.Button(content_frame, text="Close", command=about_window.destroy)
+    close_button = ttk.Button(content_frame, text=tr("Close"), command=about_window.destroy)
     close_button.pack(pady=(10, 0))
 
     # Disable resizing
@@ -4951,7 +4946,7 @@ menu_bar.add_cascade(label="Edit", menu=edit_menu)
 # Create the Help menu
 help_menu = Menu(menu_bar, tearoff=0)
 help_menu.add_command(label="View Commands", command=lambda: show_help(bot, root))
-help_menu.add_command(label="About", command=show_about_window)
+help_menu.add_command(label=tr("About"), command=show_about_window)
 menu_bar.add_cascade(label="Help", menu=help_menu)
 
 # Attach the menu bar to the root window
@@ -6376,12 +6371,15 @@ class Bot(commands.Bot):
         await self.close()
         print("Bot shutdown complete.")
 
+    async def send_command_response(self, ctx, message):
+        await send_chat_message(ctx.channel, message, category="mystats")
+
 
     @commands.command(name='info')
     async def info(self, ctx):
         if ctx.author.name.lower() == 'camwow' or ctx.author.name.lower() == config.get_setting(
                 'CHANNEL').lower() or ctx.author.name.lower() == 'vibblez':
-            await ctx.channel.send("Version " + str(version) + " | Season: " + str(config.get_setting('season')) +
+            await self.send_command_response(ctx, "Version " + str(version) + " | Season: " + str(config.get_setting('season')) +
                                    ' | Total Races: ' + str(format(int(config.get_setting('totalcountseason')), ',')) +
                                    ' | Total Points: ' + str(
                 format(int(config.get_setting('totalpointsseason')), ',')) +
@@ -6398,7 +6396,7 @@ class Bot(commands.Bot):
             leaderboard_data = fetch_pixelbypixel_leaderboard(statistic_name)
         except requests.RequestException as exc:
             print(f"Failed to fetch data: {exc}")
-            await ctx.channel.send("Failed to pull leaderboard, please try again")
+            await self.send_command_response(ctx, "Failed to pull leaderboard, please try again")
             return
 
         if sort_by_stat:
@@ -6416,7 +6414,7 @@ class Bot(commands.Bot):
 
         top_10_records = leaderboard_data[:10]
         if not top_10_records:
-            await ctx.channel.send("No leaderboard data available right now.")
+            await self.send_command_response(ctx, "No leaderboard data available right now.")
             return
 
         leaderboard_message = ""
@@ -6430,7 +6428,7 @@ class Bot(commands.Bot):
                 stat_value = "0"
             leaderboard_message += f"{emote} {rank}. {display_name} - {stat_value}\n"
 
-        await ctx.channel.send(
+        await self.send_command_response(ctx, 
             leaderboard_message + " | View the full leaderboard at: https://pixelbypixel.studio/hub"
         )
 
@@ -6467,10 +6465,10 @@ class Bot(commands.Bot):
             else:
                 message += "No daily races found."
 
-                await ctx.channel.send(message.strip())
+                await self.send_command_response(ctx, message.strip())
         else:
                 print(f"Failed to fetch data: {response.status_code}")
-                await ctx.channel.send("Failed to pull energy data, please try again.")
+                await self.send_command_response(ctx, "Failed to pull energy data, please try again.")
 
     def organize_daily_races(self, daily_races, tiers):
         # Define time thresholds as aware datetime objects in UTC
@@ -6515,13 +6513,13 @@ class Bot(commands.Bot):
 
     @commands.command(name='meta')
     async def meta(self, ctx):
-        await ctx.channel.send(
+        await self.send_command_response(ctx, 
             "Interested in learning more about the Streamer Meta?  "
             "📖: https://docs.google.com/document/d/1k93YU73QbGZrmfHqm1cto8PzzF2eADPtpGLILfGawVM/edit")
 
     @commands.command(name='energy')
     async def energy(self, ctx):
-        await ctx.channel.send(
+        await self.send_command_response(ctx, 
             "Energy is the system by which viewers exchange their energy with streamers, for points. "
             "You start the day at 12:00pm EST, with 7 energy. This is the daily energy reset time. "
             "Every 3 races with the same streamer, your energy will be returned to you. If you run out of energy, "
@@ -6530,19 +6528,19 @@ class Bot(commands.Bot):
 
     @commands.command(name='mosapp')
     async def mosapp(self, ctx):
-        await ctx.channel.send(
+        await self.send_command_response(ctx, 
             "Download the MOS App on Mobile.  Google Play: "
             "https://play.google.com/store/apps/details?id=com.pixelbypixel.mosmobile&hl=en-US.   Apple App Store: "
             "https://apps.apple.com/us/app/marbles-on-stream-mobile/id1443250176")
 
     @commands.command(name='mosshop')
     async def mosshop(self, ctx):
-        await ctx.channel.send(
+        await self.send_command_response(ctx, 
             "Purchase Skins or Coins for yourself, or gift them to a friend!  https://pixelbypixel.studio/shop")
 
     @commands.command(name='wiki')
     async def wiki(self, ctx):
-        await ctx.channel.send("Marbles on Stream Wiki - https://wiki.pixelbypixel.studio/")
+        await self.send_command_response(ctx, "Marbles on Stream Wiki - https://wiki.pixelbypixel.studio/")
 
     @commands.command(name='commands')
     async def list_commands(self, ctx):
@@ -6567,7 +6565,7 @@ class Bot(commands.Bot):
             user_b_key = resolve_user_in_stats(user_stats, compare_username)
 
             if user_a_key is None or user_b_key is None:
-                await ctx.channel.send("Could not find one or both users in season stats.")
+                await self.send_command_response(ctx, "Could not find one or both users in season stats.")
                 return
 
             stats_a = user_stats[user_a_key]
@@ -6581,7 +6579,7 @@ class Bot(commands.Bot):
 
             rivalry_status = "✅ Rivalry active" if are_rivals else "❌ Not a qualifying rivalry"
 
-            await ctx.channel.send(
+            await self.send_command_response(ctx, 
                 f"Rivals Check • {stats_a['display_name']} vs {stats_b['display_name']} | "
                 f"Gap: ±{point_gap:,} pts | "
                 f"{stats_a['display_name']}: {stats_a.get('points', 0):,} pts ({stats_a.get('races', 0):,} races) | "
@@ -6593,18 +6591,18 @@ class Bot(commands.Bot):
         if username:
             rival_data = get_user_rivals(username, limit=5)
             if rival_data is None:
-                await ctx.channel.send(f"{username}: no season rival data found.")
+                await self.send_command_response(ctx, f"{username}: no season rival data found.")
                 return
 
             if rival_data['races'] < rival_data['min_races_required']:
-                await ctx.channel.send(
+                await self.send_command_response(ctx, 
                     f"{rival_data['display_name']}: {rival_data['races']:,} races so far. "
                     f"Need {rival_data['min_races_required']:,}+ races for rivals tracking."
                 )
                 return
 
             if not rival_data['rivals']:
-                await ctx.channel.send(
+                await self.send_command_response(ctx, 
                     f"{rival_data['display_name']}: no close rivals found within configured point gap."
                 )
                 return
@@ -6613,26 +6611,26 @@ class Bot(commands.Bot):
                 f"#{idx} {row['display_name']} (±{row['point_gap']:,}, {row['points']:,} pts)"
                 for idx, row in enumerate(rival_data['rivals'], start=1)
             ]
-            await ctx.channel.send(
+            await self.send_command_response(ctx, 
                 f"Rivals for {rival_data['display_name']} ({rival_data['points']:,} pts): " + " | ".join(entries)
             )
             return
 
         rivalries = get_global_rivalries(limit=5)
         if not rivalries:
-            await ctx.channel.send("No rivalries found yet with current rival settings.")
+            await self.send_command_response(ctx, "No rivalries found yet with current rival settings.")
             return
 
         entries = [
             f"#{idx} {row['display_a']} vs {row['display_b']} (±{row['point_gap']:,})"
             for idx, row in enumerate(rivalries, start=1)
         ]
-        await ctx.channel.send("Rivalries Leaderboard: " + " | ".join(entries))
+        await self.send_command_response(ctx, "Rivalries Leaderboard: " + " | ".join(entries))
 
     @commands.command(name='h2h')
     async def head_to_head_command(self, ctx, user_a: str = None, user_b: str = None):
         if not user_a or not user_b:
-            await ctx.channel.send("Usage: !h2h <user1> <user2>")
+            await self.send_command_response(ctx, "Usage: !h2h <user1> <user2>")
             return
 
         user_stats = get_user_season_stats()
@@ -6640,7 +6638,7 @@ class Bot(commands.Bot):
         user_b_key = resolve_user_in_stats(user_stats, user_b)
 
         if user_a_key is None or user_b_key is None:
-            await ctx.channel.send("Could not find one or both users in season stats.")
+            await self.send_command_response(ctx, "Could not find one or both users in season stats.")
             return
 
         stats_a = user_stats[user_a_key]
@@ -6649,7 +6647,7 @@ class Bot(commands.Bot):
         leader_name = stats_a['display_name'] if stats_a['points'] >= stats_b['points'] else stats_b['display_name']
         point_gap = abs(stats_a['points'] - stats_b['points'])
 
-        await ctx.channel.send(
+        await self.send_command_response(ctx, 
             f"H2H {stats_a['display_name']} vs {stats_b['display_name']} | "
             f"Points: {stats_a['points']:,}-{stats_b['points']:,} | "
             f"Races: {stats_a['races']:,}-{stats_b['races']:,} | "
@@ -6668,7 +6666,7 @@ class Bot(commands.Bot):
         settings = get_mycycle_settings()
 
         if not target_user or target_user not in stats:
-            await ctx.channel.send(
+            await self.send_command_response(ctx, 
                 f"{target_name}: no MyCycle race data yet in session '{session.get('name', 'Unknown')}'."
             )
             return
@@ -6689,7 +6687,7 @@ class Bot(commands.Bot):
         if missing:
             message += f" | Missing: {','.join(missing)}"
 
-        await ctx.channel.send(message)
+        await self.send_command_response(ctx, message)
 
     @commands.command(name='cyclestats')
     async def cyclestats_command(self, ctx, session_name: str = None):
@@ -6698,13 +6696,13 @@ class Bot(commands.Bot):
 
         stats = get_mycycle_cycle_stats(session_name)
         if not stats:
-            await ctx.channel.send("No MyCycle sessions found. Try !cyclestats all")
+            await self.send_command_response(ctx, "No MyCycle sessions found. Try !cyclestats all")
             return
 
         fastest = stats.get('fastest')
         slowest = stats.get('slowest')
         if not fastest and not slowest:
-            await ctx.channel.send(
+            await self.send_command_response(ctx, 
                 f"🔁 CycleStats [{stats['label']}] | No completed cycles yet."
             )
             return
@@ -6723,7 +6721,7 @@ class Bot(commands.Bot):
         rotating_metric_key = get_next_cyclestats_metric_key()
         rotating_metric_text = format_rotating_cyclestats_metric(rotating_metric_key, stats)
 
-        await ctx.channel.send(
+        await self.send_command_response(ctx, 
             f"🔁 CycleStats [{stats['label']}] | Fastest: {fastest_text} | "
             f"Slowest: {slowest_text} | {rotating_metric_text} | "
             f"Total cycles: {stats['cycles_total']}"
@@ -6738,7 +6736,7 @@ class Bot(commands.Bot):
         progress = get_user_quest_progress(lookup_name)
 
         if progress is None:
-            await ctx.channel.send(f"{lookup_name}: No quest progress found yet.")
+            await self.send_command_response(ctx, f"{lookup_name}: No quest progress found yet.")
             return
 
         headline = (
@@ -6746,7 +6744,7 @@ class Bot(commands.Bot):
             f"{progress['completed']}/{progress['active_quests'] if progress['active_quests'] > 0 else 0} quests complete"
         )
         details = " | ".join(progress['progress_lines'])
-        await ctx.channel.send(f"{headline} | {details}")
+        await self.send_command_response(ctx, f"{headline} | {details}")
 
 
     @commands.command(name='top10ppr')
@@ -6783,7 +6781,7 @@ class Bot(commands.Bot):
 
             except FileNotFoundError:
                 print("File not found.")
-                await ctx.channel.send("No season races recorded yet")
+                await self.send_command_response(ctx, "No season races recorded yet")
                 return
             except Exception as e:
                 print(e)
@@ -6827,7 +6825,7 @@ class Bot(commands.Bot):
 
         # Send each chunk as a separate message.
         for chunk in chunks:
-            await ctx.channel.send(chunk)
+            await self.send_command_response(ctx, chunk)
 
 
     @commands.command(name='mystats')
@@ -6904,7 +6902,7 @@ class Bot(commands.Bot):
 
             except FileNotFoundError:
                 print("File not found.")
-                await ctx.channel.send("No season races recorded yet")
+                await self.send_command_response(ctx, "No season races recorded yet")
                 return
             except Exception as e:
                 print(e)
@@ -7293,10 +7291,10 @@ class Bot(commands.Bot):
                     message += "{} {} {} points{}".format("(" + str(place) + ")", racer, format(points, ','),
                                                         ", " if i < len(top_racers) - 1 else ".")
 
-            await ctx.channel.send(message)
+            await self.send_command_response(ctx, message)
         except FileNotFoundError:
             print("File not found.")
-            await ctx.channel.send(self.last_command_author + ": No races have been recorded today.")
+            await self.send_command_response(ctx, self.last_command_author + ": No races have been recorded today.")
         except Exception as e:
             pass
             print(e)
@@ -7326,10 +7324,10 @@ class Bot(commands.Bot):
                     message += "{} {} {} points{}".format("(" + str(place) + ")", racer, format(points, ','),
                                                           ", " if i < len(top_racers) - 1 else ".")
 
-            await ctx.channel.send(message)
+            await self.send_command_response(ctx, message)
         except FileNotFoundError:
             print("File not found.")
-            await ctx.channel.send(self.last_command_author + ": No races have been recorded today.")
+            await self.send_command_response(ctx, self.last_command_author + ": No races have been recorded today.")
         except Exception as e:
             pass
             print(e)
@@ -7362,7 +7360,7 @@ class Bot(commands.Bot):
             message += "{} {} {} races{}".format("(" + str(place) + ")", racer, format(races, ','),
                                                  ", " if i < len(top_racers) - 1 else ".")
 
-        await ctx.channel.send(message)
+        await self.send_command_response(ctx, message)
 
     @commands.command(name='top10wins')
     async def top10wins_command(self, ctx):
@@ -7392,7 +7390,7 @@ class Bot(commands.Bot):
             message += "{} {} {} wins{}".format("(" + str(place) + ")", racer, format(wins, ','),
                                                 ", " if i < len(top_racers) - 1 else ".")
 
-        await ctx.channel.send(message)
+        await self.send_command_response(ctx, message)
 
     @commands.command(name='top10season')
     async def top10season_command(self, ctx):
@@ -7422,7 +7420,7 @@ class Bot(commands.Bot):
             message += "{} {} {} points{}".format("(" + str(place) + ")", racer, format(points, ','),
                                                   ", " if i < len(top_racers) - 1 else ".")
 
-        await bot.channel.send(message)
+        await self.send_command_response(ctx, message)
 
     @commands.command(name='top10wr')
     async def top10worldrecords_command(self, ctx):
@@ -7458,14 +7456,14 @@ class Bot(commands.Bot):
 
             except FileNotFoundError:
                 print("File not found.")
-                await ctx.channel.send("No season races recorded yet")
+                await self.send_command_response(ctx, "No season races recorded yet")
                 return
             except Exception as e:
                 print(e)
                 return
 
         if not world_record_stats:
-            await ctx.channel.send("No world records found.")
+            await self.send_command_response(ctx, "No world records found.")
             return
 
         # Sort by world record count first, and if tied, by total points (both descending)
@@ -7483,7 +7481,7 @@ class Bot(commands.Bot):
         # Prepend the header to the message.
         final_msg = f"Top 10 World Record Wins: {output_msg}"
 
-        await ctx.channel.send(final_msg)
+        await self.send_command_response(ctx, final_msg)
 
 
 
@@ -7514,7 +7512,7 @@ class Bot(commands.Bot):
             separator = ", " if i < len(top_racers) - 1 else "."
             message += f"({i+1}) {racer} {format(points, ',')} points{separator}"
 
-        await ctx.channel.send(message)
+        await self.send_command_response(ctx, message)
 
     async def event_command_error(self, ctx, error):
         if isinstance(error, CommandNotFound):
