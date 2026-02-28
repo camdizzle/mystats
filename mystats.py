@@ -8184,7 +8184,7 @@ async def tilted(bot):
                 else:
                     print("No player data to send for current level.")
 
-                total_active = len(active_users)
+                total_active = len(active_players)
                 survivor_count = len(survivors)
                 death_rate = round(((deaths_this_level / total_active) * 100), 1) if total_active else 0
                 survival_rate = round(((survivor_count / total_active) * 100), 1) if total_active else 0
@@ -8293,6 +8293,8 @@ async def tilted(bot):
             last_tilt_processed_at = time.monotonic()
         except Exception as e:
             print(f"An error occurred while processing the tilt file: {e}")
+            last_modified_tilt = current_modified_tilt
+            last_tilt_processed_at = time.monotonic()
 
         await asyncio.sleep(7)
 
