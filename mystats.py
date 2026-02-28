@@ -2344,7 +2344,7 @@ def _load_overlay_server_port(default_port=5000):
 
 
 def run_flask():
-    app.run(port=_load_overlay_server_port(), debug=False, use_reloader=False)
+    app.run(host='0.0.0.0', port=_load_overlay_server_port(), debug=False, use_reloader=False)
 
 
 def _find_latest_overlay_results_file(data_dir):
@@ -6692,6 +6692,26 @@ class Bot(commands.Bot):
     @commands.command(name='wiki')
     async def wiki(self, ctx):
         await self.send_command_response(ctx, "Marbles on Stream Wiki - https://wiki.pixelbypixel.studio/")
+
+    @commands.command(name='highfive')
+    async def highfive(self, ctx):
+        if ctx.author.name.lower() != 'camwow':
+            return
+
+        parts = ctx.message.content.strip().split()
+        if len(parts) != 2:
+            return
+
+        command_name, mentioned_name = parts
+        if command_name.lower() != '!highfive':
+            return
+
+        bot_name = (self.nick or '').strip().lower().lstrip('@')
+        target_name = mentioned_name.strip().lower().lstrip('@')
+        if not bot_name or target_name != bot_name:
+            return
+
+        await self.send_command_response(ctx, '!highfive @camwow')
 
     @commands.command(name='commands')
     async def list_commands(self, ctx):
