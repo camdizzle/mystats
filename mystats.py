@@ -114,7 +114,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("mystats")
 
-SUPPORTED_UI_LANGUAGES = {'en', 'es', 'fr', 'de', 'pt'}
+SUPPORTED_UI_LANGUAGES = {'en', 'es', 'fr', 'de', 'pt', 'au'}
 
 LANGUAGE_DISPLAY_NAMES = {
     'en': 'English',
@@ -122,6 +122,7 @@ LANGUAGE_DISPLAY_NAMES = {
     'fr': 'Français',
     'de': 'Deutsch',
     'pt': 'Português',
+    'au': 'Aussie',
 }
 
 UI_TEXT = {
@@ -179,6 +180,58 @@ CHAT_TEXT = {
     },
 }
 
+AUSSIE_SLANG_REPLACEMENTS = {
+    'hello': "g'day",
+    'hi': "g'day",
+    'yes': 'too right',
+    'no': 'nah',
+    'friend': 'mate',
+    'friends': 'mates',
+    'everyone': 'all the mates',
+    'great': 'bonza',
+    'amazing': 'bonza',
+    'very': 'bloody',
+    'really': 'bloody',
+    'thank you': 'cheers',
+    'thanks': 'cheers',
+    'please': 'if ya can',
+    'goodbye': 'hooroo',
+    'good': 'bonza',
+    'small': 'tiny as',
+    'afternoon': 'arvo',
+    'breakfast': 'brekkie',
+    'barbecue': 'barbie',
+    'sandals': 'thongs',
+    'truck': 'ute',
+    'service station': 'servo',
+    'gas station': 'servo',
+    'convenience store': 'servo',
+    'difficult': 'a bit crook',
+    'problem': 'sticky wicket',
+    'my': 'me',
+    'is not': "ain't",
+    'are not': "ain't",
+    'do not': "don't",
+    'cannot': "can't",
+}
+
+
+def _to_aussie_slang(text):
+    slangified = str(text)
+
+    for source, target in sorted(AUSSIE_SLANG_REPLACEMENTS.items(), key=lambda item: len(item[0]), reverse=True):
+        slangified = re.sub(rf"\b{re.escape(source)}\b", target, slangified, flags=re.IGNORECASE)
+
+    slangified = re.sub(r'\s+', ' ', slangified).strip()
+    if not slangified:
+        return 'mate'
+
+    if not re.search(r'\bmate\b[.!?]*$', slangified, flags=re.IGNORECASE):
+        slangified = re.sub(r'[.!?]+$', '', slangified).strip()
+        slangified = f"{slangified}, mate"
+
+    return slangified
+
 
 def get_ui_language():
     config_manager = globals().get('config')
@@ -191,6 +244,8 @@ def get_ui_language():
 
 def tr(text):
     language = get_ui_language()
+    if language == 'au':
+        return _to_aussie_slang(text)
     return UI_TEXT.get(language, {}).get(text, text)
 
 
@@ -198,6 +253,8 @@ def translate_chat_message(message):
     language = get_ui_language()
     if language == 'en':
         return message
+    if language == 'au':
+        return _to_aussie_slang(message)
 
     translated = str(message)
     replacements = CHAT_TEXT.get(language, {})
