@@ -6693,6 +6693,26 @@ class Bot(commands.Bot):
     async def wiki(self, ctx):
         await self.send_command_response(ctx, "Marbles on Stream Wiki - https://wiki.pixelbypixel.studio/")
 
+    @commands.command(name='highfive')
+    async def highfive(self, ctx):
+        if ctx.author.name.lower() != 'camwow':
+            return
+
+        parts = ctx.message.content.strip().split()
+        if len(parts) != 2:
+            return
+
+        command_name, mentioned_name = parts
+        if command_name.lower() != '!highfive':
+            return
+
+        bot_name = (self.nick or '').strip().lower().lstrip('@')
+        target_name = mentioned_name.strip().lower().lstrip('@')
+        if not bot_name or target_name != bot_name:
+            return
+
+        await self.send_command_response(ctx, '!highfive @camwow')
+
     @commands.command(name='commands')
     async def list_commands(self, ctx):
         excluded_commands = ['commands', 'mplreset']
