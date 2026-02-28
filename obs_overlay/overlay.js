@@ -630,7 +630,7 @@ function applyServerSettings(raw = {}) {
     refreshSeconds: clampNumber(raw.refresh_seconds, 1, 60, defaultSettings.refreshSeconds),
     theme: themes[raw.theme] ? raw.theme : defaultSettings.theme,
     cardOpacity: clampNumber(raw.card_opacity, 65, 100, defaultSettings.cardOpacity),
-    textScale: clampNumber(raw.text_scale, 90, 125, defaultSettings.textScale),
+    textScale: clampNumber(raw.text_scale, 75, 175, defaultSettings.textScale),
     showMedals: String(raw.show_medals).toLowerCase() !== 'false',
     compactRows: String(raw.compact_rows).toLowerCase() === 'true',
     horizontalLayout: String(raw.horizontal_layout).toLowerCase() === 'true',

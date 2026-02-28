@@ -3854,7 +3854,7 @@ def open_settings_window():
     overlay_opacity_entry.grid(row=5, column=1, sticky="w", pady=(0, 4), padx=(8, 0))
     overlay_opacity_entry.insert(0, config.get_setting("overlay_card_opacity") or "84")
 
-    ttk.Label(overlay_tab, text="Text Scale (90-125)").grid(row=6, column=0, sticky="w", pady=(0, 4))
+    ttk.Label(overlay_tab, text="Text Scale (75-175)").grid(row=6, column=0, sticky="w", pady=(0, 4))
     overlay_text_scale_entry = ttk.Entry(overlay_tab, width=12, justify='center')
     overlay_text_scale_entry.grid(row=6, column=1, sticky="w", pady=(0, 4), padx=(8, 0))
     overlay_text_scale_entry.insert(0, config.get_setting("overlay_text_scale") or "100")

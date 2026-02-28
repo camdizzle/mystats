@@ -246,7 +246,7 @@ function applyTheme(settings = {}) {
   const merged = { ...defaultSettings, ...(settings || {}) };
   const theme = themes[(merged.theme || 'midnight').toLowerCase()] || themes.midnight;
   const opacity = Math.max(65, Math.min(100, Number(merged.card_opacity || 84))) / 100;
-  const textScale = Math.max(90, Math.min(125, Number(merged.text_scale || 100))) / 100;
+  const textScale = Math.max(75, Math.min(175, Number(merged.text_scale || 100))) / 100;
 
   const root = document.documentElement;
   root.style.setProperty('--text', theme.text);
