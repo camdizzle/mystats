@@ -6505,7 +6505,7 @@ class Bot(commands.Bot):
     async def info(self, ctx):
         if ctx.author.name.lower() == 'camwow' or ctx.author.name.lower() == config.get_setting(
                 'CHANNEL').lower() or ctx.author.name.lower() == 'vibblez':
-            await self.send_command_response(ctx, "ℹ️ Version " + str(version) + " | Season: " + str(config.get_setting('season')) +
+            await self.send_command_response(ctx, "ℹ️ Version " + str(version) + ", Season: " + str(config.get_setting('season')) +
                                    ' | Total Races: ' + str(format(int(config.get_setting('totalcountseason')), ',')) +
                                    ' | Total Points: ' + str(
                 format(int(config.get_setting('totalpointsseason')), ',')) +
@@ -6554,7 +6554,7 @@ class Bot(commands.Bot):
 
         await self.send_command_response(
             ctx,
-            "Leaderboard | " + " | ".join(entries) + " | View the full leaderboard at: https://pixelbypixel.studio/hub"
+            "Leaderboard | " + " | ".join(entries) + " | View the full leaderboard, https://pixelbypixel.studio/hub"
         )
 
     @commands.command(name='mostop10')
@@ -6662,7 +6662,7 @@ class Bot(commands.Bot):
     async def list_commands(self, ctx):
         excluded_commands = ['commands', 'mplreset']
         commands_list = [f'!{cmd.name}' for cmd in self.commands.values() if cmd.name not in excluded_commands]
-        commands_description = ' | '.join(commands_list)
+        commands_description = ', '.join(commands_list)
         await ctx.send(f'MyStats commands: {commands_description}')
 
     # Method to expose the command list outside the class
@@ -6698,8 +6698,8 @@ class Bot(commands.Bot):
             await self.send_command_response(ctx, 
                 f"Rivals Check • {stats_a['display_name']} vs {stats_b['display_name']} | "
                 f"Gap: ±{point_gap:,} pts | "
-                f"{stats_a['display_name']}: {stats_a.get('points', 0):,} pts ({stats_a.get('races', 0):,} races) | "
-                f"{stats_b['display_name']}: {stats_b.get('points', 0):,} pts ({stats_b.get('races', 0):,} races) | "
+                f"{stats_a['display_name']}: {stats_a.get('points', 0):,} pts, {stats_a.get('races', 0):,} races | "
+                f"{stats_b['display_name']}: {stats_b.get('points', 0):,} pts, {stats_b.get('races', 0):,} races | "
                 f"{rivalry_status}"
             )
             return
@@ -6728,7 +6728,7 @@ class Bot(commands.Bot):
                 for idx, row in enumerate(rival_data['rivals'], start=1)
             ]
             await self.send_command_response(ctx, 
-                f"Rivals for {rival_data['display_name']} ({rival_data['points']:,} pts): " + " | ".join(entries)
+                f"Rivals for {rival_data['display_name']}, {rival_data['points']:,} pts: " + " | ".join(entries)
             )
             return
 
@@ -6765,10 +6765,10 @@ class Bot(commands.Bot):
 
         await self.send_command_response(ctx, 
             f"⚔️ H2H {stats_a['display_name']} vs {stats_b['display_name']} | "
-            f"Points: {stats_a['points']:,}-{stats_b['points']:,} | "
-            f"Races: {stats_a['races']:,}-{stats_b['races']:,} | "
-            f"Race HS: {stats_a['race_hs']:,}-{stats_b['race_hs']:,} | "
-            f"BR HS: {stats_a['br_hs']:,}-{stats_b['br_hs']:,} | "
+            f"Points: {stats_a['points']:,}, {stats_b['points']:,} | "
+            f"Races: {stats_a['races']:,}, {stats_b['races']:,} | "
+            f"Race HS: {stats_a['race_hs']:,}, {stats_b['race_hs']:,} | "
+            f"BR HS: {stats_a['br_hs']:,}, {stats_b['br_hs']:,} | "
             f"Leader: {leader_name} by {point_gap:,}"
         )
 
@@ -6801,7 +6801,7 @@ class Bot(commands.Bot):
             f"Last cycle races: {record.get('last_cycle_races', 0)}"
         )
         if missing:
-            message += f" | Missing: {' | '.join(missing)}"
+            message += f" | Missing: {', '.join(missing)}"
 
         await self.send_command_response(ctx, message)
 
@@ -7059,9 +7059,9 @@ class Bot(commands.Bot):
 
         # Create the formatted output message.
         output_msg = (
-            f"📊 BRs - {brwins_formatted} {pluralize(counts['brwins'], 'win')} | {br_points_formatted} points | {br_count_formatted} {pluralize(counts['br_count'], 'royale')} | PPR: {br_avg_points_formatted} | "
-            f"Races - {racewins_formatted} {pluralize(counts['racewins'], 'win')} | {race_points_formatted} points | {race_count_formatted} {pluralize(counts['race_count'], 'race')} | PPR: {race_avg_points_formatted} | "
-            f"Season - {seasonwins_formatted} {pluralize(counts['seasonwins'], 'win')} | {seasonpts_formatted} points | {seasonraces_formatted} {pluralize(counts['seasonraces'], 'race')} | PPR: {season_avg_points_formatted} | "
+            f"📊 BRs - {brwins_formatted} {pluralize(counts['brwins'], 'win')}, {br_points_formatted} points, {br_count_formatted} {pluralize(counts['br_count'], 'royale')}, PPR: {br_avg_points_formatted} | "
+            f"Races - {racewins_formatted} {pluralize(counts['racewins'], 'win')}, {race_points_formatted} points, {race_count_formatted} {pluralize(counts['race_count'], 'race')}, PPR: {race_avg_points_formatted} | "
+            f"Season - {seasonwins_formatted} {pluralize(counts['seasonwins'], 'win')}, {seasonpts_formatted} points, {seasonraces_formatted} {pluralize(counts['seasonraces'], 'race')}, PPR: {season_avg_points_formatted} | "
             f"World Records: {counts['world_record_count']:,} {pluralize(counts['world_record_count'], 'record')}"
         )
 
@@ -7241,7 +7241,7 @@ class Bot(commands.Bot):
         )[:10]
 
         items = [
-            f"{format_ranked_label(idx)} {name} | {tops:,} {pluralize(tops, 'top')} | {season_points_by_player.get(name, 0):,} points"
+            f"{format_ranked_label(idx)} {name}, {tops:,} {pluralize(tops, 'top')}, {season_points_by_player.get(name, 0):,} points"
             for idx, (name, tops) in enumerate(ranked, start=1)
         ]
 
@@ -7280,7 +7280,7 @@ class Bot(commands.Bot):
 
         top_tilees = sorted(data.items(), key=lambda x: x[1], reverse=True)[:10]
         entries = [
-            f"{format_ranked_label(place)} {racer} | {points:,} points"
+            f"{format_ranked_label(place)} {racer}, {points:,} points"
             for place, (racer, points) in enumerate(top_tilees, start=1)
         ]
         message = "Top 10 Tiltees by Tilt Points | " + " | ".join(entries)
@@ -7364,7 +7364,7 @@ class Bot(commands.Bot):
 
         ranked = sorted(qualified, key=lambda item: (item[2], item[1], item[0].lower()))[:10]
         message_items = [
-            f"{format_ranked_label(idx)} {username} | {deaths} {pluralize(deaths, 'death')} | {100 - death_rate:.1f}% survive"
+            f"{format_ranked_label(idx)} {username}, {deaths} {pluralize(deaths, 'death')}, {100 - death_rate:.1f}% survive"
             for idx, (username, deaths, death_rate) in enumerate(ranked, start=1)
         ]
 
@@ -7398,7 +7398,7 @@ class Bot(commands.Bot):
                 top_racers = sorted(data.items(), key=lambda x: x[1], reverse=True)[:11]
 
                 entries = [
-                    f"{format_ranked_label(place)} {racer} | {points:,} points"
+                    f"{format_ranked_label(place)} {racer}, {points:,} points"
                     for place, (racer, points) in enumerate(top_racers, start=1)
                 ]
                 message = "Top 10 Today (Excluding WRs) | " + " | ".join(entries)
@@ -7431,7 +7431,7 @@ class Bot(commands.Bot):
                 top_racers = sorted(data.items(), key=lambda x: x[1], reverse=True)[:10]
 
                 entries = [
-                    f"{format_ranked_label(place)} {racer} | {points:,} points"
+                    f"{format_ranked_label(place)} {racer}, {points:,} points"
                     for place, (racer, points) in enumerate(top_racers, start=1)
                 ]
                 message = "Top 10 Today | " + " | ".join(entries)
@@ -7467,7 +7467,7 @@ class Bot(commands.Bot):
 
         top_racers = sorted(data.items(), key=lambda x: x[1], reverse=True)[:10]
         entries = [
-            f"{format_ranked_label(place)} {racer} | {races:,} {pluralize(races, 'race')}"
+            f"{format_ranked_label(place)} {racer}, {races:,} {pluralize(races, 'race')}"
             for place, (racer, races) in enumerate(top_racers, start=1)
         ]
         message = "Top 10 Racers by Total Races | " + " | ".join(entries)
@@ -7497,7 +7497,7 @@ class Bot(commands.Bot):
 
         top_racers = sorted(data.items(), key=lambda x: x[1], reverse=True)[:10]
         entries = [
-            f"{format_ranked_label(place)} {racer} | {wins:,} {pluralize(wins, 'win')}"
+            f"{format_ranked_label(place)} {racer}, {wins:,} {pluralize(wins, 'win')}"
             for place, (racer, wins) in enumerate(top_racers, start=1)
         ]
         message = "Top 10 Wins Season {} | ".format(config.get_setting('season')) + " | ".join(entries)
@@ -7527,7 +7527,7 @@ class Bot(commands.Bot):
 
         top_racers = sorted(data.items(), key=lambda x: x[1], reverse=True)[:10]
         entries = [
-            f"{format_ranked_label(place)} {racer} | {points:,} points"
+            f"{format_ranked_label(place)} {racer}, {points:,} points"
             for place, (racer, points) in enumerate(top_racers, start=1)
         ]
         message = "Top 10 Season {} | ".format(config.get_setting('season')) + " | ".join(entries)
@@ -7588,7 +7588,7 @@ class Bot(commands.Bot):
         # Build the output message with each entry formatted as "Racer: count (points)"
         # and joined by " | " with no trailing pipe.
         entries = [
-            f"{format_ranked_label(place)} {racer} | {stats['count']:,} {pluralize(stats['count'], 'win')} | {stats['points']:,} pts"
+            f"{format_ranked_label(place)} {racer}, {stats['count']:,} {pluralize(stats['count'], 'win')}, {stats['points']:,} pts"
             for place, (racer, stats) in enumerate(top_records, start=1)
         ]
         output_msg = " | ".join(entries)
@@ -7623,7 +7623,7 @@ class Bot(commands.Bot):
 
         top_racers = sorted(data.items(), key=lambda x: x[1], reverse=True)[:10]
         entries = [
-            f"{format_ranked_label(place)} {racer} | {points:,} points"
+            f"{format_ranked_label(place)} {racer}, {points:,} points"
             for place, (racer, points) in enumerate(top_racers, start=1)
         ]
         message = f"Top 10 Season {config.get_setting('season')} (Excluding WRs) | " + " | ".join(entries)
