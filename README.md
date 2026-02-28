@@ -31,6 +31,8 @@ MyStats ships with a built-in Flask web server that serves overlays directly to 
    - Main overlay: `http://127.0.0.1:<overlay_server_port>/overlay`
    - Tilt overlay: `http://127.0.0.1:<overlay_server_port>/overlay/tilt`
 5. If you change the server port, restart MyStats and update the OBS source URL.
+6. If you run a 2 PC setup, use `http://<your_local_ip>:<overlay_server_port>/overlay` in OBS on the streaming PC (example: `http://192.168.1.25:5000/overlay`).
+7. On the server PC (Windows), open **Windows Defender Firewall** → **Advanced Settings**, then add a new **Inbound Rule** → **Port** → **TCP** → `5000` (or your custom overlay port) → **Allow**.
 
 If an overlay page returns Not Found, open Settings once and confirm your install includes the `obs_overlay` folder.
 
@@ -88,3 +90,5 @@ Overlay settings are controlled from the desktop app (Settings → Overlay) and 
 - Text scale
 - Top-3 medal emote visibility
 - Compact row spacing
+
+2 PC setup note: Use `http://<your_local_ip>:<overlay_server_port>/overlay` in OBS instead of localhost (for example, `http://192.168.1.25:5000/overlay`).
