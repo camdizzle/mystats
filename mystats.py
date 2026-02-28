@@ -7885,6 +7885,8 @@ def process_season(directory, season):
 async def tilted(bot):
     last_modified_tilt = None
     run_id = str(config.get_setting('tilt_current_run_id') or '').strip() or None
+    last_tilt_processed_at = 0.0
+    tilt_process_cooldown_seconds = 10.0
     max_message_length = 480
     tilt_levels_count = 0
     last_tilt_narrative_alert_level_count = 0
@@ -7913,10 +7915,16 @@ async def tilted(bot):
             continue
 
         if current_modified_tilt == last_modified_tilt:
-            await asyncio.sleep(7)
+            await asyncio.sleep(10)
             continue
 
-        await asyncio.sleep(3)
+        now_monotonic = time.monotonic()
+        if (now_monotonic - last_tilt_processed_at) < tilt_process_cooldown_seconds:
+            last_modified_tilt = current_modified_tilt
+            await asyncio.sleep(1)
+            continue
+
+        await asyncio.sleep(1)
 
         try:
             level_rows = safe_read_csv_rows(tilt_level_file)
@@ -7933,6 +7941,13 @@ async def tilted(bot):
             level_points = level_state['level_xp']
             total_xp = level_state['total_xp']
             level_passed = level_state['level_passed']
+
+            if run_id is None and current_level != 1:
+                last_modified_tilt = current_modified_tilt
+                last_tilt_processed_at = time.monotonic()
+                await asyncio.sleep(1)
+                continue
+
             is_level_live = parse_boolean_token(level_state.get('live'), default=True)
             suppress_offline_tilt_chat = is_chat_response_enabled("chat_tilt_suppress_offline")
             should_suppress_tilt_chat = suppress_offline_tilt_chat and not is_level_live
@@ -8275,6 +8290,7 @@ async def tilted(bot):
                 current_tilt_points_leader = None
 
             last_modified_tilt = current_modified_tilt
+            last_tilt_processed_at = time.monotonic()
         except Exception as e:
             print(f"An error occurred while processing the tilt file: {e}")
 
