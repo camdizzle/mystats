@@ -80,6 +80,7 @@ except ImportError:
 version = '6.1.0'
 text_widget = None
 bot = None
+BOT_SHOULD_RUN = True
 GLOBAL_SOCKET = None
 DEBUG = False
 HAS_TTKBOOTSTRAP = ttkbootstrap_module is not None
@@ -3999,6 +4000,8 @@ def test_audio_playback():
 
 
 def on_close():
+    global BOT_SHOULD_RUN
+
     if not is_forced_exit:
         confirm_exit = messagebox.askyesno(
             "Exit MyStats",
@@ -4036,6 +4039,7 @@ def on_close():
     wait_window = show_wait_window()
 
     # Schedule bot shutdown in the bot's event loop (when available)
+    BOT_SHOULD_RUN = False
     if bot is not None and getattr(bot, "loop", None) is not None:
         asyncio.run_coroutine_threadsafe(bot.shutdown(), bot.loop)
 
@@ -6291,6 +6295,7 @@ class Bot(commands.Bot):
 
         self.tasks = []  # List to keep track of tasks
         self.stop_event = asyncio.Event()  # Event to signal tasks to stop
+        self.background_tasks_started = False
 
     def get_valid_token(self):
         # Load token from the token file if it exists, otherwise fallback to config token
@@ -6326,6 +6331,12 @@ class Bot(commands.Bot):
         print(f"Sending message to Twitch as: {self.nick}")
         print(f"Connected to channel: {self.channel_name}\n")
 
+        # Avoid duplicate background tasks if Twitch reconnects this bot instance.
+        self.tasks = [task for task in self.tasks if not task.done()]
+        if self.background_tasks_started:
+            return
+        self.background_tasks_started = True
+
         # Start main tasks and keep track of them
         self.tasks.append(self.loop.create_task(checkpoints(self)))
         self.tasks.append(self.loop.create_task(race(self)))
@@ -6342,6 +6353,9 @@ class Bot(commands.Bot):
                 config.get_setting('season')
             )))
             config.set_setting('data_sync', 'no', persistent=False)
+
+    async def event_disconnect(self):
+        print("Disconnected from Twitch chat. Waiting for reconnection...")
 
     async def event_message(self, message):
         if message.author is None:
@@ -9598,10 +9612,38 @@ if __name__ == "__main__":
     # Function to start the bot in a separate asyncio event loop
     def start_bot():
         global bot
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        bot = Bot()
-        bot.run()
+
+        reconnect_delay = 5
+
+        while BOT_SHOULD_RUN:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+            try:
+                bot = Bot()
+                bot.run()
+
+                # If bot.run exits without an exception, only restart if the app is still running.
+                if BOT_SHOULD_RUN:
+                    print(
+                        f"Twitch bot disconnected. Attempting reconnect in {reconnect_delay} seconds..."
+                    )
+                    time.sleep(reconnect_delay)
+                    reconnect_delay = min(reconnect_delay * 2, 60)
+                else:
+                    break
+            except Exception as e:
+                print(f"Bot connection failed: {e}")
+                if not BOT_SHOULD_RUN:
+                    break
+                print(f"Retrying Twitch connection in {reconnect_delay} seconds...")
+                time.sleep(reconnect_delay)
+                reconnect_delay = min(reconnect_delay * 2, 60)
+            finally:
+                try:
+                    loop.close()
+                except Exception:
+                    pass
 
 
     # Start the bot in a separate thread
