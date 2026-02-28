@@ -2344,7 +2344,7 @@ def _load_overlay_server_port(default_port=5000):
 
 
 def run_flask():
-    app.run(port=_load_overlay_server_port(), debug=False, use_reloader=False)
+    app.run(host='0.0.0.0', port=_load_overlay_server_port(), debug=False, use_reloader=False)
 
 
 def _find_latest_overlay_results_file(data_dir):
