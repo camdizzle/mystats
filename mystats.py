@@ -5030,6 +5030,23 @@ root.config(menu=menu_bar)
 
 
 # Classes and Functions
+TILT_RUNTIME_PERSISTENT_KEYS = {
+    "tilt_current_level", "tilt_current_elapsed", "tilt_current_top_tiltee",
+    "tilt_current_run_id", "tilt_run_started_at", "tilt_run_ledger",
+    "tilt_top_tiltee_ledger", "tilt_current_top_tiltee_count", "tilt_run_xp",
+    "tilt_run_points", "tilt_previous_run_xp", "tilt_level_completion_overlay",
+    "tilt_run_completion_overlay", "tilt_run_completion_event_id",
+    "tilt_last_run_summary", "tilt_best_run_xp_today", "tilt_highest_level_points_today",
+    "tilt_highest_level_reached_num", "tilt_season_best_level_num",
+    "tilt_personal_best_level_num", "tilt_total_xp_today", "tilt_total_deaths_today",
+    "tilt_lifetime_expertise"
+}
+
+
+def set_tilt_runtime_setting(key, value):
+    config.set_setting(key, value, persistent=(key in TILT_RUNTIME_PERSISTENT_KEYS))
+
+
 class ConfigManager:
     def __init__(self):
         self.settings_file = 'settings.txt'
@@ -5066,7 +5083,7 @@ class ConfigManager:
                                 'overlay_compact_rows', 'overlay_horizontal_layout', 'overlay_server_port', 'tilt_lifetime_base_xp',
                                 'tilt_season_best_level', 'tilt_personal_best_level', 'tilt_overlay_theme', 'tilt_scroll_step_px', 'tilt_scroll_interval_ms',
                                 'tilt_scroll_pause_ms', 'tiltsurvivors_min_levels', 'tiltdeath_min_levels',
-                                'update_later_clicks', 'update_later_version', 'minimize_to_tray', 'tray_hint_toast_shown', 'app_language'}
+                                'update_later_clicks', 'update_later_version', 'minimize_to_tray', 'tray_hint_toast_shown', 'app_language', *TILT_RUNTIME_PERSISTENT_KEYS}
         self.transient_keys = set([])
         self.defaults = {
             'chat_br_results': 'True',
@@ -5140,6 +5157,29 @@ class ConfigManager:
             'tilt_scroll_pause_ms': '900',
             'tiltsurvivors_min_levels': '20',
             'tiltdeath_min_levels': '20',
+            'tilt_current_level': '0',
+            'tilt_current_elapsed': '0:00',
+            'tilt_current_top_tiltee': 'None',
+            'tilt_current_run_id': '',
+            'tilt_run_started_at': '',
+            'tilt_run_ledger': '{}',
+            'tilt_top_tiltee_ledger': '{}',
+            'tilt_current_top_tiltee_count': '0',
+            'tilt_run_xp': '0',
+            'tilt_run_points': '0',
+            'tilt_previous_run_xp': '0',
+            'tilt_level_completion_overlay': '{}',
+            'tilt_run_completion_overlay': '{}',
+            'tilt_run_completion_event_id': '0',
+            'tilt_last_run_summary': '{}',
+            'tilt_best_run_xp_today': '0',
+            'tilt_highest_level_points_today': '0',
+            'tilt_highest_level_reached_num': '0',
+            'tilt_season_best_level_num': '0',
+            'tilt_personal_best_level_num': '0',
+            'tilt_total_xp_today': '0',
+            'tilt_total_deaths_today': '0',
+            'tilt_lifetime_expertise': '0',
             'update_later_clicks': '0',
             'update_later_version': ''
         }
@@ -7844,7 +7884,7 @@ def process_season(directory, season):
 
 async def tilted(bot):
     last_modified_tilt = None
-    run_id = None
+    run_id = str(config.get_setting('tilt_current_run_id') or '').strip() or None
     max_message_length = 480
     tilt_levels_count = 0
     last_tilt_narrative_alert_level_count = 0
@@ -7897,27 +7937,27 @@ async def tilted(bot):
             suppress_offline_tilt_chat = is_chat_response_enabled("chat_tilt_suppress_offline")
             should_suppress_tilt_chat = suppress_offline_tilt_chat and not is_level_live
 
-            config.set_setting('tilt_current_level', str(current_level), persistent=False)
-            config.set_setting('tilt_current_elapsed', str(elapsed_time), persistent=False)
-            config.set_setting('tilt_current_top_tiltee', str(top_tiltee), persistent=False)
+            set_tilt_runtime_setting('tilt_current_level', str(current_level))
+            set_tilt_runtime_setting('tilt_current_elapsed', str(elapsed_time))
+            set_tilt_runtime_setting('tilt_current_top_tiltee', str(top_tiltee))
 
             if current_level == 1 and run_id is None:
                 run_id = base64.urlsafe_b64encode(uuid.uuid4().bytes).rstrip(b'=').decode('utf-8')
-                config.set_setting('tilt_run_started_at', datetime.now().strftime('%Y-%m-%d %H:%M:%S'), persistent=False)
-                config.set_setting('tilt_run_ledger', '{}', persistent=False)
-                config.set_setting('tilt_top_tiltee_ledger', '{}', persistent=False)
-                config.set_setting('tilt_current_top_tiltee_count', '0', persistent=False)
-                config.set_setting('tilt_run_xp', '0', persistent=False)
-                config.set_setting('tilt_run_points', '0', persistent=False)
-                config.set_setting('tilt_previous_run_xp', config.get_setting('tilt_run_xp') or '0', persistent=False)
-                config.set_setting('tilt_level_completion_overlay', '{}', persistent=False)
-                config.set_setting('tilt_run_completion_overlay', '{}', persistent=False)
+                set_tilt_runtime_setting('tilt_run_started_at', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+                set_tilt_runtime_setting('tilt_run_ledger', '{}')
+                set_tilt_runtime_setting('tilt_top_tiltee_ledger', '{}')
+                set_tilt_runtime_setting('tilt_current_top_tiltee_count', '0')
+                set_tilt_runtime_setting('tilt_run_xp', '0')
+                set_tilt_runtime_setting('tilt_run_points', '0')
+                set_tilt_runtime_setting('tilt_previous_run_xp', config.get_setting('tilt_run_xp') or '0')
+                set_tilt_runtime_setting('tilt_level_completion_overlay', '{}')
+                set_tilt_runtime_setting('tilt_run_completion_overlay', '{}')
                 current_tilt_points_leader = None
 
             if run_id is None:
                 run_id = base64.urlsafe_b64encode(uuid.uuid4().bytes).rstrip(b'=').decode('utf-8')
 
-            config.set_setting('tilt_current_run_id', run_id, persistent=False)
+            set_tilt_runtime_setting('tilt_current_run_id', run_id)
 
             try:
                 run_ledger = json.loads(config.get_setting('tilt_run_ledger') or '{}')
@@ -7984,7 +8024,7 @@ async def tilted(bot):
 
             best_run_xp_today = max(get_int_setting('tilt_best_run_xp_today', 0), run_xp)
             if best_run_xp_today != get_int_setting('tilt_best_run_xp_today', 0):
-                config.set_setting('tilt_best_run_xp_today', str(best_run_xp_today), persistent=False)
+                set_tilt_runtime_setting('tilt_best_run_xp_today', str(best_run_xp_today))
 
             season_best_floor_level_num = get_tilt_best_floor_level_num('tilt_season_best_level')
             personal_best_floor_level_num = get_tilt_best_floor_level_num('tilt_personal_best_level')
@@ -8000,14 +8040,14 @@ async def tilted(bot):
                 season_best_level_num = max(get_int_setting('tilt_season_best_level_num', 0), season_best_floor_level_num)
                 personal_best_level_num = max(get_int_setting('tilt_personal_best_level_num', 0), personal_best_floor_level_num)
 
-            config.set_setting('tilt_run_xp', str(run_xp), persistent=False)
-            config.set_setting('tilt_run_points', str(run_points), persistent=False)
-            config.set_setting('tilt_total_xp_today', str(total_xp_today), persistent=False)
-            config.set_setting('tilt_total_deaths_today', str(total_deaths_today), persistent=False)
-            config.set_setting('tilt_highest_level_points_today', str(highest_level_points_today), persistent=False)
-            config.set_setting('tilt_highest_level_reached_num', str(highest_level_reached_num), persistent=False)
-            config.set_setting('tilt_season_best_level_num', str(season_best_level_num), persistent=False)
-            config.set_setting('tilt_personal_best_level_num', str(personal_best_level_num), persistent=False)
+            set_tilt_runtime_setting('tilt_run_xp', str(run_xp))
+            set_tilt_runtime_setting('tilt_run_points', str(run_points))
+            set_tilt_runtime_setting('tilt_total_xp_today', str(total_xp_today))
+            set_tilt_runtime_setting('tilt_total_deaths_today', str(total_deaths_today))
+            set_tilt_runtime_setting('tilt_highest_level_points_today', str(highest_level_points_today))
+            set_tilt_runtime_setting('tilt_highest_level_reached_num', str(highest_level_reached_num))
+            set_tilt_runtime_setting('tilt_season_best_level_num', str(season_best_level_num))
+            set_tilt_runtime_setting('tilt_personal_best_level_num', str(personal_best_level_num))
 
             season_best_setting_level = get_int_setting('tilt_season_best_level', 1)
             personal_best_setting_level = get_int_setting('tilt_personal_best_level', 1)
@@ -8019,7 +8059,7 @@ async def tilted(bot):
             if updated_personal_best_setting_level != personal_best_setting_level:
                 config.set_setting('tilt_personal_best_level', str(updated_personal_best_setting_level), persistent=True)
 
-            config.set_setting('tilt_run_ledger', json.dumps(run_ledger), persistent=False)
+            set_tilt_runtime_setting('tilt_run_ledger', json.dumps(run_ledger))
 
             lifetime_expertise = get_int_setting('tilt_lifetime_expertise', 0)
             lifetime_base_xp = get_int_setting('tilt_lifetime_base_xp', 0)
@@ -8042,7 +8082,7 @@ async def tilted(bot):
             if adjusted_total_xp > lifetime_expertise:
                 lifetime_expertise = adjusted_total_xp
             lifetime_expertise += earned_xp
-            config.set_setting('tilt_lifetime_expertise', str(lifetime_expertise), persistent=False)
+            set_tilt_runtime_setting('tilt_lifetime_expertise', str(lifetime_expertise))
 
             if level_passed:
                 tilt_levels_count += 1
@@ -8051,8 +8091,8 @@ async def tilted(bot):
                 if top_tiltee and top_tiltee != 'None':
                     top_tiltee_run_count = int(tilt_top_tiltee_ledger.get(top_tiltee, 0)) + 1
                     tilt_top_tiltee_ledger[top_tiltee] = top_tiltee_run_count
-                config.set_setting('tilt_top_tiltee_ledger', json.dumps(tilt_top_tiltee_ledger), persistent=False)
-                config.set_setting('tilt_current_top_tiltee_count', str(top_tiltee_run_count), persistent=False)
+                set_tilt_runtime_setting('tilt_top_tiltee_ledger', json.dumps(tilt_top_tiltee_ledger))
+                set_tilt_runtime_setting('tilt_current_top_tiltee_count', str(top_tiltee_run_count))
 
                 tilts_results_file = config.get_setting('tilts_results_file')
                 if not tilts_results_file:
@@ -8146,7 +8186,7 @@ async def tilted(bot):
                     'death_rate': death_rate,
                     'survival_rate': survival_rate,
                 }
-                config.set_setting('tilt_level_completion_overlay', json.dumps(completion_summary), persistent=False)
+                set_tilt_runtime_setting('tilt_level_completion_overlay', json.dumps(completion_summary))
 
                 write_tilt_output_files({
                     'LastLevelPoints.txt': f"{level_points:,}",
@@ -8218,20 +8258,20 @@ async def tilted(bot):
                     'total_deaths_today': total_deaths_today,
                     'standings': [{'name': name, 'points': int(points)} for name, points in top_users_today],
                 }
-                config.set_setting('tilt_last_run_summary', json.dumps(last_run_summary), persistent=False)
-                config.set_setting('tilt_run_completion_overlay', json.dumps(last_run_summary), persistent=False)
+                set_tilt_runtime_setting('tilt_last_run_summary', json.dumps(last_run_summary))
+                set_tilt_runtime_setting('tilt_run_completion_overlay', json.dumps(last_run_summary))
                 next_run_completion_event_id = get_int_setting('tilt_run_completion_event_id', 0) + 1
-                config.set_setting('tilt_run_completion_event_id', str(next_run_completion_event_id), persistent=False)
+                set_tilt_runtime_setting('tilt_run_completion_event_id', str(next_run_completion_event_id))
 
-                config.set_setting('tilt_previous_run_xp', str(run_xp), persistent=False)
-                config.set_setting('tilt_current_run_id', '', persistent=False)
-                config.set_setting('tilt_run_xp', '0', persistent=False)
-                config.set_setting('tilt_run_points', '0', persistent=False)
-                config.set_setting('tilt_run_ledger', '{}', persistent=False)
-                config.set_setting('tilt_top_tiltee_ledger', '{}', persistent=False)
-                config.set_setting('tilt_current_top_tiltee_count', '0', persistent=False)
-                config.set_setting('tilt_level_completion_overlay', '{}', persistent=False)
-                run_id = None
+                set_tilt_runtime_setting('tilt_previous_run_xp', str(run_xp))
+                set_tilt_runtime_setting('tilt_current_run_id', '')
+                set_tilt_runtime_setting('tilt_run_xp', '0')
+                set_tilt_runtime_setting('tilt_run_points', '0')
+                set_tilt_runtime_setting('tilt_run_ledger', '{}')
+                set_tilt_runtime_setting('tilt_top_tiltee_ledger', '{}')
+                set_tilt_runtime_setting('tilt_current_top_tiltee_count', '0')
+                set_tilt_runtime_setting('tilt_level_completion_overlay', '{}')
+                run_id = str(config.get_setting('tilt_current_run_id') or '').strip() or None
                 current_tilt_points_leader = None
 
             last_modified_tilt = current_modified_tilt
