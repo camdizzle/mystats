@@ -194,3 +194,24 @@ body {
   border-color: rgba(61,220,143,.45);
   color: #8cf1b8;
 }
+
+/* vNext polish */
+.app { max-width: 1500px; margin: 0 auto; padding: 14px; }
+.summary-panel, .leaderboard-panel { backdrop-filter: blur(8px); box-shadow: 0 10px 28px rgba(2, 8, 20, 0.42); }
+.dashboard-nav-btn, .mini-filter-btn, .sort-select {
+  transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
+}
+.dashboard-nav-btn:hover, .mini-filter-btn:hover, .sort-select:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px rgba(26, 127, 255, 0.22);
+  border-color: rgba(127,216,255,.55);
+}
+.row { box-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 8px 14px rgba(0,0,0,.2); }
+@media (max-width: 1080px) {
+  .mycycle-shell,
+  .season-shell,
+  .tilt-shell,
+  .rivals-shell,
+  .races-shell { grid-template-columns: 1fr; }
+  .rows { max-height: 58vh; }
+}

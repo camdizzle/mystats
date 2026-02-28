@@ -1,0 +1,42 @@
+{
+  "name": "mystats-node",
+  "version": "1.0.0",
+  "description": "Node.js server for MyStats dashboard and overlays",
+  "main": "electron/main.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "electron . --no-sandbox",
+    "dev": "electron . --no-sandbox",
+    "server": "node server.js",
+    "cli": "node app.js",
+    "package:win": "electron-builder --win portable"
+  },
+  "devDependencies": {
+    "electron": "^31.0.2",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "tv.camwow.mystats",
+    "productName": "MyStats",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "app.js",
+      "server.js",
+      "electron/**/*",
+      "desktop_app/**/*",
+      "desktop_ui/**/*",
+      "modern_dashboard/**/*",
+      "obs_overlay/**/*",
+      "lib/**/*",
+      "package.json",
+      "README.md"
+    ],
+    "win": {
+      "target": [
+        "portable"
+      ]
+    }
+  }
+}
