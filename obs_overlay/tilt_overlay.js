@@ -45,11 +45,6 @@ function toAussieSlang(text) {
     });
 
   slang = slang.replace(/\s+/g, ' ').trim();
-  if (!slang) return 'mate';
-  if (!/\bmate\b[.!?]*$/i.test(slang)) {
-    slang = slang.replace(/[.!?]+$/, '').trim();
-    slang = `${slang}, mate`;
-  }
   return slang;
 }
 
@@ -358,10 +353,10 @@ function renderLastRun(lastRun = {}) {
   const leaderText = lastRun.leader ? `${lastRun.leader.name} (${fmt(lastRun.leader.points)} pts)` : 'None';
   summary.innerHTML = [
     `<span class="summary__item"><span class="summary__label">Level</span>${fmt(lastRun.ended_level)}</span>`,
-    `<span class="summary__item"><span class="summary__label">Time</span>${lastRun.elapsed_time || '0:00'}</span>`,
+    `<span class="summary__item"><span class="summary__label">Total Time</span>${lastRun.total_time || lastRun.elapsed_time || '0:00'}</span>`,
     `<span class="summary__item"><span class="summary__label">Leader</span>${leaderText}</span>`,
     `<span class="summary__item"><span class="summary__label">Run Pts</span>${fmt(lastRun.run_points)}</span>`,
-    `<span class="summary__item"><span class="summary__label">Run XP</span>${fmt(lastRun.run_xp)}</span>`,
+    `<span class="summary__item"><span class="summary__label">Run Expertise</span>${fmt(lastRun.run_expertise ?? lastRun.run_xp)}</span>`,
     `<span class="summary__item"><span class="summary__label">Ended</span>${lastRun.ended_at || 'n/a'}</span>`,
   ].join('');
 }
@@ -456,7 +451,7 @@ function renderRunCompletionOverlay(lastRun = {}, shouldDisplay = true) {
   const runDeathRate = runDeathRateRaw.toFixed(1);
 
   title.textContent = `Run Complete • Level ${fmt(lastRun.ended_level)}`;
-  subtitle.textContent = `${lastRun.elapsed_time || '0:00'} total • ${fmt(lastRun.run_xp)} XP gained`;
+  subtitle.textContent = `${lastRun.total_time || lastRun.elapsed_time || '0:00'} total • ${fmt(lastRun.run_expertise ?? lastRun.run_xp)} XP gained`;
 
   top3.innerHTML = standings.length
     ? standings.map((row, i) => `
@@ -475,7 +470,7 @@ function renderRunCompletionOverlay(lastRun = {}, shouldDisplay = true) {
     </div>
     <div class="overlay-pill-row overlay-pill-row--run">
       <div class="overlay-pill">🏆 ${fmt(lastRun.run_points)} pts</div>
-      <div class="overlay-pill">✨ ${fmt(lastRun.run_xp)} XP</div>
+      <div class="overlay-pill">✨ ${fmt(lastRun.run_expertise ?? lastRun.run_xp)} XP</div>
       <div class="overlay-pill">💀 ${fmt(runDeaths)} deaths</div>
       <div class="overlay-pill">📉 ${runDeathRate}% death rate</div>
       <div class="overlay-pill">🔥 Best ${fmt(lastRun.best_run_xp_today)} XP</div>

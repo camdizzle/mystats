@@ -224,13 +224,6 @@ def _to_aussie_slang(text):
         slangified = re.sub(rf"\b{re.escape(source)}\b", target, slangified, flags=re.IGNORECASE)
 
     slangified = re.sub(r'\s+', ' ', slangified).strip()
-    if not slangified:
-        return 'mate'
-
-    if not re.search(r'\bmate\b[.!?]*$', slangified, flags=re.IGNORECASE):
-        slangified = re.sub(r'[.!?]+$', '', slangified).strip()
-        slangified = f"{slangified}, mate"
-
     return slangified
 
 
@@ -694,6 +687,37 @@ def chunked_join_messages(prefix, continuation_prefix, items, separator=' | ', m
 
     return chunks
 
+
+
+
+def parse_tilt_elapsed_to_seconds(value):
+    token = str(value or '').strip()
+    if not token:
+        return 0
+
+    parts = token.split(':')
+    try:
+        nums = [int(float(part.strip() or 0)) for part in parts]
+    except (TypeError, ValueError):
+        return 0
+
+    if len(nums) == 1:
+        return max(0, nums[0])
+    if len(nums) == 2:
+        minutes, seconds = nums
+        return max(0, (minutes * 60) + seconds)
+
+    hours, minutes, seconds = nums[-3:]
+    return max(0, (hours * 3600) + (minutes * 60) + seconds)
+
+
+def format_tilt_duration(total_seconds):
+    seconds = max(0, int(total_seconds or 0))
+    hours, remainder = divmod(seconds, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes}:{secs:02d}"
 
 def parse_tilt_level_state(level_rows):
     """Parse LastTiltLevel.csv using header aliases when possible, with positional fallbacks."""
@@ -2715,6 +2739,19 @@ def _build_tilt_overlay_payload():
     current_top_tiltee = str(config.get_setting('tilt_current_top_tiltee') or 'None')
     current_top_tiltee_count = get_int_setting('tilt_current_top_tiltee_count', 0)
 
+    last_run_summary = parse_json_setting('tilt_last_run_summary', {})
+    if not isinstance(last_run_summary, dict):
+        last_run_summary = {}
+
+    display_standings = sorted_run
+    if not current_run_id and not display_standings:
+        fallback = last_run_summary.get('standings')
+        if isinstance(fallback, list):
+            display_standings = [
+                (str(item.get('name') or 'Unknown'), _safe_int(item.get('points', 0)))
+                for item in fallback if isinstance(item, dict)
+            ]
+
     current_summary = {
         'run_id': current_run_id,
         'run_short_id': current_run_id[:6] if current_run_id else '',
@@ -2725,17 +2762,14 @@ def _build_tilt_overlay_payload():
         'top_tiltee_count': current_top_tiltee_count,
         'run_points': get_int_setting('tilt_run_points', 0),
         'run_xp': get_int_setting('tilt_run_xp', 0),
+        'run_expertise': get_int_setting('tilt_run_xp', 0),
         'best_run_xp_today': get_int_setting('tilt_best_run_xp_today', 0),
         'total_xp_today': get_int_setting('tilt_total_xp_today', 0),
         'total_deaths_today': get_int_setting('tilt_total_deaths_today', 0),
         'lifetime_expertise': get_int_setting('tilt_lifetime_expertise', 0),
-        'leader': {'name': sorted_run[0][0], 'points': sorted_run[0][1]} if sorted_run else None,
-        'standings': [{'name': name, 'points': points} for name, points in sorted_run],
+        'leader': {'name': display_standings[0][0], 'points': display_standings[0][1]} if display_standings else None,
+        'standings': [{'name': name, 'points': points} for name, points in display_standings],
     }
-
-    last_run_summary = parse_json_setting('tilt_last_run_summary', {})
-    if not isinstance(last_run_summary, dict):
-        last_run_summary = {}
 
     level_completion = parse_json_setting('tilt_level_completion_overlay', {})
     if not isinstance(level_completion, dict):
@@ -5034,7 +5068,7 @@ TILT_RUNTIME_PERSISTENT_KEYS = {
     "tilt_current_level", "tilt_current_elapsed", "tilt_current_top_tiltee",
     "tilt_current_run_id", "tilt_run_started_at", "tilt_run_ledger",
     "tilt_top_tiltee_ledger", "tilt_current_top_tiltee_count", "tilt_run_xp",
-    "tilt_run_points", "tilt_previous_run_xp", "tilt_level_completion_overlay",
+    "tilt_run_points", "tilt_run_total_seconds", "tilt_previous_run_xp", "tilt_level_completion_overlay",
     "tilt_run_completion_overlay", "tilt_run_completion_event_id",
     "tilt_last_run_summary", "tilt_best_run_xp_today", "tilt_highest_level_points_today",
     "tilt_highest_level_reached_num", "tilt_season_best_level_num",
@@ -5167,6 +5201,7 @@ class ConfigManager:
             'tilt_current_top_tiltee_count': '0',
             'tilt_run_xp': '0',
             'tilt_run_points': '0',
+            'tilt_run_total_seconds': '0',
             'tilt_previous_run_xp': '0',
             'tilt_level_completion_overlay': '{}',
             'tilt_run_completion_overlay': '{}',
@@ -7187,6 +7222,68 @@ class Bot(commands.Bot):
         )
 
 
+    @commands.command(name='thisrun')
+    async def thisrun_command(self, ctx):
+        current_run_id = str(config.get_setting('tilt_current_run_id') or '').strip()
+        run_status = 'Active' if current_run_id else 'Idle'
+
+        if current_run_id:
+            standings_raw = config.get_setting('tilt_run_ledger') or '{}'
+            try:
+                standings = json.loads(standings_raw)
+                if not isinstance(standings, dict):
+                    standings = {}
+            except Exception:
+                standings = {}
+
+            sorted_standings = sorted(
+                ((str(name), _safe_int(points)) for name, points in standings.items()),
+                key=lambda item: item[1],
+                reverse=True
+            )
+            leader_text = f"{sorted_standings[0][0]} ({sorted_standings[0][1]:,} pts)" if sorted_standings else 'None'
+            run_points = get_int_setting('tilt_run_points', 0)
+            run_xp = get_int_setting('tilt_run_xp', 0)
+            run_level = get_int_setting('tilt_current_level', 0)
+            run_elapsed = str(config.get_setting('tilt_current_elapsed') or '0:00')
+            total_deaths_today = get_int_setting('tilt_total_deaths_today', 0)
+            top_tiltee = str(config.get_setting('tilt_current_top_tiltee') or 'None')
+            top_tiltee_count = get_int_setting('tilt_current_top_tiltee_count', 0)
+
+            message = (
+                f"🏃‍➡️ This Run ({run_status}) | Level: {run_level:,} | Elapsed: {run_elapsed} | "
+                f"Leader: {leader_text} | Run Pts: {run_points:,} | "
+                f"Run Expertise: {run_xp:,} | Top Tiltee: {top_tiltee} ({top_tiltee_count:,}) | "
+                f"Deaths Today: {total_deaths_today:,}"
+            )
+        else:
+            last_run_raw = config.get_setting('tilt_last_run_summary') or '{}'
+            try:
+                last_run = json.loads(last_run_raw)
+                if not isinstance(last_run, dict):
+                    last_run = {}
+            except Exception:
+                last_run = {}
+
+            if not last_run.get('run_id'):
+                await send_chat_message(ctx.channel, "🏃‍➡️ This Run | No active or completed tilt run available yet.", category="mystats")
+                return
+
+            total_seconds = _safe_int(last_run.get('run_total_seconds', 0))
+            total_time = str(last_run.get('total_time') or format_tilt_duration(total_seconds))
+            run_points = _safe_int(last_run.get('run_points', 0))
+            run_xp = _safe_int(last_run.get('run_xp', last_run.get('run_expertise', 0)))
+            ended_level = _safe_int(last_run.get('ended_level', 0))
+
+            message = (
+                f"🏃‍➡️ This Run ({run_status}) | Last Completed Level: {ended_level:,} | "
+                f"Total Time: {total_time} | Run Pts: {run_points:,} | "
+                f"Run Expertise: {run_xp:,}"
+            )
+
+        await send_chat_message(ctx.channel, message, category="mystats")
+
+
     @commands.command(name='xp')
     async def xp_command(self, ctx):
         last_level_xp = get_int_setting('tilt_last_level_xp', 0)
@@ -7964,6 +8061,7 @@ async def tilted(bot):
                 set_tilt_runtime_setting('tilt_current_top_tiltee_count', '0')
                 set_tilt_runtime_setting('tilt_run_xp', '0')
                 set_tilt_runtime_setting('tilt_run_points', '0')
+                set_tilt_runtime_setting('tilt_run_total_seconds', '0')
                 set_tilt_runtime_setting('tilt_previous_run_xp', config.get_setting('tilt_run_xp') or '0')
                 set_tilt_runtime_setting('tilt_level_completion_overlay', '{}')
                 set_tilt_runtime_setting('tilt_run_completion_overlay', '{}')
@@ -8032,6 +8130,8 @@ async def tilted(bot):
             deaths_this_level += terminal_run_death
 
             earned_xp = int(math.floor(len(survivors) * get_tilt_multiplier(current_level)))
+            level_elapsed_seconds = parse_tilt_elapsed_to_seconds(elapsed_time)
+            run_total_seconds = get_int_setting('tilt_run_total_seconds', 0) + level_elapsed_seconds
             run_xp = get_int_setting('tilt_run_xp', 0) + earned_xp
             run_points = get_int_setting('tilt_run_points', 0) + (level_points if survivors else 0)
             total_xp_today = get_int_setting('tilt_total_xp_today', 0) + earned_xp
@@ -8057,6 +8157,7 @@ async def tilted(bot):
 
             set_tilt_runtime_setting('tilt_run_xp', str(run_xp))
             set_tilt_runtime_setting('tilt_run_points', str(run_points))
+            set_tilt_runtime_setting('tilt_run_total_seconds', str(run_total_seconds))
             set_tilt_runtime_setting('tilt_total_xp_today', str(total_xp_today))
             set_tilt_runtime_setting('tilt_total_deaths_today', str(total_deaths_today))
             set_tilt_runtime_setting('tilt_highest_level_points_today', str(highest_level_points_today))
@@ -8171,7 +8272,7 @@ async def tilted(bot):
                 finisher_names = [username for username, _, _ in survivors]
                 limited_finishers = finisher_names[:get_chat_max_names()]
                 base_msg = (
-                    f"End of Tilt Level {current_level} | Level Completion Time: {elapsed_time} | "
+                    f"✅ End of Tilt Level {current_level} | Level Completion Time: {elapsed_time} | "
                     f"Top Tiltee: {top_tiltee} | Points Earned: {level_points} | Survivors: "
                 )
 
@@ -8194,6 +8295,8 @@ async def tilted(bot):
                     'top_tiltee': top_tiltee,
                     'top_tiltee_count': top_tiltee_run_count,
                     'elapsed_time': elapsed_time,
+                    'total_time': format_tilt_duration(run_total_seconds),
+                    'run_total_seconds': run_total_seconds,
                     'level_points': level_points,
                     'earned_xp': earned_xp,
                     'survivors': survivor_count,
@@ -8225,8 +8328,8 @@ async def tilted(bot):
                 if limited_run_results:
                     standings_items = [f"{username} - {points} points" for username, points in limited_run_results]
                     chunks = chunked_join_messages(
-                        "Tilt run complete! Final standings: ",
-                        "Run standings cont: ",
+                        "🏁 Tilt run complete! Final standings: ",
+                        "🏁 Run standings cont: ",
                         standings_items,
                         max_length=max_message_length
                     )
@@ -8237,7 +8340,7 @@ async def tilted(bot):
                     show_windows_toast("MyStats Tilt", f"Tilt run complete. Top player: {limited_run_results[0][0]}")
                 else:
                     if is_chat_response_enabled("chat_tilt_results") and not should_suppress_tilt_chat:
-                        await send_chat_message(bot.channel, "Tilt run complete! No results to display.", category="tilt")
+                        await send_chat_message(bot.channel, "🏁 Tilt run complete! No results to display.", category="tilt")
                     text_area.insert('end', f"\nTilt run complete! No results to display.\n")
                     show_windows_toast("MyStats Tilt", "Tilt run complete. No standings were available.")
 
@@ -8263,11 +8366,14 @@ async def tilted(bot):
                     'ended_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                     'ended_level': current_level,
                     'elapsed_time': elapsed_time,
+                    'total_time': format_tilt_duration(run_total_seconds),
+                    'run_total_seconds': run_total_seconds,
                     'top_tiltee': top_tiltee,
                     'top_tiltee_count': get_int_setting('tilt_current_top_tiltee_count', 0),
                     'leader': {'name': top_user_names[0], 'points': int(top_users_today[0][1])} if top_users_today else None,
                     'run_points': run_points,
                     'run_xp': run_xp,
+                    'run_expertise': run_xp,
                     'best_run_xp_today': best_run_xp_today,
                     'total_xp_today': total_xp_today,
                     'total_deaths_today': total_deaths_today,
@@ -8282,6 +8388,7 @@ async def tilted(bot):
                 set_tilt_runtime_setting('tilt_current_run_id', '')
                 set_tilt_runtime_setting('tilt_run_xp', '0')
                 set_tilt_runtime_setting('tilt_run_points', '0')
+                set_tilt_runtime_setting('tilt_run_total_seconds', '0')
                 set_tilt_runtime_setting('tilt_run_ledger', '{}')
                 set_tilt_runtime_setting('tilt_top_tiltee_ledger', '{}')
                 set_tilt_runtime_setting('tilt_current_top_tiltee_count', '0')
