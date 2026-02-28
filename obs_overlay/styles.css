@@ -142,6 +142,42 @@ body.top3-active .header-stats {
   display: flex;
 }
 
+.event-overlay {
+  margin-top: 12px;
+  flex: 1;
+  min-height: 0;
+  border-radius: 12px;
+  border: 2px solid rgba(127, 216, 255, 0.62);
+  background: radial-gradient(circle at top, rgba(127, 216, 255, 0.18), rgba(8, 13, 26, 0.72));
+  box-shadow: inset 0 0 0 1px rgba(199, 237, 255, 0.2), 0 0 30px rgba(127, 216, 255, 0.2);
+  padding: 16px 14px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 12px;
+  text-align: center;
+}
+
+.event-overlay.is-visible {
+  display: flex;
+}
+
+.event-overlay__type {
+  color: var(--accent);
+  font-size: calc(1.35rem * var(--text-scale));
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.event-overlay__message {
+  color: #eaf6ff;
+  font-size: calc(1.5rem * var(--text-scale));
+  font-weight: 800;
+  line-height: 1.25;
+}
+
 .record-overlay__title {
   color: #ffd65c;
   font-size: calc(3rem * var(--text-scale));

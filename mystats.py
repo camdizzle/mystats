@@ -2499,6 +2499,10 @@ def _overlay_display_name(*candidates):
 
 
 def _overlay_points_top10(file_paths):
+    return _overlay_points_top10_filtered(file_paths)
+
+
+def _overlay_points_top10_filtered(file_paths, race_type_filter=None):
     totals = {}
 
     for file_path in file_paths:
@@ -2508,6 +2512,9 @@ def _overlay_points_top10(file_paths):
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 for row in csv.reader(f):
                     if len(row) < 5:
+                        continue
+                    race_type = (row[4] or '').strip().lower() if len(row) >= 5 else ''
+                    if race_type_filter and race_type != str(race_type_filter).strip().lower():
                         continue
                     name = _overlay_display_name(row[2], row[1])
                     if not name:
@@ -2524,6 +2531,32 @@ def _overlay_points_top10(file_paths):
         {'placement': index + 1, 'name': name, 'points': points}
         for index, (name, points) in enumerate(ranked)
     ]
+
+
+def _overlay_event_log():
+    raw = str(config.get_setting('overlay_event_log') or '[]')
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, list):
+            return parsed
+    except Exception:
+        pass
+    return []
+
+
+def enqueue_overlay_event(event_type, message):
+    now_iso = datetime.now().isoformat(timespec='seconds')
+    next_id = _safe_int(config.get_setting('overlay_event_counter') or 0) + 1
+    config.set_setting('overlay_event_counter', str(next_id), persistent=False)
+
+    events = _overlay_event_log()
+    events.append({
+        'id': next_id,
+        'type': str(event_type or 'event').strip().lower(),
+        'message': str(message or '').strip(),
+        'created_at': now_iso,
+    })
+    config.set_setting('overlay_event_log', json.dumps(events[-40:]), persistent=False)
 
 
 def _overlay_data_sources(data_dir):
@@ -2674,12 +2707,32 @@ def _build_overlay_top3_payload():
         {
             'id': 'season',
             'title': 'Top 10 Season',
-            'rows': _overlay_points_top10(season_files),
+            'rows': _overlay_points_top10_filtered(season_files),
         },
         {
             'id': 'today',
             'title': 'Top 10 Today',
-            'rows': _overlay_points_top10([today_file]),
+            'rows': _overlay_points_top10_filtered([today_file]),
+        },
+        {
+            'id': 'races-season',
+            'title': 'Top 10 Races (Season)',
+            'rows': _overlay_points_top10_filtered(season_files, race_type_filter='race'),
+        },
+        {
+            'id': 'brs-season',
+            'title': 'Top 10 BRs (Season)',
+            'rows': _overlay_points_top10_filtered(season_files, race_type_filter='br'),
+        },
+        {
+            'id': 'races-today',
+            'title': 'Top 10 Races (Today)',
+            'rows': _overlay_points_top10_filtered([today_file], race_type_filter='race'),
+        },
+        {
+            'id': 'brs-today',
+            'title': 'Top 10 BRs (Today)',
+            'rows': _overlay_points_top10_filtered([today_file], race_type_filter='br'),
         },
     ]
 
@@ -2707,6 +2760,7 @@ def _build_overlay_top3_payload():
         },
         'header_stats': _build_overlay_header_stats(data_dir),
         'settings': _build_overlay_settings_payload(),
+        'overlay_events': _overlay_event_log(),
     }
 
 
@@ -9207,6 +9261,7 @@ async def race(bot):
                 if cooldown_races == 0 or (t_count - last_narrative_alert_race_count) >= cooldown_races:
                     combined_narrative = "📣 Player Alerts: " + " | ".join(narrative_messages[:max_items]) + "."
                     messages.append(combined_narrative)
+                    enqueue_overlay_event('player_alert', combined_narrative)
                     last_narrative_alert_race_count = t_count
 
             # --- CHUNK ALERT BLOCK ---
@@ -9349,12 +9404,17 @@ async def race(bot):
             cycle_events = update_mycycle_with_race_rows(racedata)
             if is_chat_response_enabled('mycycle_announcements_enabled'):
                 for event in cycle_events:
-                    messages.append(
+                    cycle_message = (
                         f"🔁 {event['display_name']} completed a MyCycle in {event['session_name']}! "
                         f"Cycle #{event['cycles_completed']} took {event['races_used']} races."
                     )
+                    messages.append(cycle_message)
+                    enqueue_overlay_event('cycle_completed', cycle_message)
 
-            messages.extend(get_season_quest_updates())
+            quest_messages = get_season_quest_updates()
+            messages.extend(quest_messages)
+            for quest_message in quest_messages:
+                enqueue_overlay_event('quest_completed', quest_message)
 
             channel = bot.get_channel(config.get_setting('CHANNEL'))
             if not channel:
@@ -9796,14 +9856,19 @@ async def royale(bot):
                     cycle_events = update_mycycle_with_race_rows(brdata)
                     if is_chat_response_enabled('mycycle_announcements_enabled'):
                         for event in cycle_events:
+                            cycle_message = (
+                                f"🔁 {event['display_name']} completed a MyCycle in {event['session_name']}! "
+                                f"Cycle #{event['cycles_completed']} took {event['races_used']} races."
+                            )
+                            enqueue_overlay_event('cycle_completed', cycle_message)
                             await send_chat_message(
                                 bot.channel,
-                                f"🔁 {event['display_name']} completed a MyCycle in {event['session_name']}! "
-                                f"Cycle #{event['cycles_completed']} took {event['races_used']} races.",
+                                cycle_message,
                                 category="br"
                             )
 
                     for quest_message in get_season_quest_updates():
+                        enqueue_overlay_event('quest_completed', quest_message)
                         await send_chat_message(bot.channel, quest_message, category="br")
 
                     if crownwin:
