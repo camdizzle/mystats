@@ -126,13 +126,24 @@ let hasHydratedOnce = false;
 let top3IsShowing = false;
 let top3ShowTimeout = null;
 let recordOverlayTimeout = null;
-const splashDurationMs = 5000;
+let overlayEventActive = false;
+let overlayEventTimeout = null;
+let queuedRaceTop3 = null;
+let overlayEventQueue = [];
+let lastOverlayEventId = 0;
+let hasHydratedOverlayEvents = false;
+let currentResultsMode = 'race';
+const splashDurationMs = 7500;
 const recordOverlayDurationMs = 5000;
 const top3ShowDurationMs = 10000;
+const eventOverlayDurationMs = 6500;
 
 const recordOverlay = $('record-overlay');
 const recordOverlayMessage = $('record-overlay-message');
 const recordOverlayDelta = $('record-overlay-delta');
+const eventOverlay = $('event-overlay');
+const eventOverlayType = $('event-overlay-type');
+const eventOverlayMessage = $('event-overlay-message');
 
 function formatDurationDelta(secondsRaw) {
   const total = Number(secondsRaw);
@@ -150,6 +161,74 @@ function hideRecordOverlay() {
   if (!recordOverlay) return;
   recordOverlay.classList.remove('is-visible');
   recordOverlay.setAttribute('aria-hidden', 'true');
+}
+
+function hideEventOverlay() {
+  overlayEventActive = false;
+  if (eventOverlayTimeout) {
+    clearTimeout(eventOverlayTimeout);
+    eventOverlayTimeout = null;
+  }
+  if (boardShell) boardShell.classList.remove('is-hidden');
+  if (!eventOverlay) return;
+  eventOverlay.classList.remove('is-visible');
+  eventOverlay.setAttribute('aria-hidden', 'true');
+}
+
+function showEventOverlay(eventPayload = {}) {
+  if (settings.horizontalLayout) return;
+  const type = String(eventPayload?.type || 'event').replace(/[_-]+/g, ' ').trim() || 'event';
+  const message = String(eventPayload?.message || '').trim();
+  if (!message) return;
+
+  if (eventOverlayType) eventOverlayType.textContent = type.toUpperCase();
+  if (eventOverlayMessage) eventOverlayMessage.textContent = message;
+  if (boardShell) boardShell.classList.add('is-hidden');
+  if (eventOverlay) {
+    eventOverlay.classList.add('is-visible');
+    eventOverlay.setAttribute('aria-hidden', 'false');
+  }
+  overlayEventActive = true;
+}
+
+function processOverlayPresentationQueue() {
+  if (settings.horizontalLayout) return;
+  if (top3IsShowing || overlayEventActive) return;
+
+  if (overlayEventQueue.length) {
+    const nextEvent = overlayEventQueue.shift();
+    showEventOverlay(nextEvent);
+    if (overlayEventTimeout) clearTimeout(overlayEventTimeout);
+    eventOverlayTimeout = setTimeout(() => {
+      hideEventOverlay();
+      showLeaderboardView();
+      ensureLeaderboardAutoScroll();
+      processOverlayPresentationQueue();
+    }, eventOverlayDurationMs);
+    return;
+  }
+
+  if (queuedRaceTop3) {
+    const pendingTop3 = queuedRaceTop3;
+    queuedRaceTop3 = null;
+    showTop3ForTenSeconds(pendingTop3);
+  }
+}
+
+function queueOverlayEvent(eventPayload = {}) {
+  if (settings.horizontalLayout) return;
+  const message = String(eventPayload?.message || '').trim();
+  if (!message) return;
+  overlayEventQueue.push(eventPayload);
+  processOverlayPresentationQueue();
+}
+
+function queueTop3Overlay(top3View = {}) {
+  if (settings.horizontalLayout) return;
+  const finishedRows = (top3View?.rows || []).filter((row) => row?.finished !== false);
+  if (!finishedRows.length) return;
+  queuedRaceTop3 = top3View;
+  processOverlayPresentationQueue();
 }
 
 function showRecordOverlay(top3View = {}) {
@@ -258,6 +337,7 @@ function clearCycleRestartTimer() {
 function showLeaderboardView() {
   if (boardShell) boardShell.classList.remove('is-hidden');
   hideRecordOverlay();
+  hideEventOverlay();
   document.body.classList.remove('top3-active');
   leaderboard?.classList.remove('is-top3-mode');
   if (splashScreen) {
@@ -357,6 +437,7 @@ function showTop3ForTenSeconds(top3View) {
       lastRenderedViewsKey = '';
       renderCombinedRows(currentViews);
       ensureLeaderboardAutoScroll();
+      processOverlayPresentationQueue();
     }, top3ShowDurationMs);
   };
 
@@ -651,7 +732,7 @@ function applyServerSettings(raw = {}) {
 function syncViews(views = []) {
   currentViews = views;
 
-  if (top3IsShowing) {
+  if (top3IsShowing || overlayEventActive) {
     return;
   }
 
@@ -667,6 +748,24 @@ function syncViews(views = []) {
   lastRenderedViewsKey = nextRenderKey;
   renderCombinedRows(currentViews);
   ensureLeaderboardAutoScroll();
+}
+
+function normalizeRaceType(value) {
+  const type = String(value || '').trim().toLowerCase();
+  if (type === 'br' || type === 'battle royale' || type === 'royale') return 'br';
+  if (type === 'race') return 'race';
+  return '';
+}
+
+function selectViewsForMode(views = [], mode = 'race') {
+  const byId = new Map((Array.isArray(views) ? views : []).map((view) => [String(view?.id || ''), view]));
+  const orderedIds = mode === 'br'
+    ? ['season', 'today', 'brs-season', 'brs-today']
+    : ['season', 'today', 'races-season', 'races-today'];
+
+  return orderedIds
+    .map((id) => byId.get(id))
+    .filter((view) => Array.isArray(view?.rows) && view.rows.length > 0);
 }
 
 async function refresh() {
@@ -691,7 +790,31 @@ async function refresh() {
             : []),
         ];
 
-    syncViews(normalizedViews);
+    const raceType = normalizeRaceType(p?.recent_race_top3?.race_type);
+    if (raceType) {
+      currentResultsMode = raceType;
+    }
+
+    const filteredViews = selectViewsForMode(normalizedViews, currentResultsMode);
+    syncViews(filteredViews.length ? filteredViews : normalizedViews);
+
+    const overlayEvents = Array.isArray(p.overlay_events) ? p.overlay_events : [];
+    if (!hasHydratedOverlayEvents) {
+      hasHydratedOverlayEvents = true;
+      const maxHydratedEventId = overlayEvents.reduce((maxId, eventItem) => {
+        const currentId = Number(eventItem?.id) || 0;
+        return Math.max(maxId, currentId);
+      }, 0);
+      lastOverlayEventId = Math.max(lastOverlayEventId, maxHydratedEventId);
+    } else {
+      overlayEvents
+        .filter((eventItem) => (Number(eventItem?.id) || 0) > lastOverlayEventId)
+        .sort((a, b) => (Number(a?.id) || 0) - (Number(b?.id) || 0))
+        .forEach((eventItem) => {
+          lastOverlayEventId = Math.max(lastOverlayEventId, Number(eventItem?.id) || 0);
+          queueOverlayEvent(eventItem);
+        });
+    }
 
     const raceKey = p.recent_race_top3?.race_key || null;
     if (!hasHydratedOnce) {
@@ -702,7 +825,7 @@ async function refresh() {
 
     if (raceKey && raceKey !== lastRaceKey) {
       lastRaceKey = raceKey;
-      showTop3ForTenSeconds(p.recent_race_top3);
+      queueTop3Overlay(p.recent_race_top3);
     }
   } catch (error) {
     console.error('Overlay refresh failed:', error);
