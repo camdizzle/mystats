@@ -206,6 +206,21 @@ def translate_chat_message(message):
     return translated
 
 
+def get_placement_emote(place):
+    return {1: "🥇", 2: "🥈", 3: "🥉"}.get(place, "")
+
+
+def format_ranked_label(place):
+    emote = get_placement_emote(place)
+    return f"{emote} {place}." if emote else f"{place}."
+
+
+def pluralize(count, singular, plural=None):
+    if plural is None:
+        plural = f"{singular}s"
+    return singular if count == 1 else plural
+
+
 def supports_system_tray():
     return pystray is not None
 
@@ -600,7 +615,7 @@ def safe_read_csv_rows(path, retries=5, retry_delay=0.5):
     return []
 
 
-def chunked_join_messages(prefix, continuation_prefix, items, separator=', ', max_length=480):
+def chunked_join_messages(prefix, continuation_prefix, items, separator=' | ', max_length=480):
     """Build one or more chunked messages with a shared prefix strategy."""
     if not items:
         return []
@@ -6379,7 +6394,7 @@ class Bot(commands.Bot):
     async def info(self, ctx):
         if ctx.author.name.lower() == 'camwow' or ctx.author.name.lower() == config.get_setting(
                 'CHANNEL').lower() or ctx.author.name.lower() == 'vibblez':
-            await self.send_command_response(ctx, "Version " + str(version) + " | Season: " + str(config.get_setting('season')) +
+            await self.send_command_response(ctx, "ℹ️ Version " + str(version) + " | Season: " + str(config.get_setting('season')) +
                                    ' | Total Races: ' + str(format(int(config.get_setting('totalcountseason')), ',')) +
                                    ' | Total Points: ' + str(
                 format(int(config.get_setting('totalpointsseason')), ',')) +
@@ -6417,19 +6432,18 @@ class Bot(commands.Bot):
             await self.send_command_response(ctx, "No leaderboard data available right now.")
             return
 
-        leaderboard_message = ""
-        emotes = {1: " 🥇", 2: " 🥈", 3: " 🥉"}
+        entries = []
         for rank, record in enumerate(top_10_records, start=1):
-            emote = emotes.get(rank, "")
             display_name = record.get("DisplayName") or record.get("UserName") or "Unknown"
             try:
                 stat_value = format(int(float(record.get("StatValue", 0))), ",")
             except (TypeError, ValueError):
                 stat_value = "0"
-            leaderboard_message += f"{emote} {rank}. {display_name} - {stat_value}\n"
+            entries.append(f"{format_ranked_label(rank)} {display_name} - {stat_value}")
 
-        await self.send_command_response(ctx, 
-            leaderboard_message + " | View the full leaderboard at: https://pixelbypixel.studio/hub"
+        await self.send_command_response(
+            ctx,
+            "Leaderboard | " + " | ".join(entries) + " | View the full leaderboard at: https://pixelbypixel.studio/hub"
         )
 
     @commands.command(name='mostop10')
@@ -6517,15 +6531,6 @@ class Bot(commands.Bot):
             "Interested in learning more about the Streamer Meta?  "
             "📖: https://docs.google.com/document/d/1k93YU73QbGZrmfHqm1cto8PzzF2eADPtpGLILfGawVM/edit")
 
-    @commands.command(name='energy')
-    async def energy(self, ctx):
-        await self.send_command_response(ctx, 
-            "Energy is the system by which viewers exchange their energy with streamers, for points. "
-            "You start the day at 12:00pm EST, with 7 energy. This is the daily energy reset time. "
-            "Every 3 races with the same streamer, your energy will be returned to you. If you run out of energy, "
-            "you will no longer earn points, but you can still race. Once you complete 120 races with a streamer, "
-            "that energy spent will no longer be returned.")
-
     @commands.command(name='mosapp')
     async def mosapp(self, ctx):
         await self.send_command_response(ctx, 
@@ -6546,7 +6551,7 @@ class Bot(commands.Bot):
     async def list_commands(self, ctx):
         excluded_commands = ['commands', 'mplreset']
         commands_list = [f'!{cmd.name}' for cmd in self.commands.values() if cmd.name not in excluded_commands]
-        commands_description = ', '.join(commands_list)
+        commands_description = ' | '.join(commands_list)
         await ctx.send(f'MyStats commands: {commands_description}')
 
     # Method to expose the command list outside the class
@@ -6648,7 +6653,7 @@ class Bot(commands.Bot):
         point_gap = abs(stats_a['points'] - stats_b['points'])
 
         await self.send_command_response(ctx, 
-            f"H2H {stats_a['display_name']} vs {stats_b['display_name']} | "
+            f"⚔️ H2H {stats_a['display_name']} vs {stats_b['display_name']} | "
             f"Points: {stats_a['points']:,}-{stats_b['points']:,} | "
             f"Races: {stats_a['races']:,}-{stats_b['races']:,} | "
             f"Race HS: {stats_a['race_hs']:,}-{stats_b['race_hs']:,} | "
@@ -6685,7 +6690,7 @@ class Bot(commands.Bot):
             f"Last cycle races: {record.get('last_cycle_races', 0)}"
         )
         if missing:
-            message += f" | Missing: {','.join(missing)}"
+            message += f" | Missing: {' | '.join(missing)}"
 
         await self.send_command_response(ctx, message)
 
@@ -6744,7 +6749,7 @@ class Bot(commands.Bot):
             f"{progress['completed']}/{progress['active_quests'] if progress['active_quests'] > 0 else 0} quests complete"
         )
         details = " | ".join(progress['progress_lines'])
-        await self.send_command_response(ctx, f"{headline} | {details}")
+        await self.send_command_response(ctx, f"🔎 {headline} | {details}")
 
 
     @commands.command(name='top10ppr')
@@ -6799,13 +6804,13 @@ class Bot(commands.Bot):
 
         # Build a list of entry strings without a trailing separator
         entries = []
-        for racer, stats in top_racers:
+        for place, (racer, stats) in enumerate(top_racers, start=1):
             # Round down the PPR to one decimal place
             ppr_rounded_down = math.floor(stats['ppr'] * 10) / 10
-            entry = f"{racer}: {ppr_rounded_down:.1f}"
+            entry = f"{format_ranked_label(place)} {racer}: {ppr_rounded_down:.1f}"
             entries.append(entry)
 
-        header = "Top 10 Racers by PPR (with +100 races): \n"
+        header = "Top 10 Racers by PPR (100+ races): "
         chunks = []
         current_chunk = header
 
@@ -6921,10 +6926,7 @@ class Bot(commands.Bot):
         today_avg_points_rounded_down = math.floor(today_avg_points * 10) / 10
 
         # Create string for singular or plural "win" based on the count.
-        wins_str = "win" if counts['winstoday'] == 1 else "wins"
-        seasonwins_str = "win" if counts['seasonwins'] == 1 else "wins"
-
-        # Format the numbers with commas and rounded down values.
+                # Format the numbers with commas and rounded down values.
         brwins_formatted = '{:,}'.format(counts['brwins'])
         br_points_formatted = '{:,}'.format(counts['br_points'])
         br_count_formatted = '{:,}'.format(counts['br_count'])
@@ -6946,10 +6948,10 @@ class Bot(commands.Bot):
 
         # Create the formatted output message.
         output_msg = (
-            f"BRs - {brwins_formatted} wins, {br_points_formatted} points, {br_count_formatted} royales, PPR: {br_avg_points_formatted}. | "
-            f"Races - {racewins_formatted} wins, {race_points_formatted} points, {race_count_formatted} races, PPR: {race_avg_points_formatted}. | "
-            f"Season - {seasonwins_formatted} wins, {seasonpts_formatted} points, {seasonraces_formatted} races, PPR: {season_avg_points_formatted}. | "
-            f"World Records - {counts['world_record_count']}"
+            f"📊 BRs - {brwins_formatted} {pluralize(counts['brwins'], 'win')} | {br_points_formatted} points | {br_count_formatted} {pluralize(counts['br_count'], 'royale')} | PPR: {br_avg_points_formatted} | "
+            f"Races - {racewins_formatted} {pluralize(counts['racewins'], 'win')} | {race_points_formatted} points | {race_count_formatted} {pluralize(counts['race_count'], 'race')} | PPR: {race_avg_points_formatted} | "
+            f"Season - {seasonwins_formatted} {pluralize(counts['seasonwins'], 'win')} | {seasonpts_formatted} points | {seasonraces_formatted} {pluralize(counts['seasonraces'], 'race')} | PPR: {season_avg_points_formatted} | "
+            f"World Records: {counts['world_record_count']:,} {pluralize(counts['world_record_count'], 'record')}"
         )
 
         await send_chat_message(
@@ -7128,11 +7130,11 @@ class Bot(commands.Bot):
         )[:10]
 
         items = [
-            f"({idx}) {name} {tops} tops, {season_points_by_player.get(name, 0):,} points"
+            f"{format_ranked_label(idx)} {name} | {tops:,} {pluralize(tops, 'top')} | {season_points_by_player.get(name, 0):,} points"
             for idx, (name, tops) in enumerate(ranked, start=1)
         ]
 
-        message = "Top Tiltees: " + ", ".join(items) + "."
+        message = "Top Tiltees | " + " | ".join(items)
         await send_chat_message(ctx.channel, message, category="mystats")
 
 
@@ -7166,12 +7168,11 @@ class Bot(commands.Bot):
             return
 
         top_tilees = sorted(data.items(), key=lambda x: x[1], reverse=True)[:10]
-        message = "Top 10 Tilees by Tilt Points: "
-        for i, (racer, points) in enumerate(top_tilees):
-            place = i + 1
-            message += "{} {} {} points{}".format(
-                "(" + str(place) + ")", racer, format(points, ','), ", " if i < len(top_tilees) - 1 else "."
-            )
+        entries = [
+            f"{format_ranked_label(place)} {racer} | {points:,} points"
+            for place, (racer, points) in enumerate(top_tilees, start=1)
+        ]
+        message = "Top 10 Tiltees by Tilt Points | " + " | ".join(entries)
 
         await send_chat_message(ctx.channel, message, category="mystats")
 
@@ -7252,13 +7253,13 @@ class Bot(commands.Bot):
 
         ranked = sorted(qualified, key=lambda item: (item[2], item[1], item[0].lower()))[:10]
         message_items = [
-            f"({idx}) {username} {deaths} deaths, {100 - death_rate:.1f}% survive"
+            f"{format_ranked_label(idx)} {username} | {deaths} {pluralize(deaths, 'death')} | {100 - death_rate:.1f}% survive"
             for idx, (username, deaths, death_rate) in enumerate(ranked, start=1)
         ]
 
         await send_chat_message(
             ctx.channel,
-            f"Top 10 Best Tilt Survival Rate (min {minimum_levels} levels): " + ", ".join(message_items) + ".",
+            f"Top 10 Best Tilt Survival Rate (min {minimum_levels} {pluralize(minimum_levels, 'level')}) | " + " | ".join(message_items),
             category="mystats"
         )
 
@@ -7285,11 +7286,11 @@ class Bot(commands.Bot):
 
                 top_racers = sorted(data.items(), key=lambda x: x[1], reverse=True)[:11]
 
-                message = "Top 10 Today (Excluding WRs): "
-                for i, (racer, points) in enumerate(top_racers):
-                    place = i + 1
-                    message += "{} {} {} points{}".format("(" + str(place) + ")", racer, format(points, ','),
-                                                        ", " if i < len(top_racers) - 1 else ".")
+                entries = [
+                    f"{format_ranked_label(place)} {racer} | {points:,} points"
+                    for place, (racer, points) in enumerate(top_racers, start=1)
+                ]
+                message = "Top 10 Today (Excluding WRs) | " + " | ".join(entries)
 
             await self.send_command_response(ctx, message)
         except FileNotFoundError:
@@ -7318,11 +7319,11 @@ class Bot(commands.Bot):
 
                 top_racers = sorted(data.items(), key=lambda x: x[1], reverse=True)[:10]
 
-                message = "Top 10 Today: "
-                for i, (racer, points) in enumerate(top_racers):
-                    place = i + 1
-                    message += "{} {} {} points{}".format("(" + str(place) + ")", racer, format(points, ','),
-                                                          ", " if i < len(top_racers) - 1 else ".")
+                entries = [
+                    f"{format_ranked_label(place)} {racer} | {points:,} points"
+                    for place, (racer, points) in enumerate(top_racers, start=1)
+                ]
+                message = "Top 10 Today | " + " | ".join(entries)
 
             await self.send_command_response(ctx, message)
         except FileNotFoundError:
@@ -7354,11 +7355,11 @@ class Bot(commands.Bot):
                 print(e)
 
         top_racers = sorted(data.items(), key=lambda x: x[1], reverse=True)[:10]
-        message = "Top 10 Racers by Total Races: "
-        for i, (racer, races) in enumerate(top_racers):
-            place = i + 1
-            message += "{} {} {} races{}".format("(" + str(place) + ")", racer, format(races, ','),
-                                                 ", " if i < len(top_racers) - 1 else ".")
+        entries = [
+            f"{format_ranked_label(place)} {racer} | {races:,} {pluralize(races, 'race')}"
+            for place, (racer, races) in enumerate(top_racers, start=1)
+        ]
+        message = "Top 10 Racers by Total Races | " + " | ".join(entries)
 
         await self.send_command_response(ctx, message)
 
@@ -7384,11 +7385,11 @@ class Bot(commands.Bot):
                 print(e)
 
         top_racers = sorted(data.items(), key=lambda x: x[1], reverse=True)[:10]
-        message = "Top 10 Wins Season {}: ".format(config.get_setting('season'))
-        for i, (racer, wins) in enumerate(top_racers):
-            place = i + 1
-            message += "{} {} {} wins{}".format("(" + str(place) + ")", racer, format(wins, ','),
-                                                ", " if i < len(top_racers) - 1 else ".")
+        entries = [
+            f"{format_ranked_label(place)} {racer} | {wins:,} {pluralize(wins, 'win')}"
+            for place, (racer, wins) in enumerate(top_racers, start=1)
+        ]
+        message = "Top 10 Wins Season {} | ".format(config.get_setting('season')) + " | ".join(entries)
 
         await self.send_command_response(ctx, message)
 
@@ -7414,11 +7415,11 @@ class Bot(commands.Bot):
                 print(e)
 
         top_racers = sorted(data.items(), key=lambda x: x[1], reverse=True)[:10]
-        message = "Top 10 Season {}: ".format(config.get_setting('season'))
-        for i, (racer, points) in enumerate(top_racers):
-            place = i + 1
-            message += "{} {} {} points{}".format("(" + str(place) + ")", racer, format(points, ','),
-                                                  ", " if i < len(top_racers) - 1 else ".")
+        entries = [
+            f"{format_ranked_label(place)} {racer} | {points:,} points"
+            for place, (racer, points) in enumerate(top_racers, start=1)
+        ]
+        message = "Top 10 Season {} | ".format(config.get_setting('season')) + " | ".join(entries)
 
         await self.send_command_response(ctx, message)
 
@@ -7475,11 +7476,14 @@ class Bot(commands.Bot):
 
         # Build the output message with each entry formatted as "Racer: count (points)"
         # and joined by " | " with no trailing pipe.
-        entries = [f"{racer}: {stats['count']} ({stats['points']} pts)" for racer, stats in top_records]
+        entries = [
+            f"{format_ranked_label(place)} {racer} | {stats['count']:,} {pluralize(stats['count'], 'win')} | {stats['points']:,} pts"
+            for place, (racer, stats) in enumerate(top_records, start=1)
+        ]
         output_msg = " | ".join(entries)
 
         # Prepend the header to the message.
-        final_msg = f"Top 10 World Record Wins: {output_msg}"
+        final_msg = f"Top 10 World Record Wins | {output_msg}"
 
         await self.send_command_response(ctx, final_msg)
 
@@ -7507,10 +7511,11 @@ class Bot(commands.Bot):
                 print(e)
 
         top_racers = sorted(data.items(), key=lambda x: x[1], reverse=True)[:10]
-        message = f"Top 10 Season {config.get_setting('season')} (Excluding WRs): "
-        for i, (racer, points) in enumerate(top_racers):
-            separator = ", " if i < len(top_racers) - 1 else "."
-            message += f"({i+1}) {racer} {format(points, ',')} points{separator}"
+        entries = [
+            f"{format_ranked_label(place)} {racer} | {points:,} points"
+            for place, (racer, points) in enumerate(top_racers, start=1)
+        ]
+        message = f"Top 10 Season {config.get_setting('season')} (Excluding WRs) | " + " | ".join(entries)
 
         await self.send_command_response(ctx, message)
 
@@ -8962,22 +8967,20 @@ async def race(bot):
                         temp_messages = []
                         for i, data in enumerate(filtered_top10_data):
                             winner_name = data[1] if data[1] != data[2].lower() else data[2]
-                            line = f"({data[0]}) {winner_name}"
+                            line = f"{format_ranked_label(int(data[0]))} {winner_name}"
                             if i < len(filtered_top10_data) - 1:
-                                line += ", "
-                            else:
-                                line += "."
+                                line += " | "
 
                             # Check the length before appending
                             if len(message + line) > 480:
-                                temp_messages.append(message.rstrip(', '))
+                                temp_messages.append(message.rstrip(' | '))
                                 # Start a new message with the same prefix (or some short prefix, your choice)
                                 message = "🧃 Top 10 Finishers 🏆: " + line
                             else:
                                 message += line
 
                         # Append the last chunk
-                        temp_messages.append(message.rstrip(', '))
+                        temp_messages.append(message.rstrip(' | '))
                         messages.extend(temp_messages)
 
                     else:
@@ -8992,23 +8995,18 @@ async def race(bot):
                         for i, data in enumerate(filtered_data):  # Show only top 10 with points in Twitch chat
                             winner_name = data[1] if data[1] != data[2].lower() else data[2]
                             formatted_points = '{:,}'.format(int(data[4]))
-                            line = f"({data[0]}) {winner_name} {formatted_points} point"
-                            if int(data[4]) != 1:
-                                line += "s"
-                            # Add comma or period
+                            line = f"{format_ranked_label(int(data[0]))} {winner_name} | {formatted_points} {pluralize(int(data[4]), 'point')}"
                             if i < len(filtered_data) - 1:
-                                line += ", "
-                            else:
-                                line += "."
+                                line += " | "
 
                             # Check length before appending
                             if len(message + line) > 480:
-                                temp_messages.append(message.rstrip(', '))
+                                temp_messages.append(message.rstrip(' | '))
                                 message = prefix + line  # Start fresh with the same prefix
                             else:
                                 message += line
 
-                        temp_messages.append(message.rstrip(', '))
+                        temp_messages.append(message.rstrip(' | '))
                         messages.extend(temp_messages)
 
             # --- NON-CHUNK ALERT BLOCK ---
@@ -9030,19 +9028,17 @@ async def race(bot):
                         temp_messages = []
                         for i, data in enumerate(filtered_top10_data):
                             winner_name = data[1] if data[1] != data[2].lower() else data[2]
-                            line = f"({data[0]}) {winner_name}"
+                            line = f"{format_ranked_label(int(data[0]))} {winner_name}"
                             if i < len(filtered_top10_data) - 1:
-                                line += ", "
-                            else:
-                                line += "."
+                                line += " | "
 
                             if len(message + line) > 480:
-                                temp_messages.append(message.rstrip(', '))
+                                temp_messages.append(message.rstrip(' | '))
                                 message = "Top 10 Finishers 🏆: " + line
                             else:
                                 message += line
 
-                        temp_messages.append(message.rstrip(', '))
+                        temp_messages.append(message.rstrip(' | '))
                         messages.extend(temp_messages)
 
                     else:
@@ -9057,21 +9053,17 @@ async def race(bot):
                         for i, data in enumerate(filtered_data):
                             winner_name = data[1] if data[1] != data[2].lower() else data[2]
                             formatted_points = '{:,}'.format(int(data[4]))
-                            line = f"({data[0]}) {winner_name} {formatted_points} point"
-                            if int(data[4]) != 1:
-                                line += "s"
+                            line = f"{format_ranked_label(int(data[0]))} {winner_name} | {formatted_points} {pluralize(int(data[4]), 'point')}"
                             if i < len(filtered_data) - 1:
-                                line += ", "
-                            else:
-                                line += "."
+                                line += " | "
 
                             if len(message + line) > 480:
-                                temp_messages.append(message.rstrip(', '))
+                                temp_messages.append(message.rstrip(' | '))
                                 message = prefix + line
                             else:
                                 message += line
 
-                        temp_messages.append(message.rstrip(', '))
+                        temp_messages.append(message.rstrip(' | '))
                         messages.extend(temp_messages)
 
 
