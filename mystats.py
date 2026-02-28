@@ -2872,6 +2872,7 @@ def _build_main_dashboard_payload():
         },
         'settings': {
             'language': get_ui_language(),
+            'rivals': get_rival_settings(),
         },
     }
 
@@ -3678,7 +3679,11 @@ def open_settings_window():
     rivals_pair_count_entry.insert(0, config.get_setting("rivals_pair_count") or "25")
 
     ttk.Button(rivals_tab, text="View Rivalries", command=lambda: open_rivalries_window(settings_window)).grid(row=5, column=0, sticky="w", pady=(8, 0))
-    ttk.Label(rivals_tab, text="Tip: use !h2h <user1> <user2> to compare two players head-to-head.", style="Small.TLabel").grid(row=6, column=0, columnspan=2, sticky="w", pady=(10, 0))
+    ttk.Label(rivals_tab, text="How Rivals works: only players above Minimum Season Races are considered.", style="Small.TLabel").grid(row=6, column=0, columnspan=2, sticky="w", pady=(10, 0))
+    ttk.Label(rivals_tab, text="Pairs qualify when their season points are within Maximum Point Gap, then closest gaps are ranked.", style="Small.TLabel").grid(row=7, column=0, columnspan=2, sticky="w", pady=(2, 0))
+    ttk.Label(rivals_tab, text="Chat helpers: !rivals <user> for personal rivals and !h2h <user1> <user2> for direct comparison.", style="Small.TLabel").grid(row=8, column=0, columnspan=2, sticky="w", pady=(6, 0))
+    ttk.Label(rivals_tab, text="Need a deeper breakdown? Open the Rivals dashboard tab for a guide and live rivalry context.", style="Small.TLabel").grid(row=9, column=0, columnspan=2, sticky="w", pady=(6, 0))
+    ttk.Button(rivals_tab, text="Open Rivals Dashboard", command=open_rivals_dashboard).grid(row=10, column=0, sticky="w", pady=(8, 0))
 
     # --- MyCycle tab ---
     ttk.Label(mycycle_tab, text="Track placement cycles (uses your configured min/max placements) and custom sessions", style="Small.TLabel").grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 8))
@@ -4167,6 +4172,11 @@ def open_url(event):
 
 def open_dashboard():
     dashboard_url = f"http://127.0.0.1:{_load_overlay_server_port()}/dashboard"
+    webbrowser.open_new(dashboard_url)
+
+
+def open_rivals_dashboard():
+    dashboard_url = f"http://127.0.0.1:{_load_overlay_server_port()}/dashboard#rivals"
     webbrowser.open_new(dashboard_url)
 
 
