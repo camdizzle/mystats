@@ -11,8 +11,52 @@ const I18N = {
     'No active run standings yet.': 'Aún no hay posiciones de la partida activa.',
     'No completed tilt run yet.': 'Aún no hay una partida tilt completada.',
   },
+  au: {
+    'MyStats Tilt Run Tracker': 'MyStats Tilt Run Tracker, cobber',
+    'Active': 'Flat Out',
+    'Idle': 'Taking a Breather',
+    'No active run standings yet.': 'No active run standings yet, still warming up.',
+    'No completed tilt run yet.': 'No completed tilt run yet, hang tight.',
+  },
 };
-const t = (key) => I18N[currentLanguage]?.[key] || key;
+const AUSSIE_SLANG_REPLACEMENTS = [
+  ['thank you', 'cheers'],
+  ['thanks', 'cheers'],
+  ['friend', 'mate'],
+  ['friends', 'mates'],
+  ['everyone', 'all the mates'],
+  ['great', 'bonza'],
+  ['very', 'bloody'],
+  ['really', 'bloody'],
+  ['goodbye', 'hooroo'],
+  ['good', 'bonza'],
+  ['active', 'flat out'],
+  ['idle', 'taking a breather'],
+  ['updated', 'fresh off the barbie'],
+];
+
+function toAussieSlang(text) {
+  let slang = String(text ?? '');
+  AUSSIE_SLANG_REPLACEMENTS
+    .sort((a, b) => b[0].length - a[0].length)
+    .forEach(([source, target]) => {
+      const pattern = new RegExp(`\\b${source.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}\\b`, 'gi');
+      slang = slang.replace(pattern, target);
+    });
+
+  slang = slang.replace(/\s+/g, ' ').trim();
+  if (!slang) return 'mate';
+  if (!/\bmate\b[.!?]*$/i.test(slang)) {
+    slang = slang.replace(/[.!?]+$/, '').trim();
+    slang = `${slang}, mate`;
+  }
+  return slang;
+}
+
+const t = (key) => {
+  const translated = I18N[currentLanguage]?.[key] || key;
+  return currentLanguage === 'au' ? toAussieSlang(translated) : translated;
+};
 
 const defaultSettings = {
   refresh_seconds: 3,

@@ -36,11 +36,78 @@ const I18N = {
     'Updated now': 'Actualizado ahora',
     'Updated': 'Actualizado',
     'Unable to load MyCycle data.': 'No se pudieron cargar los datos de MyCycle.',
+  },
+  au: {
+    'Tracked Racers': 'Tracked Mates on the Track',
+    'Total Cycles Completed': 'Total Cycles Knocked Over',
+    'Within 2 Positions': 'Within 2 Spots, too right',
+    'Cycle Highlights': 'Cycle Highlights, bonza bits',
+    'No cycle completions yet': 'No cycle completions yet, give it a tick',
+    'Top Cycler': 'Top Cycler, absolute legend',
+    'Newest Cycler': 'Newest Cycler on the scene',
+    'cycles completed': 'cycles smashed out',
+    'No active session': 'No active session right now',
+    'Session': 'Session, mate zone',
+    'No MyCycle race data yet.': 'No MyCycle race data yet, not a sausage.',
+    'positions': 'spots',
+    'Missing': 'Still chasing',
+    'None': 'Nunya',
+    'Current races': 'Current races on the go',
+    'Last cycle': 'Last cycle run',
+    'No season quest data yet.': 'No season quest data yet, matey.',
+    'complete': 'done and dusted',
+    'Disabled': 'Switched off',
+    'No tilt competitors yet.': 'No tilt competitors yet, waiting on the crew.',
+    'Death Rate': 'Death Rate, rough as guts',
+    'Deaths Today': 'Deaths Today, crikey count',
+    'Total Tilt Points': 'Total Tilt Points, ripper tally',
+    'No rivals found. Lower minimum races or increase max point gap in settings.': 'No rivals found. Drop minimum races or widen point gap in settings, mate.',
+    'No competitors found for this filter.': 'No competitors for this filter, try another one.',
+    'Updated now': 'Updated just now, fresh as',
+    'Updated': 'Updated, fresh off the barbie',
+    'Unable to load MyCycle data.': 'Could not load MyCycle data, bit crook.',
   }
 };
 
 let currentLanguage = 'en';
-const t = (key) => I18N[currentLanguage]?.[key] || key;
+const AUSSIE_SLANG_REPLACEMENTS = [
+  ['thank you', 'cheers'],
+  ['thanks', 'cheers'],
+  ['friend', 'mate'],
+  ['friends', 'mates'],
+  ['everyone', 'all the mates'],
+  ['great', 'bonza'],
+  ['very', 'bloody'],
+  ['really', 'bloody'],
+  ['goodbye', 'hooroo'],
+  ['good', 'bonza'],
+  ['active', 'flat out'],
+  ['idle', 'taking a breather'],
+  ['updated', 'fresh off the barbie'],
+];
+
+function toAussieSlang(text) {
+  let slang = String(text ?? '');
+  AUSSIE_SLANG_REPLACEMENTS
+    .sort((a, b) => b[0].length - a[0].length)
+    .forEach(([source, target]) => {
+      const pattern = new RegExp(`\\b${source.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}\\b`, 'gi');
+      slang = slang.replace(pattern, target);
+    });
+
+  slang = slang.replace(/\s+/g, ' ').trim();
+  if (!slang) return 'mate';
+  if (!/\bmate\b[.!?]*$/i.test(slang)) {
+    slang = slang.replace(/[.!?]+$/, '').trim();
+    slang = `${slang}, mate`;
+  }
+  return slang;
+}
+
+const t = (key) => {
+  const translated = I18N[currentLanguage]?.[key] || key;
+  return currentLanguage === 'au' ? toAussieSlang(translated) : translated;
+};
 
 function fmt(n) {
   const x = Number(n || 0);
@@ -545,7 +612,7 @@ function renderRaceDashboardKpis(rows = [], filterMode = 'both') {
   const avgPoints = totalEvents > 0 ? (totalPoints / totalEvents) : 0;
 
   host.innerHTML = [
-    { label: 'Tracked Racers', value: fmt(filteredRows.length) },
+    { label: t('Tracked Racers'), value: fmt(filteredRows.length) },
     { label: filterMode === 'race' ? 'Total Races' : (filterMode === 'br' ? 'Total BRs' : 'Total Events'), value: fmt(totalEvents) },
     { label: 'Total Points', value: fmt(totalPoints) },
     { label: 'Avg Points/Event', value: avgPoints.toFixed(1) },
