@@ -240,6 +240,14 @@ function updateTrackerVisibility() {
   if (!levelOverlay || levelOverlay.hidden) levelOverlayActive = false;
   if (!runOverlay || runOverlay.hidden) runOverlayActive = false;
 
+  // Defensive reconciliation: if overlay state says inactive, force-hide any lingering overlay DOM.
+  if (levelOverlay && !levelOverlayActive && !levelOverlay.hidden) {
+    setLevelOverlayVisible(false);
+  }
+  if (runOverlay && !runOverlayActive && !runOverlay.hidden) {
+    setRunOverlayVisible(false);
+  }
+
   const showingRecap =
     (levelOverlayActive && !!levelOverlay && !levelOverlay.hidden)
     || (runOverlayActive && !!runOverlay && !runOverlay.hidden);
@@ -390,8 +398,6 @@ function renderLastRun(lastRun = {}) {
   const hasRecentRun = hasRunId && isLastRunFromToday(lastRun);
 
   document.body?.setAttribute('data-has-last-run', hasRecentRun ? 'true' : 'false');
-
-  document.body?.setAttribute('data-has-last-run', hasRun ? 'true' : 'false');
 
   if (section) {
     section.hidden = !hasRecentRun;
