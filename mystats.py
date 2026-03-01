@@ -1377,6 +1377,61 @@ def parse_tilt_result_detail(row):
     }
 
 
+def get_tilt_xp_totals_from_results_files(target_date=None):
+    """Calculate Tilt XP from season result files.
+
+    Returns a tuple of (season_xp, day_xp). `day_xp` is filtered by `target_date`
+    using the MyStats internal Marble Day clock (YYYY-MM-DD).
+    """
+    data_dir = config.get_setting('directory')
+    if not data_dir:
+        return 0, 0
+
+    level_survivors = defaultdict(int)
+    level_survivors_by_day = defaultdict(int)
+
+    for tilts_file in sorted(glob.glob(os.path.join(data_dir, "tilts_*.csv"))):
+        file_date = os.path.basename(tilts_file)[6:16]
+        try:
+            with open(tilts_file, 'rb') as f:
+                raw_data = f.read()
+            result = chardet.detect(raw_data)
+            encoding = result['encoding'] if result['encoding'] else 'utf-8'
+
+            with open(tilts_file, 'r', encoding=encoding, errors='ignore') as f:
+                reader = csv.reader(f)
+                for row in reader:
+                    parsed = parse_tilt_result_row(row)
+                    if parsed is None:
+                        continue
+
+                    _, points, run_id = parsed
+                    if points <= 0 or len(row) < 2:
+                        continue
+
+                    try:
+                        level_number = int(''.join(ch for ch in str(row[1]).strip() if ch.isdigit()) or '0')
+                    except (TypeError, ValueError):
+                        level_number = 0
+
+                    if level_number <= 0:
+                        continue
+
+                    level_key = (str(run_id), level_number)
+                    level_survivors[level_key] += 1
+                    if target_date and file_date == target_date:
+                        level_survivors_by_day[level_key] += 1
+
+        except FileNotFoundError:
+            continue
+        except Exception as e:
+            print(e)
+
+    season_xp = int(sum(math.floor(count * get_tilt_multiplier(level)) for (_, level), count in level_survivors.items()))
+    day_xp = int(sum(math.floor(count * get_tilt_multiplier(level)) for (_, level), count in level_survivors_by_day.items()))
+    return season_xp, day_xp
+
+
 def is_tilt_top_tiltee_milestone(count):
     if count in (3, 5):
         return True
@@ -7923,13 +7978,19 @@ class Bot(commands.Bot):
     async def xp_command(self, ctx):
         last_level_xp = get_int_setting('tilt_last_level_xp', 0)
         last_run_xp = get_int_setting('tilt_previous_run_xp', 0)
-        today_xp = get_int_setting('tilt_total_xp_today', 0)
-        season_xp = get_int_setting('tilt_lifetime_expertise', 0)
+
+        marble_day = str(config.get_setting('marble_day') or '').strip()
+        if not marble_day:
+            _, _, _, adjusted_time = time_manager.get_adjusted_time()
+            marble_day = adjusted_time.strftime("%Y-%m-%d")
+
+        season_xp, today_xp = get_tilt_xp_totals_from_results_files(target_date=marble_day)
+        lifetime_xp = get_int_setting('tilt_lifetime_expertise', 0)
 
         await send_chat_message(
             ctx.channel,
             f"⚖️ Expertise Stats | Last Level XP: {last_level_xp:,} | Last Run XP: {last_run_xp:,} | "
-            f"Today's XP: {today_xp:,} | Season XP: {season_xp:,}",
+            f"Todays XP: {today_xp:,} | Season XP: {season_xp:,} | Lifetime XP: {lifetime_xp:,}",
             category="mystats"
         )
 
