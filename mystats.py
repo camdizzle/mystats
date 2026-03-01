@@ -779,6 +779,529 @@ def parse_boolean_token(value, default=False):
     return default
 
 
+def normalize_channel_name(value):
+    raw_value = str(value or '').strip().lower()
+    if not raw_value:
+        return ''
+
+    if raw_value.startswith('https://') or raw_value.startswith('http://'):
+        raw_value = raw_value.rstrip('/').split('/')[-1]
+
+    return raw_value.lstrip('@')
+
+
+def _walk_payload_nodes(payload):
+    stack = [payload]
+    while stack:
+        current = stack.pop()
+        yield current
+        if isinstance(current, dict):
+            for value in current.values():
+                if isinstance(value, (dict, list)):
+                    stack.append(value)
+        elif isinstance(current, list):
+            for value in current:
+                if isinstance(value, (dict, list)):
+                    stack.append(value)
+
+
+def _extract_streamer_candidates(payload):
+    candidates = []
+
+    for current in _walk_payload_nodes(payload):
+        if not isinstance(current, dict):
+            continue
+
+        streamer_value = None
+        for key in ('streamer', 'streamer_username', 'streamerUsername', 'channel', 'username', 'twitch'):
+            if key in current and str(current.get(key) or '').strip():
+                streamer_value = current.get(key)
+                break
+
+        if streamer_value is None:
+            continue
+
+        normalized_streamer = normalize_channel_name(streamer_value)
+        if not normalized_streamer:
+            continue
+
+        score = 0
+        status_tokens = str(current.get('status') or '').strip().lower()
+        if status_tokens in {'active', 'current', 'live', 'selected'}:
+            score += 3
+
+        for key in ('active', 'is_active', 'isActive', 'current', 'is_current', 'isCurrent', 'selected', 'is_selected'):
+            if parse_boolean_token(current.get(key), default=False):
+                score += 3
+                break
+
+        context_blob = ' '.join(f"{k}={v}" for k, v in current.items()).lower()
+        if 'competitive' in context_blob:
+            score += 2
+        if 'raid' in context_blob:
+            score += 2
+
+        candidates.append((score, normalized_streamer))
+
+    return candidates
+
+
+def _parse_competition_timestamp(raw_value):
+    if raw_value is None:
+        return None
+
+    if isinstance(raw_value, (int, float)):
+        ts = float(raw_value)
+        if ts > 10_000_000_000:
+            ts /= 1000.0
+        try:
+            return datetime.fromtimestamp(ts, tz=timezone.utc)
+        except (OverflowError, OSError, ValueError):
+            return None
+
+    token = str(raw_value).strip()
+    if not token:
+        return None
+
+    try:
+        as_num = float(token)
+        if as_num > 10_000_000_000:
+            as_num /= 1000.0
+        return datetime.fromtimestamp(as_num, tz=timezone.utc)
+    except (TypeError, ValueError, OverflowError, OSError):
+        pass
+
+    try:
+        parsed = parser.parse(token)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def get_competitive_raid_started_at(payload):
+    preferred_keys = (
+        'raid_started_at', 'raidStartTime', 'raid_start_time', 'start_time',
+        'startTime', 'started_at', 'startedAt', 'timestamp', 'time'
+    )
+
+    if isinstance(payload, dict):
+        for key in preferred_keys:
+            parsed = _parse_competition_timestamp(payload.get(key))
+            if parsed is not None:
+                return parsed
+
+    for node in _walk_payload_nodes(payload):
+        if not isinstance(node, dict):
+            continue
+        for key in preferred_keys:
+            parsed = _parse_competition_timestamp(node.get(key))
+            if parsed is not None:
+                return parsed
+
+    return None
+
+
+def get_current_competitive_raid_streamer(payload):
+    candidates = _extract_streamer_candidates(payload)
+    if not candidates:
+        return None
+
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    return candidates[0][1]
+
+
+def _extract_top_three_entries(payload):
+    candidates = []
+    score_keys = ('score', 'points', 'xp', 'value', 'total')
+
+    for node in _walk_payload_nodes(payload):
+        if not isinstance(node, list) or len(node) < 3:
+            continue
+
+        entries = []
+        for item in node:
+            if not isinstance(item, dict):
+                continue
+
+            username = ''
+            for name_key in ('streamer', 'streamer_username', 'streamerUsername', 'channel', 'username', 'name'):
+                username = normalize_channel_name(item.get(name_key))
+                if username:
+                    break
+            if not username:
+                continue
+
+            score_value = None
+            for score_key in score_keys:
+                if score_key in item:
+                    try:
+                        score_value = int(float(item.get(score_key) or 0))
+                    except (TypeError, ValueError):
+                        score_value = None
+                    break
+
+            rank_raw = item.get('rank')
+            try:
+                rank_value = int(float(rank_raw)) if rank_raw is not None else None
+            except (TypeError, ValueError):
+                rank_value = None
+
+            entries.append({'streamer': username, 'score': score_value, 'rank': rank_value})
+
+        if len(entries) < 3:
+            continue
+
+        ranked_count = sum(1 for e in entries if e.get('rank') is not None)
+        scored_count = sum(1 for e in entries if e.get('score') is not None)
+        list_score = ranked_count * 2 + scored_count
+        candidates.append((list_score, entries))
+
+    if not candidates:
+        return []
+
+    _, entries = max(candidates, key=lambda pair: pair[0])
+
+    if any(e.get('rank') is not None for e in entries):
+        entries.sort(key=lambda e: (e.get('rank') is None, e.get('rank') if e.get('rank') is not None else 999999))
+    elif any(e.get('score') is not None for e in entries):
+        entries.sort(key=lambda e: (e.get('score') is None, -(e.get('score') or 0)))
+
+    return entries[:3]
+
+
+def format_competitive_raid_top_three(entries):
+    if not entries:
+        return None
+
+    formatted = []
+    for place, entry in enumerate(entries[:3], start=1):
+        label = f"{place}) {entry.get('streamer', 'unknown')}"
+        score = entry.get('score')
+        if score is not None:
+            label += f" ({score:,})"
+        formatted.append(label)
+
+    return "🏁 Competitive raid final top 3: " + " | ".join(formatted)
+
+
+def fetch_competitions_payload(timeout=20):
+    response = requests.get("https://pixelbypixel.studio/api/competitions", timeout=timeout)
+    response.raise_for_status()
+    return response.json()
+
+
+def fetch_competitions_history_payload(timeout=20):
+    history_urls = [
+        "https://pixelbypixel.studio/api/competitions/history",
+        "https://pixelbypixel.studio/api/competition-history",
+    ]
+
+    last_error = None
+    for history_url in history_urls:
+        try:
+            response = requests.get(history_url, timeout=timeout)
+            response.raise_for_status()
+            return response.json()
+        except requests.RequestException as error:
+            last_error = error
+
+    if last_error is not None:
+        raise last_error
+
+    raise requests.RequestException("No competition history endpoint candidates configured")
+
+
+def get_competitive_raid_poll_delay_seconds(started_at, now=None):
+    if started_at is None:
+        return 180
+
+    now_utc = now.astimezone(timezone.utc) if now else datetime.now(timezone.utc)
+    elapsed_seconds = max(0, int((now_utc - started_at).total_seconds()))
+    cycle_seconds = 20 * 60
+    position_in_cycle = elapsed_seconds % cycle_seconds
+    seconds_to_rotation = cycle_seconds - position_in_cycle
+
+    if position_in_cycle < 5 * 60:
+        baseline = 90
+    else:
+        baseline = 150
+
+    if seconds_to_rotation <= 75:
+        return max(15, seconds_to_rotation + 2)
+
+    return baseline
+
+
+def _collect_payload_field_names(payload):
+    field_names = set()
+    for node in _walk_payload_nodes(payload):
+        if isinstance(node, dict):
+            field_names.update(str(key) for key in node.keys())
+    return sorted(field_names)
+
+
+def _extract_raid_streamer_stats(payload, selected_streamer):
+    target = normalize_channel_name(selected_streamer)
+    if not target:
+        return None
+
+    best_match = None
+    best_score = -1
+
+    for node in _walk_payload_nodes(payload):
+        if not isinstance(node, dict):
+            continue
+
+        node_streamer = None
+        for key in ('streamer', 'streamer_username', 'streamerUsername', 'channel', 'username', 'twitch', 'name'):
+            candidate = normalize_channel_name(node.get(key))
+            if candidate:
+                node_streamer = candidate
+                break
+
+        if node_streamer != target:
+            continue
+
+        score = sum(1 for value in node.values() if not isinstance(value, (dict, list)))
+        if score > best_score:
+            best_score = score
+            best_match = node
+
+    if not isinstance(best_match, dict):
+        return None
+
+    stats = {}
+    for key, value in best_match.items():
+        if isinstance(value, (dict, list)):
+            continue
+        stats[str(key)] = value
+
+    stats['streamer_normalized'] = target
+    return stats
+
+
+def persist_competitive_raid_snapshot(payload, selected_streamer, started_at):
+    season_directory = config.get_setting('directory')
+    if not season_directory:
+        return
+
+    os.makedirs(season_directory, exist_ok=True)
+
+    field_names = _collect_payload_field_names(payload)
+    field_path = os.path.join(season_directory, 'competitive_raid_payload_fields.json')
+    with open(field_path, 'w', encoding='utf-8', errors='ignore') as field_file:
+        json.dump(field_names, field_file, ensure_ascii=False, indent=2)
+
+    stats = _extract_raid_streamer_stats(payload, selected_streamer)
+    if not stats:
+        return
+
+    record = {
+        'captured_at_utc': datetime.now(timezone.utc).isoformat(),
+        'raid_started_at_utc': started_at.isoformat() if started_at else None,
+        'streamer': normalize_channel_name(selected_streamer),
+        'stats': stats,
+    }
+
+    stats_path = os.path.join(season_directory, 'competitive_raid_streamer_stats.jsonl')
+    with open(stats_path, 'a', encoding='utf-8', errors='ignore') as stats_file:
+        stats_file.write(json.dumps(record, ensure_ascii=False) + '\n')
+
+
+
+def _extract_phase_streamer_info(payload):
+    queue_candidate = None
+    queue_score = -1
+    live_candidate = None
+    live_score = -1
+
+    queue_ts_keys = ('queue_started_at', 'queueStartTime', 'queue_start_time', 'queue_timestamp', 'queue_time')
+    live_ts_keys = ('raid_started_at', 'raidStartTime', 'raid_start_time', 'live_started_at', 'liveStartTime', 'start_time', 'startTime', 'started_at', 'startedAt', 'timestamp', 'time')
+
+    for node in _walk_payload_nodes(payload):
+        if not isinstance(node, dict):
+            continue
+
+        streamer_name = ''
+        for key in ('streamer', 'streamer_username', 'streamerUsername', 'channel', 'username', 'twitch', 'name'):
+            streamer_name = normalize_channel_name(node.get(key))
+            if streamer_name:
+                break
+
+        if not streamer_name:
+            continue
+
+        status = str(node.get('status') or '').strip().lower()
+        context = ' '.join(str(k) for k in node.keys()).lower() + ' ' + ' '.join(str(v) for v in node.values()).lower()
+
+        queue_weight = 0
+        if 'queue' in context:
+            queue_weight += 3
+        if status in {'queued', 'queue', 'waiting', 'upnext', 'next'}:
+            queue_weight += 4
+
+        live_weight = 0
+        if any(token in context for token in ('live', 'active', 'current', 'in_progress', 'started')):
+            live_weight += 2
+        if status in {'live', 'active', 'current', 'in_progress', 'started'}:
+            live_weight += 4
+        for key in ('active', 'is_active', 'isActive', 'current', 'is_current', 'isCurrent'):
+            if parse_boolean_token(node.get(key), default=False):
+                live_weight += 3
+                break
+
+        queue_started_at = None
+        for key in queue_ts_keys:
+            parsed = _parse_competition_timestamp(node.get(key))
+            if parsed is not None:
+                queue_started_at = parsed
+                break
+
+        live_started_at = None
+        for key in live_ts_keys:
+            parsed = _parse_competition_timestamp(node.get(key))
+            if parsed is not None:
+                live_started_at = parsed
+                break
+
+        if queue_weight > queue_score:
+            queue_score = queue_weight
+            queue_candidate = {'streamer': streamer_name, 'started_at': queue_started_at, 'source': node}
+
+        if live_weight > live_score:
+            live_score = live_weight
+            live_candidate = {'streamer': streamer_name, 'started_at': live_started_at, 'source': node}
+
+    fallback_streamer = get_current_competitive_raid_streamer(payload)
+    fallback_started = get_competitive_raid_started_at(payload)
+
+    if queue_candidate is None and fallback_streamer:
+        queue_candidate = {'streamer': fallback_streamer, 'started_at': None, 'source': None}
+
+    if live_candidate is None and fallback_streamer:
+        live_candidate = {'streamer': fallback_streamer, 'started_at': fallback_started, 'source': None}
+
+    return queue_candidate, live_candidate
+
+
+def _format_history_summary_for_streamer(entry, streamer_name):
+    if not isinstance(entry, dict):
+        return f"🏁 Competitive raid summary for {streamer_name}: no history entry found yet."
+
+    rank = entry.get('rank')
+    points = entry.get('points')
+    score = entry.get('score') if entry.get('score') is not None else points
+    wins = entry.get('wins')
+
+    details = [f"streamer: {streamer_name}"]
+    if rank is not None:
+        details.append(f"rank: {rank}")
+    if score is not None:
+        details.append(f"score: {score}")
+    if wins is not None:
+        details.append(f"wins: {wins}")
+
+    return "🏁 Competitive raid summary | " + ' | '.join(details)
+
+
+def _latest_history_entry_for_streamer(payload, streamer_name):
+    target = normalize_channel_name(streamer_name)
+    if not target:
+        return None
+
+    best = None
+    best_ts = None
+
+    for node in _walk_payload_nodes(payload):
+        if not isinstance(node, dict):
+            continue
+
+        node_name = ''
+        for key in ('streamer', 'streamer_username', 'streamerUsername', 'channel', 'username', 'twitch', 'name'):
+            node_name = normalize_channel_name(node.get(key))
+            if node_name:
+                break
+
+        if node_name != target:
+            continue
+
+        node_ts = None
+        for key in ('raid_started_at', 'raidStartTime', 'raid_start_time', 'start_time', 'startTime', 'started_at', 'startedAt', 'timestamp', 'time', 'created_at', 'createdAt'):
+            node_ts = _parse_competition_timestamp(node.get(key))
+            if node_ts is not None:
+                break
+
+        if best is None or (node_ts is not None and (best_ts is None or node_ts > best_ts)):
+            best = node
+            best_ts = node_ts
+
+    return best
+
+
+def _parse_iso_utc(raw_value):
+    token = str(raw_value or '').strip()
+    if not token:
+        return None
+    try:
+        parsed = parser.parse(token)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+
+def _extract_participant_count(payload, preferred_node=None, streamer_name=None):
+    count_keys = (
+        'participants', 'participant_count', 'participantCount',
+        'players', 'player_count', 'playerCount',
+        'entries', 'entry_count', 'entryCount',
+        'queued', 'queue_count', 'queueCount'
+    )
+
+    candidate_nodes = []
+    if isinstance(preferred_node, dict):
+        candidate_nodes.append(preferred_node)
+
+    target_streamer = normalize_channel_name(streamer_name)
+    for node in _walk_payload_nodes(payload):
+        if not isinstance(node, dict):
+            continue
+
+        if target_streamer:
+            node_streamer = ''
+            for key in ('streamer', 'streamer_username', 'streamerUsername', 'channel', 'username', 'twitch', 'name'):
+                node_streamer = normalize_channel_name(node.get(key))
+                if node_streamer:
+                    break
+            if node_streamer and node_streamer != target_streamer:
+                continue
+
+        candidate_nodes.append(node)
+
+    for node in candidate_nodes:
+        for key in count_keys:
+            if key not in node:
+                continue
+            value = node.get(key)
+            if isinstance(value, list):
+                return len(value)
+            if isinstance(value, dict):
+                for nested_key in ('count', 'total', 'size', 'length'):
+                    if nested_key in value:
+                        return _safe_int(value.get(nested_key))
+            parsed = _safe_int(value)
+            if parsed > 0:
+                return parsed
+
+    return None
+
+
+
 def parse_tilt_result_row(row):
     """Parse a tilt results row written by `tilted` and return (username, points, run_id)."""
     if len(row) < 5:
@@ -3564,10 +4087,12 @@ def open_settings_window():
     chat_br_results_var = tk.BooleanVar(value=is_chat_response_enabled("chat_br_results"))
     chat_race_results_var = tk.BooleanVar(value=is_chat_response_enabled("chat_race_results"))
     chat_all_commands_var = tk.BooleanVar(value=is_chat_response_enabled("chat_all_commands"))
+    competitive_raid_monitor_enabled_var = tk.BooleanVar(value=is_chat_response_enabled("competitive_raid_monitor_enabled"))
 
     ttk.Checkbutton(chat_tab, text="BR Results", variable=chat_br_results_var).grid(row=1, column=0, sticky="w", pady=2)
     ttk.Checkbutton(chat_tab, text="Race Results", variable=chat_race_results_var).grid(row=2, column=0, sticky="w", pady=2)
     ttk.Checkbutton(chat_tab, text="All !commands", variable=chat_all_commands_var).grid(row=3, column=0, sticky="w", pady=2)
+    ttk.Checkbutton(chat_tab, text="Competitive Raid Alerts (opt-in)", variable=competitive_raid_monitor_enabled_var).grid(row=4, column=0, sticky="w", pady=2)
 
     race_narrative_alerts_var = tk.BooleanVar(value=is_chat_response_enabled("race_narrative_alerts_enabled"))
     race_narrative_grinder_var = tk.BooleanVar(value=is_chat_response_enabled("race_narrative_grinder_enabled"))
@@ -3575,7 +4100,7 @@ def open_settings_window():
     race_narrative_leadchange_var = tk.BooleanVar(value=is_chat_response_enabled("race_narrative_leadchange_enabled"))
 
     race_alerts_frame = ttk.LabelFrame(chat_tab, text="Race Narrative Player Alerts", style="Card.TLabelframe")
-    race_alerts_frame.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+    race_alerts_frame.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(10, 0))
 
     ttk.Checkbutton(race_alerts_frame, text="Narrative Alerts", variable=race_narrative_alerts_var).grid(row=0, column=0, sticky="w", padx=10, pady=(8, 4))
     ttk.Checkbutton(race_alerts_frame, text="Grinder milestones", variable=race_narrative_grinder_var).grid(row=1, column=0, sticky="w", padx=10, pady=2)
@@ -3598,7 +4123,7 @@ def open_settings_window():
     race_narrative_max_items_entry.insert(0, config.get_setting("race_narrative_alert_max_items") or "3")
 
     message_delay_frame = ttk.LabelFrame(chat_tab, text="Message Delay", style="Card.TLabelframe")
-    message_delay_frame.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+    message_delay_frame.grid(row=6, column=0, columnspan=2, sticky="ew", pady=(10, 0))
 
     announce_delay_var = tk.BooleanVar(value=config.get_setting("announcedelay") == "True")
     ttk.Checkbutton(message_delay_frame, text="Enable Delay", variable=announce_delay_var).grid(row=0, column=0, sticky="w", padx=10, pady=(8, 6))
@@ -3976,6 +4501,7 @@ def open_settings_window():
         chat_race_results_var.set(True)
         chat_tilt_results_var.set(True)
         chat_all_commands_var.set(True)
+        competitive_raid_monitor_enabled_var.set(False)
         chat_narrative_alerts_var.set(True)
         chat_tilt_suppress_offline_var.set(True)
         narrative_alert_grinder_var.set(True)
@@ -4083,6 +4609,7 @@ def open_settings_window():
         config.set_setting("chat_tilt_results", str(chat_tilt_results_var.get()), persistent=True)
         config.set_setting("chat_tilt_suppress_offline", str(chat_tilt_suppress_offline_var.get()), persistent=True)
         config.set_setting("chat_all_commands", str(chat_all_commands_var.get()), persistent=True)
+        config.set_setting("competitive_raid_monitor_enabled", str(competitive_raid_monitor_enabled_var.get()), persistent=True)
         config.set_setting("chat_narrative_alerts", str(chat_narrative_alerts_var.get()), persistent=True)
         config.set_setting("narrative_alert_grinder_enabled", str(narrative_alert_grinder_var.get()), persistent=True)
         config.set_setting("narrative_alert_winmilestone_enabled", str(narrative_alert_winmilestone_var.get()), persistent=True)
@@ -5158,7 +5685,7 @@ class ConfigManager:
                                 'tilts_results_file', 'tilt_level_file', 'map_data_file', 'map_results_file',
                                 'UI_THEME', 'chat_br_results', 'chat_race_results', 'chat_tilt_results',
                                 'chat_tilt_suppress_offline',
-                                'chat_mystats_command', 'chat_all_commands', 'chat_narrative_alerts',
+                                'chat_mystats_command', 'chat_all_commands', 'chat_narrative_alerts', 'competitive_raid_monitor_enabled', 'competitive_raid_phase', 'competitive_raid_queue_started_at', 'competitive_raid_live_started_at', 'competitive_raid_last_summary_live_started_at',
                                 'narrative_alert_grinder_enabled', 'narrative_alert_winmilestone_enabled',
                                 'narrative_alert_leadchange_enabled', 'narrative_alert_cooldown_races',
                                 'narrative_alert_min_lead_change_points', 'narrative_alert_max_items',
@@ -5191,6 +5718,11 @@ class ConfigManager:
             'chat_mystats_command': 'True',
             'chat_all_commands': 'True',
             'chat_narrative_alerts': 'True',
+            'competitive_raid_monitor_enabled': 'False',
+            'competitive_raid_phase': 'idle',
+            'competitive_raid_queue_started_at': '',
+            'competitive_raid_live_started_at': '',
+            'competitive_raid_last_summary_live_started_at': '',
             'narrative_alert_grinder_enabled': 'True',
             'narrative_alert_winmilestone_enabled': 'True',
             'narrative_alert_leadchange_enabled': 'True',
@@ -6507,6 +7039,11 @@ class Bot(commands.Bot):
         self.tasks = []  # List to keep track of tasks
         self.stop_event = asyncio.Event()  # Event to signal tasks to stop
         self.background_tasks_started = False
+        self.last_competitive_raid_streamer = None
+        self.last_competitive_raid_started_at = None
+        self.last_competitive_raid_channel_announcement_cycle = None
+        self.last_competitive_raid_final_announcement_cycle = None
+        self.last_competitive_raid_field_list_signature = None
 
     def get_valid_token(self):
         # Load token from the token file if it exists, otherwise fallback to config token
@@ -6553,6 +7090,7 @@ class Bot(commands.Bot):
         self.tasks.append(self.loop.create_task(race(self)))
         self.tasks.append(self.loop.create_task(royale(self)))
         self.tasks.append(self.loop.create_task(tilted(self)))
+        self.tasks.append(self.loop.create_task(competitive_raid_monitor(self)))
 
         # Start background tasks in separate threads
         if config.get_setting('sync').lower() != 'yes':
@@ -8061,6 +8599,136 @@ def process_season(directory, season):
         print("error", e)
     except json.JSONDecodeError as e:
         print("Failed to decode JSON from response:", e)
+
+
+async def competitive_raid_monitor(bot):
+    next_poll_at = None
+
+    while not bot.stop_event.is_set():
+        try:
+            monitor_enabled = parse_boolean_token(config.get_setting('competitive_raid_monitor_enabled'), default=False)
+            if not monitor_enabled:
+                next_poll_at = None
+                await asyncio.sleep(2)
+                continue
+
+            now_monotonic = time.monotonic()
+            if next_poll_at is not None and now_monotonic < next_poll_at:
+                await asyncio.sleep(min(5, max(0.5, next_poll_at - now_monotonic)))
+                continue
+
+            payload = await asyncio.to_thread(fetch_competitions_payload)
+            payload_fields = _collect_payload_field_names(payload)
+            payload_signature = '|'.join(payload_fields)
+            if payload_signature != bot.last_competitive_raid_field_list_signature:
+                print(f"Competitive raid payload fields ({len(payload_fields)}): {', '.join(payload_fields)}")
+                bot.last_competitive_raid_field_list_signature = payload_signature
+
+            local_streamer = normalize_channel_name(bot.channel_name)
+            queue_info, live_info = _extract_phase_streamer_info(payload)
+            queue_streamer = normalize_channel_name((queue_info or {}).get('streamer'))
+            live_streamer = normalize_channel_name((live_info or {}).get('streamer'))
+
+            queue_started_at = (queue_info or {}).get('started_at') or _parse_iso_utc(config.get_setting('competitive_raid_queue_started_at'))
+            live_started_at = (live_info or {}).get('started_at') or _parse_iso_utc(config.get_setting('competitive_raid_live_started_at'))
+
+            if queue_streamer:
+                bot.last_competitive_raid_streamer = queue_streamer
+                persist_competitive_raid_snapshot(payload, queue_streamer, live_started_at)
+
+            if queue_streamer == local_streamer and queue_started_at is not None:
+                queue_start_iso = queue_started_at.isoformat()
+                if config.get_setting('competitive_raid_queue_started_at') != queue_start_iso:
+                    config.set_setting('competitive_raid_queue_started_at', queue_start_iso, persistent=True)
+                    config.set_setting('competitive_raid_phase', 'queue', persistent=True)
+                    queue_message = (
+                        f"🟡 {local_streamer} is next up for competitive raids! "
+                        f"Queue is open now: https://pixelbypixel.studio/competitions"
+                    )
+                    if bot.channel is not None:
+                        await send_chat_message(bot.channel, queue_message, category='race')
+                    enqueue_overlay_event('raid_queue_open', queue_message)
+
+            if live_streamer == local_streamer and live_started_at is not None:
+                live_start_iso = live_started_at.isoformat()
+                if config.get_setting('competitive_raid_live_started_at') != live_start_iso:
+                    config.set_setting('competitive_raid_live_started_at', live_start_iso, persistent=True)
+
+                    participant_count = _extract_participant_count(
+                        payload,
+                        preferred_node=(live_info or {}).get('source'),
+                        streamer_name=local_streamer,
+                    )
+
+                    if participant_count is not None and participant_count < 10:
+                        cancel_message = (
+                            f"🛑 Competitive raid cancelled for {local_streamer}: only {participant_count} participants (minimum 10)."
+                        )
+                        if bot.channel is not None:
+                            await send_chat_message(bot.channel, cancel_message, category='race')
+                        enqueue_overlay_event('raid_cancelled', cancel_message)
+                        config.set_setting('competitive_raid_phase', 'idle', persistent=True)
+                        config.set_setting('competitive_raid_last_summary_live_started_at', live_start_iso, persistent=True)
+                    else:
+                        config.set_setting('competitive_raid_phase', 'live', persistent=True)
+                        live_message = f"🔴 Competitive raid has begun for {local_streamer}!"
+                        if bot.channel is not None:
+                            await send_chat_message(bot.channel, live_message, category='race')
+                        enqueue_overlay_event('raid_live_started', live_message)
+
+            persisted_live_start = _parse_iso_utc(config.get_setting('competitive_raid_live_started_at'))
+            if persisted_live_start and live_streamer == local_streamer and str(config.get_setting('competitive_raid_phase') or '').lower() == 'live':
+                elapsed = datetime.now(timezone.utc) - persisted_live_start
+                summary_key = persisted_live_start.isoformat()
+                if elapsed >= timedelta(minutes=20) and config.get_setting('competitive_raid_last_summary_live_started_at') != summary_key:
+                    history_payload = None
+                    try:
+                        history_payload = await asyncio.to_thread(fetch_competitions_history_payload)
+                    except requests.RequestException as history_error:
+                        print(f"Competitive raid history request failed: {history_error}")
+
+                    latest_entry = _latest_history_entry_for_streamer(history_payload, local_streamer) if history_payload else None
+                    summary_message = _format_history_summary_for_streamer(latest_entry, local_streamer)
+                    if bot.channel is not None:
+                        await send_chat_message(bot.channel, summary_message, category='race')
+                    enqueue_overlay_event('raid_summary', summary_message)
+                    config.set_setting('competitive_raid_last_summary_live_started_at', summary_key, persistent=True)
+                    config.set_setting('competitive_raid_phase', 'idle', persistent=True)
+
+            now_utc = datetime.now(timezone.utc)
+            if queue_streamer == local_streamer and queue_started_at is not None:
+                queue_end = queue_started_at + timedelta(minutes=15)
+                if now_utc < queue_end:
+                    remaining = (queue_end - now_utc).total_seconds()
+                    next_poll_at = time.monotonic() + max(10, min(30, remaining / 3))
+                else:
+                    next_poll_at = time.monotonic() + 15
+            elif live_streamer == local_streamer and live_started_at is not None:
+                live_end = live_started_at + timedelta(minutes=20)
+                if now_utc < live_end:
+                    remaining = (live_end - now_utc).total_seconds()
+                    next_poll_at = time.monotonic() + (10 if remaining < 90 else 30)
+                else:
+                    next_poll_at = time.monotonic() + 20
+            else:
+                started_at = get_competitive_raid_started_at(payload)
+                delay_seconds = get_competitive_raid_poll_delay_seconds(started_at)
+                next_poll_at = time.monotonic() + max(20, delay_seconds)
+
+        except asyncio.CancelledError:
+            print("Competitive raid monitor task was cancelled.")
+            break
+        except requests.RequestException as error:
+            print(f"Competitive raid monitor request failed: {error}")
+            next_poll_at = time.monotonic() + 60
+        except (TypeError, ValueError, json.JSONDecodeError) as error:
+            print(f"Competitive raid monitor parse error: {error}")
+            next_poll_at = time.monotonic() + 90
+        except Exception as error:
+            print(f"Competitive raid monitor error: {error}")
+            next_poll_at = time.monotonic() + 90
+
+    print("Competitive raid monitor task has exited.")
 
 
 async def tilted(bot):
