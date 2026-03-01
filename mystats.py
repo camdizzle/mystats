@@ -7615,7 +7615,7 @@ class Bot(commands.Bot):
         # Use the provided username if available; otherwise default to the command author.
         if username is None:
             winnersname = ctx.author.name
-            winnersdisplayname = ctx.author.name
+            winnersdisplayname = getattr(ctx.author, 'display_name', None) or ctx.author.name
         else:
             # Split on spaces and remove any leading "@" character.
             winnersname = username.split()[0].lstrip('@')
@@ -7660,6 +7660,8 @@ class Bot(commands.Bot):
                                 counts['winstoday'] += 1
 
                         if row[1].lower() == winnersname.lower():
+                            if len(row) > 2 and row[2] and row[2].lower() != row[1].lower():
+                                winnersdisplayname = row[2]
                             counts['seasonraces'] += 1
                             counts['seasonpts'] += int(row[3])
                             if int(row[0]) == 1:
@@ -7740,7 +7742,7 @@ class Bot(commands.Bot):
     async def mytilts_command(self, ctx, username: str = None):
         if username is None:
             target_name = ctx.author.name
-            display_name = ctx.author.name
+            display_name = getattr(ctx.author, 'display_name', None) or ctx.author.name
         else:
             target_name = username.split()[0].lstrip('@')
             display_name = target_name
@@ -7836,14 +7838,14 @@ class Bot(commands.Bot):
         if points_season == 0 and deaths_season == 0:
             await send_chat_message(
                 ctx.channel,
-                f"{format_user_tag(display_name)}: No tilt data found this season.",
+                f"⚖️ {format_user_tag(display_name)}: No tilt data found this season.",
                 category="mystats"
             )
             return
 
         await send_chat_message(
             ctx.channel,
-            f"{format_user_tag(display_name)} Tilt Stats | Run: {points_run:,} pts, {deaths_run:,} deaths | "
+            f"⚖️ {format_user_tag(display_name)} Tilt Stats | Run: {points_run:,} pts, {deaths_run:,} deaths | "
             f"Today: {points_today:,} pts, {deaths_today:,} deaths | "
             f"Season: {points_season:,} pts, {deaths_season:,} deaths | "
             f"Last Level Completed: {last_completed_level:,}",
@@ -7922,7 +7924,7 @@ class Bot(commands.Bot):
 
         await send_chat_message(
             ctx.channel,
-            f"Expertise Stats | Last Level XP: {last_level_xp:,} | Last Run XP: {last_run_xp:,} | "
+            f"⚖️ Expertise Stats | Last Level XP: {last_level_xp:,} | Last Run XP: {last_run_xp:,} | "
             f"Today's XP: {today_xp:,} | Season XP: {season_xp:,}",
             category="mystats"
         )
@@ -7957,7 +7959,7 @@ class Bot(commands.Bot):
                 print(e)
 
         if not top_tiltee_counts:
-            await send_chat_message(ctx.channel, "No top tiltee data available yet.", category="mystats")
+            await send_chat_message(ctx.channel, "⚖️ No top tiltee data available yet.", category="mystats")
             return
 
         ranked = sorted(
@@ -7971,7 +7973,7 @@ class Bot(commands.Bot):
             for idx, (name, tops) in enumerate(ranked, start=1)
         ]
 
-        message = "Top Tiltees | " + " | ".join(items)
+        message = "⚖️ Top Tiltees | " + " | ".join(items)
         await send_chat_message(ctx.channel, message, category="mystats")
 
 
@@ -8001,7 +8003,7 @@ class Bot(commands.Bot):
                 print(e)
 
         if not data:
-            await send_chat_message(ctx.channel, "No tilt data available yet.", category="mystats")
+            await send_chat_message(ctx.channel, "⚖️ No tilt data available yet.", category="mystats")
             return
 
         top_tilees = sorted(data.items(), key=lambda x: x[1], reverse=True)[:10]
@@ -8009,7 +8011,7 @@ class Bot(commands.Bot):
             f"{format_ranked_label(place)} {racer}, {points:,} points"
             for place, (racer, points) in enumerate(top_tilees, start=1)
         ]
-        message = "Top 10 Tiltees by Tilt Points | " + " | ".join(entries)
+        message = "⚖️ Top 10 Tiltees by Tilt Points | " + " | ".join(entries)
 
         await send_chat_message(ctx.channel, message, category="mystats")
 
@@ -8050,7 +8052,7 @@ class Bot(commands.Bot):
                 print(e)
 
         if not player_run_levels:
-            await send_chat_message(ctx.channel, "No tilt data available yet.", category="mystats")
+            await send_chat_message(ctx.channel, "⚖️ No tilt data available yet.", category="mystats")
             return
 
         player_totals = defaultdict(lambda: {'deaths': 0, 'levels_participated': 0})
@@ -8083,7 +8085,7 @@ class Bot(commands.Bot):
         if not qualified:
             await send_chat_message(
                 ctx.channel,
-                f"No tilt survivor-rate data yet (minimum {minimum_levels} levels participated required).",
+                f"⚖️ No tilt survivor-rate data yet (minimum {minimum_levels} levels participated required).",
                 category="mystats"
             )
             return
@@ -8096,7 +8098,7 @@ class Bot(commands.Bot):
 
         await send_chat_message(
             ctx.channel,
-            f"Top 10 Best Tilt Survival Rate (min {minimum_levels} {pluralize(minimum_levels, 'level')}) | " + " | ".join(message_items),
+            f"⚖️ Top 10 Best Tilt Survival Rate (min {minimum_levels} {pluralize(minimum_levels, 'level')}) | " + " | ".join(message_items),
             category="mystats"
         )
 
