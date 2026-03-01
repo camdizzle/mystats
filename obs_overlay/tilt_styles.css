@@ -6,7 +6,7 @@
   --line: rgba(255, 255, 255, 0.18);
   --text-scale: 1;
   --overlay-frame-gap: 12px;
-  --overlay-frame-width: min(800px, calc(100vw - (var(--overlay-frame-gap) * 2)));
+  --overlay-frame-width: calc(100vw - (var(--overlay-frame-gap) * 2));
   --overlay-frame-height: min(600px, calc(100vh - (var(--overlay-frame-gap) * 2)));
 }
 
@@ -91,7 +91,8 @@ h1 {
 }
 
 .panel--standings,
-.panel--current-run {
+.panel--current-run,
+.panel--season-top10 {
   flex: 1 1 auto;
   min-height: 0;
 }
@@ -164,7 +165,8 @@ body[data-rotation-view='season'] .panel--current-run {
   display: none;
 }
 
-.panel--standings {
+.panel--standings,
+.panel--season-top10 {
   min-width: 0;
 }
 
