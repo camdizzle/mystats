@@ -14,6 +14,7 @@ const fmt = n => new Intl.NumberFormat().format(n || 0);
 
 
 const splashVariantAliases = {
+  '0': 'classic',
   '1': 'neon-boot',
   '2': 'countdown',
   '3': 'hologram',
@@ -23,9 +24,10 @@ const splashVariantAliases = {
   'countdown': 'countdown',
   'hologram': 'hologram',
   'minimal': 'minimal',
+  'classic': 'classic',
 };
 const splashVariantParam = new URLSearchParams(window.location.search).get('splashVariant');
-const activeSplashVariant = splashVariantAliases[String(splashVariantParam || '').trim().toLowerCase()] || 'neon-boot';
+const activeSplashVariant = splashVariantAliases[String(splashVariantParam || '').trim().toLowerCase()] || 'classic';
 document.body.dataset.splashVariant = activeSplashVariant;
 
 let currentLanguage = 'en';
