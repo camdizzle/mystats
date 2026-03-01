@@ -183,9 +183,9 @@ function hideRecordOverlay() {
 
 function hideEventOverlay() {
   overlayEventActive = false;
-  if (eventOverlayTimeout) {
-    clearTimeout(eventOverlayTimeout);
-    eventOverlayTimeout = null;
+  if (overlayEventTimeout) {
+    clearTimeout(overlayEventTimeout);
+    overlayEventTimeout = null;
   }
   if (boardShell) boardShell.classList.remove('is-hidden');
   if (!eventOverlay) return;
@@ -217,7 +217,7 @@ function processOverlayPresentationQueue() {
     const nextEvent = overlayEventQueue.shift();
     showEventOverlay(nextEvent);
     if (overlayEventTimeout) clearTimeout(overlayEventTimeout);
-    eventOverlayTimeout = setTimeout(() => {
+    overlayEventTimeout = setTimeout(() => {
       hideEventOverlay();
       showLeaderboardView();
       ensureLeaderboardAutoScroll();
