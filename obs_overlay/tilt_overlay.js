@@ -368,19 +368,37 @@ function renderCurrentRun(run = {}) {
   renderStandings('current-standings', run.standings, t('No active run standings yet.'));
 }
 
+function isLastRunFromToday(lastRun = {}) {
+  const endedAt = String(lastRun?.ended_at || '').trim();
+  if (!endedAt) return false;
+
+  const dateMatch = endedAt.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (!dateMatch) return true;
+
+  const today = new Date();
+  const yyyy = today.getFullYear();
+  const mm = String(today.getMonth() + 1).padStart(2, '0');
+  const dd = String(today.getDate()).padStart(2, '0');
+  const todayKey = `${yyyy}-${mm}-${dd}`;
+  return dateMatch[1] === todayKey;
+}
+
 function renderLastRun(lastRun = {}) {
   const summary = $('last-run-summary');
   const section = $('last-run-section');
-  const hasRun = !!(lastRun && lastRun.run_id);
+  const hasRunId = !!(lastRun && lastRun.run_id);
+  const hasRecentRun = hasRunId && isLastRunFromToday(lastRun);
+
+  document.body?.setAttribute('data-has-last-run', hasRecentRun ? 'true' : 'false');
 
   document.body?.setAttribute('data-has-last-run', hasRun ? 'true' : 'false');
 
   if (section) {
-    section.hidden = !hasRun;
-    section.style.display = hasRun ? '' : 'none';
+    section.hidden = !hasRecentRun;
+    section.style.display = hasRecentRun ? '' : 'none';
   }
 
-  if (!hasRun) {
+  if (!hasRecentRun) {
     summary.textContent = t('No completed tilt run yet.');
     return;
   }

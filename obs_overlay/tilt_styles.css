@@ -175,25 +175,25 @@ body[data-rotation-view='summary'] .panel--standings {
 
 
 body[data-rotation-view='summary'][data-has-last-run='true'] .panel--current-run .stats-grid {
-  gap: 5px 8px;
+  gap: 7px 10px;
 }
 
 body[data-rotation-view='summary'][data-has-last-run='true'] .panel--current-run .stats-grid > div {
-  padding: 6px 8px;
+  padding: 7px 9px;
 }
 
 body[data-rotation-view='summary'][data-has-last-run='true'] .panel--current-run .stats-grid label {
-  font-size: calc(0.88rem * var(--text-scale));
+  font-size: calc(0.93rem * var(--text-scale));
   margin-bottom: 1px;
 }
 
 body[data-rotation-view='summary'][data-has-last-run='true'] .panel--current-run .stats-grid strong {
-  font-size: calc(1.18rem * var(--text-scale));
+  font-size: calc(1.24rem * var(--text-scale));
 }
 
 body[data-rotation-view='summary'][data-has-last-run='true'] .panel--current-run h2 {
-  margin-bottom: 5px;
-  font-size: calc(1.06rem * var(--text-scale));
+  margin-bottom: 6px;
+  font-size: calc(1.12rem * var(--text-scale));
 }
 
 .standings {
