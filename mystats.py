@@ -790,6 +790,13 @@ def normalize_channel_name(value):
     return raw_value.lstrip('@')
 
 
+def format_user_tag(value, default='unknown'):
+    username = str(value or '').strip().lstrip('@')
+    if not username:
+        username = default
+    return f"@{username}"
+
+
 def _walk_payload_nodes(payload):
     stack = [payload]
     while stack:
@@ -7353,10 +7360,10 @@ class Bot(commands.Bot):
             rivalry_status = "✅ Rivalry active" if are_rivals else "❌ Not a qualifying rivalry"
 
             await self.send_command_response(ctx, 
-                f"Rivals Check • {stats_a['display_name']} vs {stats_b['display_name']} | "
+                f"Rivals Check • {format_user_tag(stats_a['display_name'])} vs {format_user_tag(stats_b['display_name'])} | "
                 f"Gap: ±{point_gap:,} pts | "
-                f"{stats_a['display_name']}: {stats_a.get('points', 0):,} pts, {stats_a.get('races', 0):,} races | "
-                f"{stats_b['display_name']}: {stats_b.get('points', 0):,} pts, {stats_b.get('races', 0):,} races | "
+                f"{format_user_tag(stats_a['display_name'])}: {stats_a.get('points', 0):,} pts, {stats_a.get('races', 0):,} races | "
+                f"{format_user_tag(stats_b['display_name'])}: {stats_b.get('points', 0):,} pts, {stats_b.get('races', 0):,} races | "
                 f"{rivalry_status}"
             )
             return
@@ -7364,28 +7371,28 @@ class Bot(commands.Bot):
         if username:
             rival_data = get_user_rivals(username, limit=5)
             if rival_data is None:
-                await self.send_command_response(ctx, f"{username}: no season rival data found.")
+                await self.send_command_response(ctx, f"{format_user_tag(username)}: no season rival data found.")
                 return
 
             if rival_data['races'] < rival_data['min_races_required']:
                 await self.send_command_response(ctx, 
-                    f"{rival_data['display_name']}: {rival_data['races']:,} races so far. "
+                    f"{format_user_tag(rival_data['display_name'])}: {rival_data['races']:,} races so far. "
                     f"Need {rival_data['min_races_required']:,}+ races for rivals tracking."
                 )
                 return
 
             if not rival_data['rivals']:
                 await self.send_command_response(ctx, 
-                    f"{rival_data['display_name']}: no close rivals found within configured point gap."
+                    f"{format_user_tag(rival_data['display_name'])}: no close rivals found within configured point gap."
                 )
                 return
 
             entries = [
-                f"#{idx} {row['display_name']} (±{row['point_gap']:,}, {row['points']:,} pts)"
+                f"#{idx} {format_user_tag(row['display_name'])} (±{row['point_gap']:,}, {row['points']:,} pts)"
                 for idx, row in enumerate(rival_data['rivals'], start=1)
             ]
             await self.send_command_response(ctx, 
-                f"Rivals for {rival_data['display_name']}, {rival_data['points']:,} pts: " + " | ".join(entries)
+                f"Rivals for {format_user_tag(rival_data['display_name'])}, {rival_data['points']:,} pts: " + " | ".join(entries)
             )
             return
 
@@ -7395,7 +7402,7 @@ class Bot(commands.Bot):
             return
 
         entries = [
-            f"#{idx} {row['display_a']} vs {row['display_b']} (±{row['point_gap']:,})"
+            f"#{idx} {format_user_tag(row['display_a'])} vs {format_user_tag(row['display_b'])} (±{row['point_gap']:,})"
             for idx, row in enumerate(rivalries, start=1)
         ]
         await self.send_command_response(ctx, "Rivalries Leaderboard: " + " | ".join(entries))
@@ -7421,12 +7428,12 @@ class Bot(commands.Bot):
         point_gap = abs(stats_a['points'] - stats_b['points'])
 
         await self.send_command_response(ctx, 
-            f"⚔️ H2H {stats_a['display_name']} vs {stats_b['display_name']} | "
+            f"⚔️ H2H {format_user_tag(stats_a['display_name'])} vs {format_user_tag(stats_b['display_name'])} | "
             f"Points: {stats_a['points']:,}, {stats_b['points']:,} | "
             f"Races: {stats_a['races']:,}, {stats_b['races']:,} | "
             f"Race HS: {stats_a['race_hs']:,}, {stats_b['race_hs']:,} | "
             f"BR HS: {stats_a['br_hs']:,}, {stats_b['br_hs']:,} | "
-            f"Leader: {leader_name} by {point_gap:,}"
+            f"Leader: {format_user_tag(leader_name)} by {point_gap:,}"
         )
 
     @commands.command(name='mycycle')
@@ -7440,7 +7447,7 @@ class Bot(commands.Bot):
 
         if not target_user or target_user not in stats:
             await self.send_command_response(ctx, 
-                f"{target_name}: no MyCycle race data yet in session '{session.get('name', 'Unknown')}'."
+                f"{format_user_tag(target_name)}: no MyCycle race data yet in session '{session.get('name', 'Unknown')}'."
             )
             return
 
@@ -7452,7 +7459,7 @@ class Bot(commands.Bot):
         display_name = record.get('display_name') or target_user
 
         message = (
-            f"🔁 {display_name} | Session: {session.get('name', 'Unknown')} | "
+            f"🔁 {format_user_tag(display_name)} | Session: {session.get('name', 'Unknown')} | "
             f"Cycles: {record.get('cycles_completed', 0)} | Progress: {progress_text} | "
             f"Races this cycle: {record.get('current_cycle_races', 0)} | "
             f"Last cycle races: {record.get('last_cycle_races', 0)}"
@@ -7509,11 +7516,11 @@ class Bot(commands.Bot):
         progress = get_user_quest_progress(lookup_name)
 
         if progress is None:
-            await self.send_command_response(ctx, f"{lookup_name}: No quest progress found yet.")
+            await self.send_command_response(ctx, f"{format_user_tag(lookup_name)}: No quest progress found yet.")
             return
 
         headline = (
-            f"{progress['display_name']} Quest Progress: "
+            f"{format_user_tag(progress['display_name'])} Quest Progress: "
             f"{progress['completed']}/{progress['active_quests'] if progress['active_quests'] > 0 else 0} quests complete"
         )
         details = " | ".join(progress['progress_lines'])
@@ -7716,7 +7723,7 @@ class Bot(commands.Bot):
 
         # Create the formatted output message.
         output_msg = (
-            f"📊 BRs - {brwins_formatted} {pluralize(counts['brwins'], 'win')}, {br_points_formatted} points, {br_count_formatted} {pluralize(counts['br_count'], 'royale')}, PPR: {br_avg_points_formatted} | "
+            f"📊 {format_user_tag(winnersdisplayname)} | BRs - {brwins_formatted} {pluralize(counts['brwins'], 'win')}, {br_points_formatted} points, {br_count_formatted} {pluralize(counts['br_count'], 'royale')}, PPR: {br_avg_points_formatted} | "
             f"Races - {racewins_formatted} {pluralize(counts['racewins'], 'win')}, {race_points_formatted} points, {race_count_formatted} {pluralize(counts['race_count'], 'race')}, PPR: {race_avg_points_formatted} | "
             f"Season - {seasonwins_formatted} {pluralize(counts['seasonwins'], 'win')}, {seasonpts_formatted} points, {seasonraces_formatted} {pluralize(counts['seasonraces'], 'race')}, PPR: {season_avg_points_formatted} | "
             f"World Records: {counts['world_record_count']:,} {pluralize(counts['world_record_count'], 'record')}"
@@ -7829,14 +7836,14 @@ class Bot(commands.Bot):
         if points_season == 0 and deaths_season == 0:
             await send_chat_message(
                 ctx.channel,
-                f"{display_name}: No tilt data found this season.",
+                f"{format_user_tag(display_name)}: No tilt data found this season.",
                 category="mystats"
             )
             return
 
         await send_chat_message(
             ctx.channel,
-            f"{display_name} Tilt Stats | Run: {points_run:,} pts, {deaths_run:,} deaths | "
+            f"{format_user_tag(display_name)} Tilt Stats | Run: {points_run:,} pts, {deaths_run:,} deaths | "
             f"Today: {points_today:,} pts, {deaths_today:,} deaths | "
             f"Season: {points_season:,} pts, {deaths_season:,} deaths | "
             f"Last Level Completed: {last_completed_level:,}",
