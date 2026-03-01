@@ -13,21 +13,7 @@ const headerPills = [
 const fmt = n => new Intl.NumberFormat().format(n || 0);
 
 
-const splashVariantAliases = {
-  '0': 'classic',
-  '1': 'neon-boot',
-  '2': 'countdown',
-  '3': 'hologram',
-  '4': 'minimal',
-  'neon': 'neon-boot',
-  'neon-boot': 'neon-boot',
-  'countdown': 'countdown',
-  'hologram': 'hologram',
-  'minimal': 'minimal',
-  'classic': 'classic',
-};
-const splashVariantParam = new URLSearchParams(window.location.search).get('splashVariant');
-const activeSplashVariant = splashVariantAliases[String(splashVariantParam || '').trim().toLowerCase()] || 'classic';
+const activeSplashVariant = 'countdown';
 document.body.dataset.splashVariant = activeSplashVariant;
 
 let currentLanguage = 'en';
@@ -150,7 +136,7 @@ let queuedRaceTop3 = null;
 let overlayEventQueue = [];
 let lastOverlayEventId = 0;
 let hasHydratedOverlayEvents = false;
-let currentResultsMode = 'race';
+let currentResultsMode = '';
 const splashAnimationDurationMs = 9000;
 const splashPostAnimationHoldMs = 1000;
 const splashDurationMs = splashAnimationDurationMs + splashPostAnimationHoldMs;
@@ -780,11 +766,13 @@ function normalizeRaceType(value) {
   return '';
 }
 
-function selectViewsForMode(views = [], mode = 'race') {
+function selectViewsForMode(views = [], mode = '') {
+  if (!mode) return Array.isArray(views) ? views : [];
+
   const byId = new Map((Array.isArray(views) ? views : []).map((view) => [String(view?.id || ''), view]));
   const orderedIds = mode === 'br'
-    ? ['season', 'today', 'brs-season', 'brs-today']
-    : ['season', 'today', 'races-season', 'races-today'];
+    ? ['season', 'today', 'brs-season', 'brs-today', 'previous']
+    : ['season', 'today', 'races-season', 'races-today', 'previous'];
 
   return orderedIds
     .map((id) => byId.get(id))
