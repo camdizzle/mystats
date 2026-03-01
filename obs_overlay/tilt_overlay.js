@@ -281,6 +281,9 @@ function startAutoScroll(listId) {
 
     if (loopHeight <= 0 && host.scrollTop >= maxScrollTop) {
       host.scrollTop = 0;
+      if (listId === 'current-standings') {
+        showCurrentRunSummaryTemporarily();
+      }
     }
   }, autoScrollConfig.intervalMs);
 

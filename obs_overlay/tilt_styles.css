@@ -6,7 +6,7 @@
   --line: rgba(255, 255, 255, 0.18);
   --text-scale: 1;
   --overlay-frame-gap: 12px;
-  --overlay-frame-width: min(600px, calc(100vw - (var(--overlay-frame-gap) * 2)));
+  --overlay-frame-width: min(800px, calc(100vw - (var(--overlay-frame-gap) * 2)));
   --overlay-frame-height: min(600px, calc(100vh - (var(--overlay-frame-gap) * 2)));
 }
 
@@ -223,11 +223,11 @@ body[data-rotation-view='summary'][data-has-last-run='true'] .panel--current-run
   background: rgba(255,255,255,0.08);
   border: 1px solid rgba(255,255,255,0.14);
   font-weight: 700;
-  font-size: calc(1.32rem * var(--text-scale));
+  font-size: calc(1.62rem * var(--text-scale));
 }
 
 .standings li > span:first-child {
-  font-size: calc(1.34rem * var(--text-scale));
+  font-size: calc(1.64rem * var(--text-scale));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -235,7 +235,7 @@ body[data-rotation-view='summary'][data-has-last-run='true'] .panel--current-run
 }
 
 .standings li > span:last-child {
-  font-size: calc(1.3rem * var(--text-scale));
+  font-size: calc(1.6rem * var(--text-scale));
   justify-self: end;
   text-align: right;
   white-space: nowrap;
