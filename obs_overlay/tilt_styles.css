@@ -601,8 +601,7 @@ body[data-rotation-view='summary'][data-has-last-run='true'] .panel--current-run
 
 .tilt-splash-screen__title,
 .tilt-splash-screen__presenter,
-.tilt-splash-screen__url,
-.tilt-splash-screen__countdown {
+.tilt-splash-screen__url {
   opacity: 0;
   transform: translateY(8px);
 }
@@ -621,38 +620,10 @@ body[data-rotation-view='summary'][data-has-last-run='true'] .panel--current-run
   color: #ffe9cc;
 }
 
-.tilt-splash-screen__countdown {
-  position: absolute;
-  inset: auto 0 14%;
-  display: flex;
-  justify-content: center;
-  gap: 16px;
-  z-index: 2;
-  opacity: 1;
-  transform: none;
-}
-
-.tilt-splash-screen__countdown span {
-  display: inline-flex;
-  width: 72px;
-  height: 72px;
-  border-radius: 999px;
-  align-items: center;
-  justify-content: center;
-  font-size: calc(2rem * var(--text-scale));
-  font-weight: 900;
-  border: 1px solid rgba(255, 255, 255, 0.35);
-  background: rgba(255, 255, 255, 0.16);
-  opacity: 0;
-  transform: scale(0.7);
-}
 
 body[data-splash-variant='countdown'] .tilt-splash-screen.is-visible.splash-animate .tilt-splash-screen__title { animation: v2-title 9000ms linear forwards; }
 body[data-splash-variant='countdown'] .tilt-splash-screen.is-visible.splash-animate .tilt-splash-screen__presenter { animation: v2-presenter 9000ms linear forwards; }
 body[data-splash-variant='countdown'] .tilt-splash-screen.is-visible.splash-animate .tilt-splash-screen__url { animation: v2-url 9000ms linear forwards; }
-body[data-splash-variant='countdown'] .tilt-splash-screen.is-visible.splash-animate .tilt-splash-screen__countdown span:nth-child(1) { animation: v2-count 1050ms ease-out 300ms forwards; }
-body[data-splash-variant='countdown'] .tilt-splash-screen.is-visible.splash-animate .tilt-splash-screen__countdown span:nth-child(2) { animation: v2-count 1050ms ease-out 1450ms forwards; }
-body[data-splash-variant='countdown'] .tilt-splash-screen.is-visible.splash-animate .tilt-splash-screen__countdown span:nth-child(3) { animation: v2-count 1050ms ease-out 2600ms forwards; }
 
 @keyframes v2-title {
   0%, 12% { opacity: 0; transform: translateY(10px); }
@@ -672,11 +643,6 @@ body[data-splash-variant='countdown'] .tilt-splash-screen.is-visible.splash-anim
   100% { opacity: 0; transform: translateY(-6px); }
 }
 
-@keyframes v2-count {
-  0% { opacity: 0; transform: scale(0.7); }
-  20%, 74% { opacity: 1; transform: scale(1); }
-  100% { opacity: 0; transform: scale(1.12); }
-}
 
 body[data-overlay-mode='recap'] #tilt-tracker-card {
   visibility: hidden;
