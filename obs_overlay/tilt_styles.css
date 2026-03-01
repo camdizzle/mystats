@@ -207,7 +207,7 @@ body[data-rotation-view='summary'][data-has-last-run='true'] .panel--current-run
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 6px;
+  gap: 8px;
   max-height: 100%;
   overflow: auto;
   flex: 1 1 auto;
@@ -218,16 +218,16 @@ body[data-rotation-view='summary'][data-has-last-run='true'] .panel--current-run
   grid-template-columns: minmax(16ch, 1fr) auto;
   column-gap: 10px;
   align-items: center;
-  padding: 7px 9px;
+  padding: 9px 11px;
   border-radius: 9px;
   background: rgba(255,255,255,0.08);
   border: 1px solid rgba(255,255,255,0.14);
   font-weight: 700;
-  font-size: calc(1.22rem * var(--text-scale));
+  font-size: calc(1.32rem * var(--text-scale));
 }
 
 .standings li > span:first-child {
-  font-size: calc(1.24rem * var(--text-scale));
+  font-size: calc(1.34rem * var(--text-scale));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -235,7 +235,7 @@ body[data-rotation-view='summary'][data-has-last-run='true'] .panel--current-run
 }
 
 .standings li > span:last-child {
-  font-size: calc(1.2rem * var(--text-scale));
+  font-size: calc(1.3rem * var(--text-scale));
   justify-self: end;
   text-align: right;
   white-space: nowrap;
