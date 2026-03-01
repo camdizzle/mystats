@@ -90,6 +90,38 @@ let pendingRunCompletionEventId = 0;
 let displayedRunCompletionEventId = 0;
 const overlayStorageKey = 'mystats.tiltOverlay.snapshot.v1';
 
+const rotationConfig = {
+  summaryDurationMs: 15000,
+};
+let rotationReturnTimer = null;
+let rotationView = 'standings';
+
+function setRotationView(view) {
+  rotationView = view === 'summary' ? 'summary' : 'standings';
+  document.body?.setAttribute('data-rotation-view', rotationView);
+}
+
+function clearRotationTimer() {
+  if (rotationReturnTimer) {
+    clearTimeout(rotationReturnTimer);
+    rotationReturnTimer = null;
+  }
+}
+
+function showCurrentRunSummaryTemporarily() {
+  if (rotationView === 'summary') return;
+  clearRotationTimer();
+  stopAutoScroll('current-standings');
+  setRotationView('summary');
+
+  rotationReturnTimer = setTimeout(() => {
+    setRotationView('standings');
+    rotationReturnTimer = null;
+    startAutoScroll('current-standings');
+  }, rotationConfig.summaryDurationMs);
+}
+
+
 function saveOverlaySnapshot(payload = {}) {
   try {
     const snapshot = {
@@ -167,6 +199,7 @@ function hideRecapOverlays() {
   if (runOverlayHideTimer) clearTimeout(runOverlayHideTimer);
   levelOverlayHideTimer = null;
   runOverlayHideTimer = null;
+  clearRotationTimer();
   levelOverlayActive = false;
   runOverlayActive = false;
   setLevelOverlayVisible(false);
@@ -218,6 +251,7 @@ function updateTrackerVisibility() {
 function startAutoScroll(listId) {
   const host = $(listId);
   if (!host) return;
+  if (listId === 'current-standings' && rotationView === 'summary') return;
 
   stopAutoScroll(listId);
   host.scrollTop = 0;
@@ -231,6 +265,9 @@ function startAutoScroll(listId) {
 
     if (loopHeight > 0 && host.scrollTop >= loopHeight) {
       host.scrollTop -= loopHeight;
+      if (listId === 'current-standings') {
+        showCurrentRunSummaryTemporarily();
+      }
       return;
     }
 
@@ -267,7 +304,10 @@ function renderStandings(listId, standings, emptyText) {
   const hasRows = Array.isArray(standings) && standings.length > 0;
   const rowsMarkup = hasRows
     ? standings
-      .map((row, i) => `<li><span>#${i + 1} ${row.name}</span><span>${fmt(row.points)} pts</span></li>`)
+      .map((row, i) => {
+        const deaths = Number(row.deaths ?? row.death_count ?? row.total_deaths ?? row.run_deaths ?? 0);
+        return `<li><span>#${i + 1} ${row.name}</span><span>${fmt(row.points)} pts · ☠ ${fmt(deaths)}</span></li>`;
+      })
       .join('')
     : '';
   const renderKey = hasRows ? rowsMarkup : `__empty__:${emptyText}`;
@@ -284,7 +324,11 @@ function renderStandings(listId, standings, emptyText) {
 
   if (!hasRows) {
     host.innerHTML = `<li>${emptyText}</li>`;
-    if (listId === 'current-standings') stopAutoScroll(listId);
+    if (listId === 'current-standings') {
+      clearRotationTimer();
+      setRotationView('standings');
+      stopAutoScroll(listId);
+    }
     return;
   }
 
@@ -296,19 +340,8 @@ function renderStandings(listId, standings, emptyText) {
       host.dataset.loopHeight = String(host.scrollHeight);
       host.insertAdjacentHTML('beforeend', rowsMarkup);
     }
+    if (rotationView !== 'summary') startAutoScroll(listId);
   }
-
-  host.innerHTML = rowsMarkup;
-
-  if (listId === 'current-standings') {
-    const needsLoop = host.scrollHeight - host.clientHeight > 0;
-    if (needsLoop) {
-      host.dataset.loopHeight = String(host.scrollHeight);
-      host.insertAdjacentHTML('beforeend', rowsMarkup);
-    }
-  }
-
-  if (listId === 'current-standings') startAutoScroll(listId);
 }
 
 function renderCurrentRun(run = {}) {
@@ -324,7 +357,7 @@ function renderCurrentRun(run = {}) {
   const topTilteeWithCount = topTiltee === 'None' ? 'None' : `${topTiltee} (${fmt(topTilteeCount)} tops)`;
   $('current-leader').textContent = leader;
   $('current-top-tiltee').textContent = topTilteeWithCount;
-  $('top-tiltee-value').textContent = topTilteeWithCount;
+  $('top-tiltee-value').textContent = topTiltee;
   $('current-run-points').textContent = fmt(run.run_points);
   $('current-run-xp').textContent = fmt(run.run_xp);
   $('best-run-xp').textContent = fmt(run.best_run_xp_today);
@@ -569,6 +602,8 @@ function startRefreshTimer() {
   if (refreshTimer) clearInterval(refreshTimer);
   refreshTimer = setInterval(refresh, refreshSeconds * 1000);
 }
+
+setRotationView('standings');
 
 const initialSnapshot = loadOverlaySnapshot();
 if (initialSnapshot) {
