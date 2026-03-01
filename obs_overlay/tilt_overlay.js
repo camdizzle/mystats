@@ -391,6 +391,8 @@ function renderLastRun(lastRun = {}) {
 
   document.body?.setAttribute('data-has-last-run', hasRecentRun ? 'true' : 'false');
 
+  document.body?.setAttribute('data-has-last-run', hasRun ? 'true' : 'false');
+
   if (section) {
     section.hidden = !hasRecentRun;
     section.style.display = hasRecentRun ? '' : 'none';
