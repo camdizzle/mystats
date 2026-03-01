@@ -3376,6 +3376,22 @@ def _build_tilt_overlay_payload():
         reverse=True
     )
 
+    _, tilt_user_stats = get_tilt_season_stats()
+    season_standings = sorted(
+        (
+            {
+                'name': (stats.get('display_name') or username),
+                'points': _safe_int(stats.get('tilt_points', 0)),
+                'levels': _safe_int(stats.get('tilt_levels', 0)),
+                'top_tiltee': _safe_int(stats.get('tilt_top_tiltee', 0)),
+            }
+            for username, stats in tilt_user_stats.items()
+            if _safe_int(stats.get('tilt_points', 0)) > 0
+        ),
+        key=lambda row: row['points'],
+        reverse=True,
+    )[:10]
+
     current_run_id = str(config.get_setting('tilt_current_run_id') or '').strip()
     current_level = get_int_setting('tilt_current_level', 0)
     current_elapsed = str(config.get_setting('tilt_current_elapsed') or '0:00')
@@ -3436,6 +3452,7 @@ def _build_tilt_overlay_payload():
         'level_completion': level_completion,
         'run_completion': run_completion,
         'run_completion_event_id': run_completion_event_id,
+        'season_standings': season_standings,
         'suppress_initial_recaps': True,
     }
     return payload
