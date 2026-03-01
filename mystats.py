@@ -3312,7 +3312,11 @@ def _build_tilt_overlay_payload():
         run_ledger = {}
 
     sorted_run = sorted(
-        ((str(name), _safe_int(points)) for name, points in run_ledger.items()),
+        (
+            (str(name), _safe_int(points))
+            for name, points in run_ledger.items()
+            if _safe_int(points) > 0
+        ),
         key=lambda item: item[1],
         reverse=True
     )
@@ -9105,7 +9109,12 @@ async def tilted(bot):
                     text_area.insert('end', f"\nTilt run complete! No results to display.\n")
                     show_windows_toast("MyStats Tilt", "Tilt run complete. No standings were available.")
 
-                top_users_today = sorted(run_ledger.items(), key=lambda x: x[1], reverse=True)[:10]
+                participants_with_points = sorted(
+                    ((str(name), _safe_int(points)) for name, points in run_ledger.items() if _safe_int(points) > 0),
+                    key=lambda x: x[1],
+                    reverse=True
+                )
+                top_users_today = participants_with_points[:10]
                 top_user_names = [name for name, _ in top_users_today]
                 write_tilt_output_files({
                     'CurrentLevel.txt': 'FAIL',
@@ -9131,14 +9140,14 @@ async def tilted(bot):
                     'run_total_seconds': run_total_seconds,
                     'top_tiltee': top_tiltee,
                     'top_tiltee_count': get_int_setting('tilt_current_top_tiltee_count', 0),
-                    'leader': {'name': top_user_names[0], 'points': int(top_users_today[0][1])} if top_users_today else None,
+                    'leader': {'name': participants_with_points[0][0], 'points': int(participants_with_points[0][1])} if participants_with_points else None,
                     'run_points': run_points,
                     'run_xp': run_xp,
                     'run_expertise': run_xp,
                     'best_run_xp_today': best_run_xp_today,
                     'total_xp_today': total_xp_today,
                     'total_deaths_today': total_deaths_today,
-                    'standings': [{'name': name, 'points': int(points)} for name, points in top_users_today],
+                    'standings': [{'name': name, 'points': int(points)} for name, points in participants_with_points],
                 }
                 set_tilt_runtime_setting('tilt_last_run_summary', json.dumps(last_run_summary))
                 set_tilt_runtime_setting('tilt_run_completion_overlay', json.dumps(last_run_summary))

@@ -343,11 +343,6 @@ function renderStandings(listId, standings, emptyText) {
   host.innerHTML = rowsMarkup;
 
   if (listId === 'current-standings') {
-    const needsLoop = host.scrollHeight - host.clientHeight > 0;
-    if (needsLoop) {
-      host.dataset.loopHeight = String(host.scrollHeight);
-      host.insertAdjacentHTML('beforeend', rowsMarkup);
-    }
     if (rotationView !== 'summary') startAutoScroll(listId);
   }
 }
