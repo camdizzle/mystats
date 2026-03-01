@@ -350,6 +350,7 @@ function startAutoScroll(listId) {
 
   stopAutoScroll(listId);
   host.scrollTop = 0;
+  host.dataset.scrollLock = 'false';
 
   const endSpacer = host.querySelector('.standings-end-spacer');
   const initialTransitionTop = endSpacer ? endSpacer.offsetTop : 0;
@@ -360,16 +361,26 @@ function startAutoScroll(listId) {
     // Recompute bounds on every tick so we recover after overlays/splash hide or layout changes.
     const maxScrollTop = Math.max(0, host.scrollHeight - host.clientHeight);
     const transitionSpacer = host.querySelector('.standings-end-spacer');
-    const transitionTop = transitionSpacer ? transitionSpacer.offsetTop : maxScrollTop;
+    // Keep trigger within reachable scroll bounds. offsetTop can exceed maxScrollTop.
+    const transitionTop = Math.min(maxScrollTop, transitionSpacer ? transitionSpacer.offsetTop : maxScrollTop);
 
     // Ignore ticks while the list is not measurable (e.g. tracker hidden under recap overlays).
     if (host.clientHeight <= 0) return;
+    if (maxScrollTop <= 0) return;
+    if (host.dataset.scrollLock === 'true') return;
 
-    host.scrollTop = host.scrollTop + autoScrollConfig.stepPx;
+    host.scrollTop = Math.min(maxScrollTop, host.scrollTop + autoScrollConfig.stepPx);
 
     if (host.scrollTop >= transitionTop - 1) {
-      host.scrollTop = 0;
-      if (listId === 'current-standings') showCurrentRunSummaryTemporarily();
+      host.dataset.scrollLock = 'true';
+      setTimeout(() => {
+        if (!autoScrollTimers.has(listId)) return;
+        host.scrollTop = 0;
+        host.dataset.scrollLock = 'false';
+        if (listId === 'current-standings') {
+          showCurrentRunSummaryTemporarily();
+        }
+      }, autoScrollConfig.pauseMs);
     }
   }, autoScrollConfig.intervalMs);
 
