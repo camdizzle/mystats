@@ -421,7 +421,7 @@ body[data-splash-variant='countdown'] .splash-screen.is-visible.splash-animate .
 #leaderboard li.leaderboard-row > span:last-child {
   color: var(--points-accent);
   background: transparent;
-  border: 1px solid rgba(127, 216, 255, 0.2);
+  border: 0;
 }
 
 #leaderboard li.leaderboard-row--record-race {
