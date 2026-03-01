@@ -259,6 +259,16 @@ body[data-rotation-view='summary'][data-has-last-run='true'] .panel--current-run
   font-weight: 800;
 }
 
+.standings .standings-end-spacer {
+  height: 1px;
+  min-height: 1px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  pointer-events: none;
+}
+
 
 .last-run {
   flex: 0 0 auto;
