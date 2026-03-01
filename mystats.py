@@ -1255,6 +1255,53 @@ def _parse_iso_utc(raw_value):
 
 
 
+def _extract_participant_count(payload, preferred_node=None, streamer_name=None):
+    count_keys = (
+        'participants', 'participant_count', 'participantCount',
+        'players', 'player_count', 'playerCount',
+        'entries', 'entry_count', 'entryCount',
+        'queued', 'queue_count', 'queueCount'
+    )
+
+    candidate_nodes = []
+    if isinstance(preferred_node, dict):
+        candidate_nodes.append(preferred_node)
+
+    target_streamer = normalize_channel_name(streamer_name)
+    for node in _walk_payload_nodes(payload):
+        if not isinstance(node, dict):
+            continue
+
+        if target_streamer:
+            node_streamer = ''
+            for key in ('streamer', 'streamer_username', 'streamerUsername', 'channel', 'username', 'twitch', 'name'):
+                node_streamer = normalize_channel_name(node.get(key))
+                if node_streamer:
+                    break
+            if node_streamer and node_streamer != target_streamer:
+                continue
+
+        candidate_nodes.append(node)
+
+    for node in candidate_nodes:
+        for key in count_keys:
+            if key not in node:
+                continue
+            value = node.get(key)
+            if isinstance(value, list):
+                return len(value)
+            if isinstance(value, dict):
+                for nested_key in ('count', 'total', 'size', 'length'):
+                    if nested_key in value:
+                        return _safe_int(value.get(nested_key))
+            parsed = _safe_int(value)
+            if parsed > 0:
+                return parsed
+
+    return None
+
+
+
 def parse_tilt_result_row(row):
     """Parse a tilt results row written by `tilted` and return (username, points, run_id)."""
     if len(row) < 5:
@@ -8606,14 +8653,31 @@ async def competitive_raid_monitor(bot):
                 live_start_iso = live_started_at.isoformat()
                 if config.get_setting('competitive_raid_live_started_at') != live_start_iso:
                     config.set_setting('competitive_raid_live_started_at', live_start_iso, persistent=True)
-                    config.set_setting('competitive_raid_phase', 'live', persistent=True)
-                    live_message = f"🔴 Competitive raid has begun for {local_streamer}!"
-                    if bot.channel is not None:
-                        await send_chat_message(bot.channel, live_message, category='race')
-                    enqueue_overlay_event('raid_live_started', live_message)
+
+                    participant_count = _extract_participant_count(
+                        payload,
+                        preferred_node=(live_info or {}).get('source'),
+                        streamer_name=local_streamer,
+                    )
+
+                    if participant_count is not None and participant_count < 10:
+                        cancel_message = (
+                            f"🛑 Competitive raid cancelled for {local_streamer}: only {participant_count} participants (minimum 10)."
+                        )
+                        if bot.channel is not None:
+                            await send_chat_message(bot.channel, cancel_message, category='race')
+                        enqueue_overlay_event('raid_cancelled', cancel_message)
+                        config.set_setting('competitive_raid_phase', 'idle', persistent=True)
+                        config.set_setting('competitive_raid_last_summary_live_started_at', live_start_iso, persistent=True)
+                    else:
+                        config.set_setting('competitive_raid_phase', 'live', persistent=True)
+                        live_message = f"🔴 Competitive raid has begun for {local_streamer}!"
+                        if bot.channel is not None:
+                            await send_chat_message(bot.channel, live_message, category='race')
+                        enqueue_overlay_event('raid_live_started', live_message)
 
             persisted_live_start = _parse_iso_utc(config.get_setting('competitive_raid_live_started_at'))
-            if persisted_live_start and live_streamer == local_streamer:
+            if persisted_live_start and live_streamer == local_streamer and str(config.get_setting('competitive_raid_phase') or '').lower() == 'live':
                 elapsed = datetime.now(timezone.utc) - persisted_live_start
                 summary_key = persisted_live_start.isoformat()
                 if elapsed >= timedelta(minutes=20) and config.get_setting('competitive_raid_last_summary_live_started_at') != summary_key:
