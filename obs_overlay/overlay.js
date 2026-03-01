@@ -531,12 +531,12 @@ function hasReachedEndOfStackedViews() {
 
   if (!hasScrolledIntoFinalSection()) return false;
 
-  const finalRow = leaderboard.querySelector('.leaderboard-row--final');
-  if (!finalRow) return false;
+  const endSpacer = leaderboard.querySelector('.leaderboard-end-spacer');
+  if (!endSpacer) return false;
 
   const listBounds = leaderboard.getBoundingClientRect();
-  const finalRowBounds = finalRow.getBoundingClientRect();
-  return finalRowBounds.bottom <= listBounds.top + 2;
+  const endSpacerBounds = endSpacer.getBoundingClientRect();
+  return endSpacerBounds.top <= listBounds.top + 2;
 }
 
 function hasScrolledIntoFinalSection() {
