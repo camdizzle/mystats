@@ -151,7 +151,9 @@ let overlayEventQueue = [];
 let lastOverlayEventId = 0;
 let hasHydratedOverlayEvents = false;
 let currentResultsMode = 'race';
-const splashDurationMs = 15000;
+const splashAnimationDurationMs = 15000;
+const splashPostAnimationHoldMs = 3000;
+const splashDurationMs = splashAnimationDurationMs + splashPostAnimationHoldMs;
 const recordOverlayDurationMs = 5000;
 const top3ShowDurationMs = 10000;
 const eventOverlayDurationMs = 6500;
@@ -383,14 +385,13 @@ function showSplashView(force = false) {
 
   clearCycleRestartTimer();
   cycleRestartTimer = setTimeout(() => {
-    showLeaderboardView();
-    if (leaderboard) {
-      leaderboard.scrollTop = 0;
-      leaderboard.scrollLeft = 0;
-      updateBoardTitleFromScroll();
-    }
-    startLeaderboardAutoScroll();
+    lastRenderedViewsKey = '';
+    renderCombinedRows(currentViews);
   }, splashDurationMs);
+}
+
+function isSplashViewActive() {
+  return Boolean(splashScreen?.getAttribute('visible') === 'true');
 }
 
 function stopLeaderboardAutoScroll() {
@@ -754,7 +755,7 @@ function applyServerSettings(raw = {}) {
 function syncViews(views = []) {
   currentViews = views;
 
-  if (top3IsShowing || overlayEventActive) {
+  if (top3IsShowing || overlayEventActive || isSplashViewActive()) {
     return;
   }
 
