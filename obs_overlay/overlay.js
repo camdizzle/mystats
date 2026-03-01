@@ -12,6 +12,24 @@ const headerPills = [
 ];
 const fmt = n => new Intl.NumberFormat().format(n || 0);
 
+
+const splashVariantAliases = {
+  '0': 'classic',
+  '1': 'neon-boot',
+  '2': 'countdown',
+  '3': 'hologram',
+  '4': 'minimal',
+  'neon': 'neon-boot',
+  'neon-boot': 'neon-boot',
+  'countdown': 'countdown',
+  'hologram': 'hologram',
+  'minimal': 'minimal',
+  'classic': 'classic',
+};
+const splashVariantParam = new URLSearchParams(window.location.search).get('splashVariant');
+const activeSplashVariant = splashVariantAliases[String(splashVariantParam || '').trim().toLowerCase()] || 'classic';
+document.body.dataset.splashVariant = activeSplashVariant;
+
 let currentLanguage = 'en';
 const I18N = {
   en: {},
@@ -133,7 +151,7 @@ let overlayEventQueue = [];
 let lastOverlayEventId = 0;
 let hasHydratedOverlayEvents = false;
 let currentResultsMode = 'race';
-const splashDurationMs = 7500;
+const splashDurationMs = 10000;
 const recordOverlayDurationMs = 5000;
 const top3ShowDurationMs = 10000;
 const eventOverlayDurationMs = 6500;
@@ -342,6 +360,7 @@ function showLeaderboardView() {
   leaderboard?.classList.remove('is-top3-mode');
   if (splashScreen) {
     splashScreen.classList.remove('is-visible');
+    splashScreen.classList.remove('splash-animate');
     splashScreen.setAttribute('aria-hidden', 'true');
     splashScreen.setAttribute('visible', 'false');
   }
@@ -355,6 +374,9 @@ function showSplashView(force = false) {
   if (boardShell) boardShell.classList.add('is-hidden');
   if (splashScreen) {
     splashScreen.classList.add('is-visible');
+    splashScreen.classList.remove('splash-animate');
+    void splashScreen.offsetWidth;
+    splashScreen.classList.add('splash-animate');
     splashScreen.setAttribute('aria-hidden', 'false');
     splashScreen.setAttribute('visible', 'true');
   }
