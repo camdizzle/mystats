@@ -373,6 +373,8 @@ function renderLastRun(lastRun = {}) {
   const section = $('last-run-section');
   const hasRun = !!(lastRun && lastRun.run_id);
 
+  document.body?.setAttribute('data-has-last-run', hasRun ? 'true' : 'false');
+
   if (section) {
     section.hidden = !hasRun;
     section.style.display = hasRun ? '' : 'none';

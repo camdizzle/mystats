@@ -173,6 +173,29 @@ body[data-rotation-view='summary'] .panel--standings {
   white-space: nowrap;
 }
 
+
+body[data-rotation-view='summary'][data-has-last-run='true'] .panel--current-run .stats-grid {
+  gap: 5px 8px;
+}
+
+body[data-rotation-view='summary'][data-has-last-run='true'] .panel--current-run .stats-grid > div {
+  padding: 6px 8px;
+}
+
+body[data-rotation-view='summary'][data-has-last-run='true'] .panel--current-run .stats-grid label {
+  font-size: calc(0.88rem * var(--text-scale));
+  margin-bottom: 1px;
+}
+
+body[data-rotation-view='summary'][data-has-last-run='true'] .panel--current-run .stats-grid strong {
+  font-size: calc(1.18rem * var(--text-scale));
+}
+
+body[data-rotation-view='summary'][data-has-last-run='true'] .panel--current-run h2 {
+  margin-bottom: 5px;
+  font-size: calc(1.06rem * var(--text-scale));
+}
+
 .standings {
   list-style: none;
   margin: 0;
