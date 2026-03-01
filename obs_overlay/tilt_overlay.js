@@ -343,11 +343,18 @@ function startAutoScroll(listId) {
   stopAutoScroll(listId);
   host.scrollTop = 0;
 
-  const loopHeight = Number(host.dataset.loopHeight || 0);
-  const maxScrollTop = host.scrollHeight - host.clientHeight;
-  if (maxScrollTop <= 0 && loopHeight <= 0) return;
+  const initialLoopHeight = Number(host.dataset.loopHeight || 0);
+  const initialMaxScrollTop = host.scrollHeight - host.clientHeight;
+  if (initialMaxScrollTop <= 0 && initialLoopHeight <= 0) return;
 
   const timerId = setInterval(() => {
+    // Recompute bounds on every tick so we recover after overlays/splash hide or layout changes.
+    const loopHeight = Number(host.dataset.loopHeight || 0);
+    const maxScrollTop = Math.max(0, host.scrollHeight - host.clientHeight);
+
+    // Ignore ticks while the list is not measurable (e.g. tracker hidden under recap overlays).
+    if (host.clientHeight <= 0) return;
+
     host.scrollTop = host.scrollTop + autoScrollConfig.stepPx;
 
     if (loopHeight > 0 && host.scrollTop >= loopHeight) {
@@ -356,7 +363,7 @@ function startAutoScroll(listId) {
       return;
     }
 
-    if (loopHeight <= 0 && host.scrollTop >= maxScrollTop) {
+    if (loopHeight <= 0 && maxScrollTop > 0 && host.scrollTop >= maxScrollTop) {
       host.scrollTop = 0;
       if (listId === 'current-standings') showCurrentRunSummaryTemporarily();
     }
