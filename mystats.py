@@ -7400,14 +7400,14 @@ class Bot(commands.Bot):
 
     @commands.command(name='commands')
     async def list_commands(self, ctx):
-        excluded_commands = ['commands', 'mplreset']
+        excluded_commands = ['commands', 'mplreset', 'highfive']
         commands_list = [f'!{cmd.name}' for cmd in self.commands.values() if cmd.name not in excluded_commands]
         commands_description = ', '.join(commands_list)
         await ctx.send(f'MyStats commands: {commands_description}')
 
     # Method to expose the command list outside the class
     def get_commands(self):
-        excluded_commands = ['commands', 'mplreset']
+        excluded_commands = ['commands', 'mplreset', 'highfive']
         return [f'!{cmd.name}' for cmd in self.commands.values() if cmd.name not in excluded_commands]
 
     @commands.command(name='rivals')
