@@ -6867,7 +6867,7 @@ def show_update_message(versioncheck, download_url):
 
     hyperlink = tk.Label(popup, text="Release/download page", fg="blue", cursor="hand2")
     hyperlink.pack(pady=5)
-    hyperlink.bind("<Button-1>", lambda e: open_url(download_url or "https://mystats.camwow.tv/download"))
+    hyperlink.bind("<Button-1>", lambda e: open_url("https://mystats.camwow.tv/download"))
 
     button_frame = ttk.Frame(popup)
     button_frame.pack(pady=16)
