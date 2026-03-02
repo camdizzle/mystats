@@ -5791,7 +5791,9 @@ class ConfigManager:
                                 'overlay_compact_rows', 'overlay_horizontal_layout', 'overlay_server_port', 'tilt_lifetime_base_xp',
                                 'tilt_season_best_level', 'tilt_personal_best_level', 'tilt_overlay_theme', 'tilt_scroll_step_px', 'tilt_scroll_interval_ms',
                                 'tilt_scroll_pause_ms', 'tiltsurvivors_min_levels', 'tiltdeath_min_levels',
-                                'update_later_clicks', 'update_later_version', 'minimize_to_tray', 'tray_hint_toast_shown', 'app_language', *TILT_RUNTIME_PERSISTENT_KEYS}
+                                'update_later_clicks', 'update_later_version', 'pending_update_installer_path',
+                                'pending_update_silent_mode', 'pending_update_version_label',
+                                'minimize_to_tray', 'tray_hint_toast_shown', 'app_language', *TILT_RUNTIME_PERSISTENT_KEYS}
         self.transient_keys = set([])
         self.defaults = {
             'chat_br_results': 'True',
@@ -5895,7 +5897,10 @@ class ConfigManager:
             'tilt_total_deaths_today': '0',
             'tilt_lifetime_expertise': '0',
             'update_later_clicks': '0',
-            'update_later_version': ''
+            'update_later_version': '',
+            'pending_update_installer_path': '',
+            'pending_update_silent_mode': 'True',
+            'pending_update_version_label': ''
         }
         self.load_settings()
 
@@ -6723,15 +6728,77 @@ def _create_update_progress_dialog(version_label):
 
 
 def _start_installer_and_exit(installer_path, silent_mode=True):
+    if not installer_path:
+        messagebox.showerror("Update Failed", "Installer path was empty.")
+        return
+
+    command = [installer_path]
+    if silent_mode:
+        command.extend(["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS"])
+
+    config.set_setting('pending_update_installer_path', installer_path, persistent=True)
+    config.set_setting('pending_update_silent_mode', 'True' if silent_mode else 'False', persistent=True)
+    config.set_setting('pending_update_version_label', str(config.get_setting('update_later_version') or ''), persistent=True)
+
+    try:
+        creationflags = 0
+        if sys.platform == "win32":
+            creationflags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+
+        subprocess.Popen(command, shell=False, creationflags=creationflags)
+        config.set_setting('pending_update_installer_path', '', persistent=True)
+        config.set_setting('pending_update_silent_mode', 'True', persistent=True)
+        config.set_setting('pending_update_version_label', '', persistent=True)
+        force_exit_application()
+    except Exception as exc:
+        messagebox.showerror("Update Failed", f"Could not start installer: {exc}")
+
+
+def recover_pending_update_launch(parent=None):
+    installer_path = str(config.get_setting('pending_update_installer_path') or '').strip()
+    silent_mode_raw = str(config.get_setting('pending_update_silent_mode') or 'True').strip().lower()
+    silent_mode = silent_mode_raw == 'true'
+    version_label = str(config.get_setting('pending_update_version_label') or '').strip()
+
+    if not installer_path:
+        return False
+
+    if not os.path.exists(installer_path):
+        config.set_setting('pending_update_installer_path', '', persistent=True)
+        config.set_setting('pending_update_silent_mode', 'True', persistent=True)
+        config.set_setting('pending_update_version_label', '', persistent=True)
+        return False
+
     command = [installer_path]
     if silent_mode:
         command.extend(["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS"])
 
     try:
-        subprocess.Popen(command, shell=False)
-        force_exit_application()
+        creationflags = 0
+        if sys.platform == "win32":
+            creationflags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+
+        subprocess.Popen(command, shell=False, creationflags=creationflags)
+        config.set_setting('pending_update_installer_path', '', persistent=True)
+        config.set_setting('pending_update_silent_mode', 'True', persistent=True)
+        config.set_setting('pending_update_version_label', '', persistent=True)
+
+        label_suffix = f" {version_label}" if version_label else ""
+        show_windows_toast("MyStats Update", f"Resuming installer launch{label_suffix}.")
+
+        if parent is not None and parent.winfo_exists():
+            parent.after(150, force_exit_application)
+        return True
     except Exception as exc:
-        messagebox.showerror("Update Failed", f"Could not start installer: {exc}")
+        logger.warning(f"Pending update installer launch failed: {exc}")
+        if parent is not None and parent.winfo_exists():
+            parent.after(0, lambda: messagebox.showwarning(
+                "Update Resume Failed",
+                "MyStats found a pending update installer but could not launch it. "
+                "Please run the installer manually from your temp folder or trigger update again.",
+                parent=parent,
+            ))
+        return False
 
 
 def download_and_install_update(download_url, version_label, silent_mode=True):
@@ -6876,6 +6943,7 @@ def show_update_message(versioncheck, download_url):
 
     def start_update():
         update_now_requested['value'] = True
+        config.set_setting('pending_update_version_label', str(versioncheck), persistent=True)
         popup.destroy()
         download_and_install_update(download_url, versioncheck, silent_mode=True)
 
@@ -7098,6 +7166,9 @@ def startup(text_widget):
 
     display_welcome_message(text_widget, version, config, timestamp)
 
+
+# Try to recover a previously downloaded installer if a prior update launch was interrupted.
+recover_pending_update_launch(root)
 
 # Schedule the startup function to run after the window is ready
 root.after(100, lambda: startup(text_area))
