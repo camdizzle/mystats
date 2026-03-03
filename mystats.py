@@ -3411,7 +3411,11 @@ def _build_tilt_overlay_payload():
         fallback = last_run_summary.get('standings')
         if isinstance(fallback, list):
             display_standings = [
-                (str(item.get('name') or 'Unknown'), _safe_int(item.get('points', 0)))
+                (
+                    str(item.get('name') or 'Unknown'),
+                    _safe_int(item.get('points', 0)),
+                    _safe_int(item.get('deaths', item.get('death_count', item.get('run_deaths', 0)))),
+                )
                 for item in fallback if isinstance(item, dict)
             ]
 
@@ -3435,9 +3439,14 @@ def _build_tilt_overlay_payload():
             {
                 'name': name,
                 'points': points,
-                'deaths': _safe_int(run_deaths_ledger.get(name, 0)),
+                'deaths': _safe_int(deaths if len(entry) > 2 else run_deaths_ledger.get(name, 0)),
             }
-            for name, points in display_standings
+            for entry in display_standings
+            for name, points, deaths in [(
+                str(entry[0]) if isinstance(entry, (list, tuple)) and len(entry) > 0 else 'Unknown',
+                _safe_int(entry[1]) if isinstance(entry, (list, tuple)) and len(entry) > 1 else 0,
+                _safe_int(entry[2]) if isinstance(entry, (list, tuple)) and len(entry) > 2 else 0,
+            )]
         ],
     }
 
