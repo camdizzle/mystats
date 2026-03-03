@@ -107,14 +107,14 @@ const rotationConfig = {
   splashMaxIntervalMs: 15 * 60 * 1000,
 };
 let rotationStepTimer = null;
-const rotationOrder = ['season', 'today', 'standings', 'summary'];
+const rotationOrder = ['season', 'today', 'standings', 'run'];
 let rotationIndex = 0;
 let rotationView = rotationOrder[rotationIndex];
 let splashRestartTimer = null;
 let nextSplashDueAt = 0;
 
 function setRotationView(view) {
-  const allowed = new Set(['standings', 'summary', 'season', 'today']);
+  const allowed = new Set(['standings', 'run', 'season', 'today']);
   rotationView = allowed.has(view) ? view : 'standings';
   document.body?.setAttribute('data-rotation-view', rotationView);
 }
@@ -140,10 +140,12 @@ function setRotationViewAndAutoscroll(view) {
   stopAutoScroll('current-standings');
   stopAutoScroll('season-standings');
   stopAutoScroll('today-standings');
+  stopAutoScroll('current-run-stats');
   setRotationView(view);
   if (view === 'standings') startAutoScroll('current-standings');
   if (view === 'season') startAutoScroll('season-standings');
   if (view === 'today') startAutoScroll('today-standings');
+  if (view === 'run') startAutoScroll('current-run-stats');
 }
 
 function advanceRotationCycle(force = false) {
@@ -198,6 +200,7 @@ function showSplashView() {
   stopAutoScroll('current-standings');
   stopAutoScroll('season-standings');
   stopAutoScroll('today-standings');
+  stopAutoScroll('current-run-stats');
 
   splashScreen.classList.add('is-visible');
   splashScreen.classList.remove('splash-animate');
@@ -368,6 +371,7 @@ function startAutoScroll(listId) {
   if (listId === 'current-standings' && rotationView !== 'standings') return;
   if (listId === 'season-standings' && rotationView !== 'season') return;
   if (listId === 'today-standings' && rotationView !== 'today') return;
+  if (listId === 'current-run-stats' && rotationView !== 'run') return;
 
   stopAutoScroll(listId);
   host.scrollTop = 0;
@@ -424,9 +428,9 @@ function applyTheme(settings = {}) {
 }
 
 function renderCurrentRun(run = {}) {
-  const host = $('current-standings');
-  const summaryGrid = $('current-run-summary-grid');
-  if (!host) return;
+  const standingsHost = $('current-standings');
+  const runStatsHost = $('current-run-stats');
+  if (!standingsHost) return;
 
   $('run-level-value').textContent = fmt(run.level);
   $('run-elapsed-value').textContent = run.elapsed_time || '0:00';
@@ -448,12 +452,17 @@ function renderCurrentRun(run = {}) {
     ['Lifetime Expertise', `${fmt(run.lifetime_expertise)} XP`],
   ];
 
-  if (summaryGrid) {
-    summaryGrid.innerHTML = runStats
-      .map(([label, value]) => `<div><label>${label}</label><strong>${value}</strong></div>`)
+  if (runStatsHost) {
+    const runStatsMarkup = runStats
+      .map(([label, value]) => `<li class="standings-stat-row"><span class="standings-stat-label">${escapeHtml(label)}</span><span class="standings-stat-value">${escapeHtml(value)}</span></li>`)
       .join('');
+    if (runStatsHost.dataset.renderKey !== runStatsMarkup) {
+      runStatsHost.dataset.renderKey = runStatsMarkup;
+      runStatsHost.innerHTML = `${runStatsMarkup}<li class="standings-end-spacer" aria-hidden="true"></li>`;
+      syncStandingsEndSpacer('current-run-stats');
+    }
+    if (!isSplashViewActive()) startAutoScroll('current-run-stats');
   }
-
 
   const standings = Array.isArray(run.standings) ? run.standings : [];
   const standingsMarkup = standings.length
@@ -469,13 +478,13 @@ function renderCurrentRun(run = {}) {
   const rowsMarkup = `${standingsMarkup}`;
 
   const renderKey = rowsMarkup;
-  if (host.dataset.renderKey === renderKey) {
+  if (standingsHost.dataset.renderKey === renderKey) {
     if (!autoScrollTimers.has('current-standings') && !isSplashViewActive()) startAutoScroll('current-standings');
     return;
   }
 
-  host.dataset.renderKey = renderKey;
-  host.innerHTML = `${rowsMarkup}<li class="standings-end-spacer" aria-hidden="true"></li>`;
+  standingsHost.dataset.renderKey = renderKey;
+  standingsHost.innerHTML = `${rowsMarkup}<li class="standings-end-spacer" aria-hidden="true"></li>`;
   syncStandingsEndSpacer('current-standings');
 
   if (!isSplashViewActive()) startAutoScroll('current-standings');
@@ -774,6 +783,7 @@ window.addEventListener('resize', () => {
   syncStandingsEndSpacer('current-standings');
   syncStandingsEndSpacer('season-standings');
   syncStandingsEndSpacer('today-standings');
+  syncStandingsEndSpacer('current-run-stats');
 });
 
 setRotationView(rotationOrder[rotationIndex]);
