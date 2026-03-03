@@ -3366,6 +3366,10 @@ def _build_tilt_overlay_payload():
     if not isinstance(run_ledger, dict):
         run_ledger = {}
 
+    run_deaths_ledger = parse_json_setting('tilt_run_deaths_ledger', {})
+    if not isinstance(run_deaths_ledger, dict):
+        run_deaths_ledger = {}
+
     sorted_run = sorted(
         (
             (str(name), _safe_int(points))
@@ -3427,7 +3431,14 @@ def _build_tilt_overlay_payload():
         'total_deaths_today': get_int_setting('tilt_total_deaths_today', 0),
         'lifetime_expertise': get_int_setting('tilt_lifetime_expertise', 0),
         'leader': {'name': display_standings[0][0], 'points': display_standings[0][1]} if display_standings else None,
-        'standings': [{'name': name, 'points': points} for name, points in display_standings],
+        'standings': [
+            {
+                'name': name,
+                'points': points,
+                'deaths': _safe_int(run_deaths_ledger.get(name, 0)),
+            }
+            for name, points in display_standings
+        ],
     }
 
     level_completion = parse_json_setting('tilt_level_completion_overlay', {})
@@ -5741,7 +5752,7 @@ root.config(menu=menu_bar)
 TILT_RUNTIME_PERSISTENT_KEYS = {
     "tilt_current_level", "tilt_current_elapsed", "tilt_current_top_tiltee",
     "tilt_current_run_id", "tilt_run_started_at", "tilt_run_ledger",
-    "tilt_top_tiltee_ledger", "tilt_current_top_tiltee_count", "tilt_run_xp",
+    "tilt_run_deaths_ledger", "tilt_top_tiltee_ledger", "tilt_current_top_tiltee_count", "tilt_run_xp",
     "tilt_run_points", "tilt_run_total_seconds", "tilt_previous_run_xp", "tilt_level_completion_overlay",
     "tilt_run_completion_overlay", "tilt_run_completion_event_id",
     "tilt_last_run_summary", "tilt_best_run_xp_today", "tilt_highest_level_points_today",
@@ -5878,6 +5889,7 @@ class ConfigManager:
             'tilt_current_run_id': '',
             'tilt_run_started_at': '',
             'tilt_run_ledger': '{}',
+            'tilt_run_deaths_ledger': '{}',
             'tilt_top_tiltee_ledger': '{}',
             'tilt_current_top_tiltee_count': '0',
             'tilt_run_xp': '0',
@@ -8990,6 +9002,7 @@ async def tilted(bot):
                 run_id = base64.urlsafe_b64encode(uuid.uuid4().bytes).rstrip(b'=').decode('utf-8')
                 set_tilt_runtime_setting('tilt_run_started_at', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
                 set_tilt_runtime_setting('tilt_run_ledger', '{}')
+                set_tilt_runtime_setting('tilt_run_deaths_ledger', '{}')
                 set_tilt_runtime_setting('tilt_top_tiltee_ledger', '{}')
                 set_tilt_runtime_setting('tilt_current_top_tiltee_count', '0')
                 set_tilt_runtime_setting('tilt_run_xp', '0')
@@ -9011,6 +9024,13 @@ async def tilted(bot):
                     run_ledger = {}
             except Exception:
                 run_ledger = {}
+
+            try:
+                run_deaths_ledger = json.loads(config.get_setting('tilt_run_deaths_ledger') or '{}')
+                if not isinstance(run_deaths_ledger, dict):
+                    run_deaths_ledger = {}
+            except Exception:
+                run_deaths_ledger = {}
 
             try:
                 tilt_top_tiltee_ledger = json.loads(config.get_setting('tilt_top_tiltee_ledger') or '{}')
@@ -9058,6 +9078,7 @@ async def tilted(bot):
                     run_ledger[username] = int(run_ledger.get(username, 0)) + level_points
                 else:
                     deaths_this_level += 1
+                    run_deaths_ledger[username] = int(run_deaths_ledger.get(username, 0)) + 1
 
             terminal_run_death = 1 if (not level_passed and 1 <= len(survivors) <= 2) else 0
             deaths_this_level += terminal_run_death
@@ -9109,6 +9130,7 @@ async def tilted(bot):
                 config.set_setting('tilt_personal_best_level', str(updated_personal_best_setting_level), persistent=True)
 
             set_tilt_runtime_setting('tilt_run_ledger', json.dumps(run_ledger))
+            set_tilt_runtime_setting('tilt_run_deaths_ledger', json.dumps(run_deaths_ledger))
 
             lifetime_expertise = get_int_setting('tilt_lifetime_expertise', 0)
             lifetime_base_xp = get_int_setting('tilt_lifetime_base_xp', 0)
@@ -9315,7 +9337,14 @@ async def tilted(bot):
                     'best_run_xp_today': best_run_xp_today,
                     'total_xp_today': total_xp_today,
                     'total_deaths_today': total_deaths_today,
-                    'standings': [{'name': name, 'points': int(points)} for name, points in participants_with_points],
+                    'standings': [
+                        {
+                            'name': name,
+                            'points': int(points),
+                            'deaths': _safe_int(run_deaths_ledger.get(name, 0)),
+                        }
+                        for name, points in participants_with_points
+                    ],
                 }
                 set_tilt_runtime_setting('tilt_last_run_summary', json.dumps(last_run_summary))
                 set_tilt_runtime_setting('tilt_run_completion_overlay', json.dumps(last_run_summary))
@@ -9328,6 +9357,7 @@ async def tilted(bot):
                 set_tilt_runtime_setting('tilt_run_points', '0')
                 set_tilt_runtime_setting('tilt_run_total_seconds', '0')
                 set_tilt_runtime_setting('tilt_run_ledger', '{}')
+                set_tilt_runtime_setting('tilt_run_deaths_ledger', '{}')
                 set_tilt_runtime_setting('tilt_top_tiltee_ledger', '{}')
                 set_tilt_runtime_setting('tilt_current_top_tiltee_count', '0')
                 set_tilt_runtime_setting('tilt_level_completion_overlay', '{}')
