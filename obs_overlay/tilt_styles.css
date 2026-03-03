@@ -92,6 +92,7 @@ h1 {
 
 .panels {
   display: flex;
+  flex-direction: column;
   min-height: 0;
   flex: 1 1 auto;
 }
@@ -165,21 +166,20 @@ body[data-rotation-view='run'] .panel--today-top10 {
   display: none;
 }
 
-body[data-rotation-view='season'] .panel--season-top10 {
+body[data-rotation-view='top10'] .panel--season-top10,
+body[data-rotation-view='top10'] .panel--today-top10 {
   display: flex;
 }
 
-body[data-rotation-view='today'] .panel--today-top10 {
-  display: flex;
-}
-
-body[data-rotation-view='season'] .panel--standings,
-body[data-rotation-view='season'] .panel--current-run,
-body[data-rotation-view='season'] .panel--today-top10,
-body[data-rotation-view='today'] .panel--standings,
-body[data-rotation-view='today'] .panel--current-run,
-body[data-rotation-view='today'] .panel--season-top10 {
+body[data-rotation-view='top10'] .panel--standings,
+body[data-rotation-view='top10'] .panel--current-run {
   display: none;
+}
+
+body[data-rotation-view='top10'] .panel--season-top10,
+body[data-rotation-view='top10'] .panel--today-top10 {
+  flex: 1 1 0;
+  min-height: 0;
 }
 
 .panel--standings,
