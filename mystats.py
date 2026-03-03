@@ -8887,7 +8887,6 @@ async def competitive_raid_monitor(bot):
             payload_fields = _collect_payload_field_names(payload)
             payload_signature = '|'.join(payload_fields)
             if payload_signature != bot.last_competitive_raid_field_list_signature:
-                print(f"Competitive raid payload fields ({len(payload_fields)}): {', '.join(payload_fields)}")
                 bot.last_competitive_raid_field_list_signature = payload_signature
 
             local_streamer = normalize_channel_name(bot.channel_name)
