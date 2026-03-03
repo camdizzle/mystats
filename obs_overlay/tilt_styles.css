@@ -6,7 +6,7 @@
   --line: rgba(255, 255, 255, 0.18);
   --text-scale: 1;
   --overlay-frame-gap: 12px;
-  --overlay-frame-width: calc(100vw - (var(--overlay-frame-gap) * 2));
+  --overlay-frame-width: min(600px, calc(100vw - (var(--overlay-frame-gap) * 2)));
   --overlay-frame-height: min(600px, calc(100vh - (var(--overlay-frame-gap) * 2)));
 }
 
@@ -24,7 +24,7 @@ body {
   width: var(--overlay-frame-width);
   height: var(--overlay-frame-height);
   max-height: var(--overlay-frame-height);
-  margin: var(--overlay-frame-gap) auto;
+  margin: var(--overlay-frame-gap);
   padding: 12px;
   border-radius: 16px;
   background: linear-gradient(165deg, var(--panel), var(--panel-2));
@@ -41,47 +41,44 @@ h1 {
 
 .status-bar {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 5px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
 }
 
 .pill {
+  width: 100%;
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
   text-align: center;
   padding: 7px 8px;
   border-radius: 16px;
-  background: rgba(127, 216, 255, 0.15);
+  background: rgba(127, 216, 255, 0.14);
   border: 1px solid rgba(127, 216, 255, 0.35);
-  font-size: calc(0.98rem * var(--text-scale));
-  line-height: 1.1;
-  gap: 2px;
+  font-size: calc(1.04rem * var(--text-scale));
+  font-weight: 700;
+  line-height: 1.15;
+  gap: 3px;
 }
 
 .pill-title {
   display: block;
-  font-size: calc(0.7rem * var(--text-scale));
+  font-size: calc(1.18rem * var(--text-scale));
   font-weight: 700;
-  color: rgba(238, 243, 255, 0.74);
+  color: rgba(155, 181, 255, 0.95);
   text-transform: uppercase;
   letter-spacing: 0.03em;
-  line-height: 1.05;
+  line-height: 1.1;
 }
 
 .pill-value {
   display: block;
-  font-size: calc(1.1rem * var(--text-scale));
+  font-size: calc(1.46rem * var(--text-scale));
   font-weight: 800;
   color: var(--text);
   line-height: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.pill--active {
-  background: rgba(124, 255, 177, 0.2);
-  border-color: rgba(124, 255, 177, 0.5);
 }
 
 .panels {
@@ -231,18 +228,25 @@ body[data-rotation-view='summary'][data-has-last-run='true'] .panel--current-run
 
 .standings li {
   display: grid;
-  grid-template-columns: minmax(16ch, 1fr) auto;
-  column-gap: 10px;
+  grid-template-columns: 56px minmax(16ch, 1fr) auto;
+  gap: 10px;
   align-items: center;
-  padding: 9px 11px;
-  border-radius: 9px;
-  background: rgba(255,255,255,0.08);
-  border: 1px solid rgba(255,255,255,0.14);
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  font-size: calc(1.5rem * var(--text-scale));
   font-weight: 700;
-  font-size: calc(1.62rem * var(--text-scale));
 }
 
 .standings li > span:first-child {
+  text-align: center;
+  border-radius: 10px;
+  padding: 7px 0;
+  background: transparent;
+}
+
+.standings li > span:nth-child(2) {
   font-size: calc(1.64rem * var(--text-scale));
   overflow: hidden;
   text-overflow: ellipsis;
@@ -259,6 +263,70 @@ body[data-rotation-view='summary'][data-has-last-run='true'] .panel--current-run
   font-weight: 800;
 }
 
+.standings li.standings-row--podium-1 > span:first-child { background: #f6d35f; color: #231500; }
+.standings li.standings-row--podium-2 > span:first-child { background: #cfdaf5; color: #182448; }
+.standings li.standings-row--podium-3 > span:first-child { background: #f2ad73; color: #3a1600; }
+
+
+.standings--live {
+  gap: 7px;
+  padding-right: 4px;
+}
+
+.standings--live .standings-section-title {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  margin: 0;
+  padding: 7px 10px;
+  border-radius: 9px;
+  font-size: calc(1.12rem * var(--text-scale));
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  background: rgba(8, 13, 26, 0.92);
+  border: 1px solid rgba(127, 216, 255, 0.2);
+  text-align: center;
+}
+
+.standings--live .standings-stat-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: linear-gradient(145deg, rgba(127, 216, 255, 0.14), rgba(255, 255, 255, 0.05));
+  border: 1px solid rgba(127, 216, 255, 0.28);
+}
+
+.standings--live .standings-stat-label {
+  font-size: calc(0.88rem * var(--text-scale));
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  opacity: 0.78;
+}
+
+.standings--live .standings-stat-value {
+  font-size: calc(1.48rem * var(--text-scale));
+  font-weight: 900;
+  line-height: 1.1;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.standings--live .standings-empty {
+  display: block;
+  text-align: center;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.2);
+  background: rgba(255,255,255,0.08);
+  font-size: calc(1.05rem * var(--text-scale));
+  font-weight: 700;
+}
 .standings .standings-end-spacer {
   height: 1px;
   min-height: 1px;
@@ -305,10 +373,9 @@ body[data-rotation-view='summary'][data-has-last-run='true'] .panel--current-run
 .level-overlay {
   position: fixed;
   top: var(--overlay-frame-gap);
-  left: 50%;
+  left: var(--overlay-frame-gap);
   width: var(--overlay-frame-width);
   height: var(--overlay-frame-height);
-  transform: translateX(-50%);
   border-radius: 16px;
   border: 1px solid rgba(125, 235, 255, 0.42);
   background:
@@ -371,10 +438,9 @@ body[data-rotation-view='summary'][data-has-last-run='true'] .panel--current-run
 .run-overlay {
   position: fixed;
   top: var(--overlay-frame-gap);
-  left: 50%;
+  left: var(--overlay-frame-gap);
   width: var(--overlay-frame-width);
   height: var(--overlay-frame-height);
-  transform: translateX(-50%);
   border-radius: 16px;
   border: 1px solid rgba(255, 211, 130, 0.48);
   background:
@@ -567,10 +633,9 @@ body[data-rotation-view='summary'][data-has-last-run='true'] .panel--current-run
 .tilt-splash-screen {
   position: fixed;
   top: var(--overlay-frame-gap);
-  left: 50%;
+  left: var(--overlay-frame-gap);
   width: var(--overlay-frame-width);
   height: var(--overlay-frame-height);
-  transform: translateX(-50%);
   border-radius: 16px;
   border: 1px solid rgba(255, 192, 107, 0.42);
   overflow: hidden;

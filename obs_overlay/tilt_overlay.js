@@ -237,7 +237,6 @@ function renderSnapshot(snapshot = {}) {
   $('overlay-title').textContent = t(snapshot.title || 'MyStats Tilt Run Tracker');
   applyTheme(snapshot.settings || {});
   renderCurrentRun(snapshot.current_run || {});
-  renderSeasonStandings(snapshot.season_standings || []);
   renderLastRun(snapshot.last_run || {});
 }
 
@@ -377,9 +376,6 @@ function startAutoScroll(listId) {
         if (!autoScrollTimers.has(listId)) return;
         host.scrollTop = 0;
         host.dataset.scrollLock = 'false';
-        if (listId === 'current-standings') {
-          showCurrentRunSummaryTemporarily();
-        }
       }, autoScrollConfig.pauseMs);
     }
   }, autoScrollConfig.intervalMs);
@@ -405,83 +401,63 @@ function applyTheme(settings = {}) {
   autoScrollConfig.pauseMs = Math.max(0, Math.min(3000, Number(merged.tilt_scroll_pause_ms || defaultSettings.tilt_scroll_pause_ms)));
 }
 
-function renderStandings(listId, standings, emptyText, limit = null) {
-  const host = $(listId);
+function renderCurrentRun(run = {}) {
+  const host = $('current-standings');
   if (!host) return;
 
-  const normalizedRows = Array.isArray(standings) ? (Number.isFinite(limit) ? standings.slice(0, Math.max(0, limit)) : standings) : [];
-  const hasRows = normalizedRows.length > 0;
-  const rowsMarkup = hasRows
-    ? normalizedRows
+  $('run-level-value').textContent = fmt(run.level);
+  $('run-elapsed-value').textContent = run.elapsed_time || '0:00';
+
+  const topTiltee = run.top_tiltee || 'None';
+  const topTilteeCount = Number(run.top_tiltee_count || 0);
+  const topTilteeWithCount = topTiltee === 'None' ? 'None' : `${topTiltee} (${fmt(topTilteeCount)} tops)`;
+  $('top-tiltee-value').textContent = topTiltee;
+
+  const leader = run.leader ? `${run.leader.name} (${fmt(run.leader.points)} pts)` : 'None';
+  const runStats = [
+    ['Leader', leader],
+    ['Top Tiltee', topTilteeWithCount],
+    ['Run Points', `${fmt(run.run_points)} pts`],
+    ['Expertise This Run', `${fmt(run.run_xp)} XP`],
+    ['Best Run XP Today', `${fmt(run.best_run_xp_today)} XP`],
+    ['Total XP Today', `${fmt(run.total_xp_today)} XP`],
+    ['Total Deaths Today', fmt(run.total_deaths_today)],
+    ['Lifetime Expertise', `${fmt(run.lifetime_expertise)} XP`],
+  ];
+
+  const statsMarkup = runStats
+    .map(([label, value]) => `<li class="standings-stat-row"><span class="standings-stat-label">${label}</span><span class="standings-stat-value">${value}</span></li>`)
+    .join('');
+
+  const standings = Array.isArray(run.standings) ? run.standings : [];
+  const standingsMarkup = standings.length
+    ? standings
       .map((row, i) => {
         const deaths = Number(row.deaths ?? row.death_count ?? row.total_deaths ?? row.run_deaths ?? 0);
-        return `<li><span>#${i + 1} ${row.name}</span><span>${fmt(row.points)} pts · ☠ ${fmt(deaths)}</span></li>`;
+        const podiumClass = i < 3 ? ` standings-row--podium-${i + 1}` : '';
+        return `<li class="standings-row${podiumClass}"><span>${i + 1}</span><span>${row.name}</span><span>${fmt(row.points)} pts · ☠ ${fmt(deaths)}</span></li>`;
       })
       .join('')
-    : '';
-  const renderKey = hasRows ? rowsMarkup : `__empty__:${emptyText}`;
+    : `<li class="standings-empty">${t('No active run standings yet.')}</li>`;
 
+  const rowsMarkup = `
+    <li class="standings-section-title">Current Run</li>
+    ${statsMarkup}
+    <li class="standings-section-title">Current Standings</li>
+    ${standingsMarkup}
+  `;
+
+  const renderKey = rowsMarkup;
   if (host.dataset.renderKey === renderKey) {
-    if (listId === 'current-standings' && hasRows && !autoScrollTimers.has(listId)) {
-      startAutoScroll(listId);
-    }
+    if (!autoScrollTimers.has('current-standings') && !isSplashViewActive()) startAutoScroll('current-standings');
     return;
   }
 
   host.dataset.renderKey = renderKey;
-  host.dataset.loopHeight = '0';
-
-  if (!hasRows) {
-    host.innerHTML = `<li>${emptyText}</li>`;
-    if (listId === 'current-standings') {
-      clearRotationTimer();
-      clearSplashRestartTimer();
-      hideSplashView();
-      setRotationView('standings');
-      stopAutoScroll('current-standings');
-      stopAutoScroll('season-standings');
-    }
-    return;
-  }
-
   host.innerHTML = `${rowsMarkup}<li class="standings-end-spacer" aria-hidden="true"></li>`;
-  syncStandingsEndSpacer(listId);
+  syncStandingsEndSpacer('current-standings');
 
-  if (listId === 'current-standings') {
-    if (rotationView === 'standings' && !isSplashViewActive()) startAutoScroll(listId);
-  }
-
-  if (listId === 'season-standings' && rotationView === 'season') {
-    startAutoScroll(listId);
-  }
-}
-
-function renderCurrentRun(run = {}) {
-  const isActive = run.status === 'active';
-  $('run-status-value').textContent = isActive ? t('Active') : t('Idle');
-  $('run-status').classList.toggle('pill--active', isActive);
-  $('run-level-value').textContent = fmt(run.level);
-  $('run-elapsed-value').textContent = run.elapsed_time || '0:00';
-
-  const leader = run.leader ? `${run.leader.name} (${fmt(run.leader.points)} pts)` : 'None';
-  const topTiltee = run.top_tiltee || 'None';
-  const topTilteeCount = Number(run.top_tiltee_count || 0);
-  const topTilteeWithCount = topTiltee === 'None' ? 'None' : `${topTiltee} (${fmt(topTilteeCount)} tops)`;
-  $('current-leader').textContent = leader;
-  $('current-top-tiltee').textContent = topTilteeWithCount;
-  $('top-tiltee-value').textContent = topTiltee;
-  $('current-run-points').textContent = fmt(run.run_points);
-  $('current-run-xp').textContent = fmt(run.run_xp);
-  $('best-run-xp').textContent = fmt(run.best_run_xp_today);
-  $('total-xp-today').textContent = fmt(run.total_xp_today);
-  $('total-deaths-today').textContent = fmt(run.total_deaths_today);
-  $('lifetime-xp').textContent = fmt(run.lifetime_expertise);
-
-  renderStandings('current-standings', run.standings, t('No active run standings yet.'));
-}
-
-function renderSeasonStandings(seasonStandings = []) {
-  renderStandings('season-standings', seasonStandings, t('No season standings yet.'), 10);
+  if (!isSplashViewActive()) startAutoScroll('current-standings');
 }
 
 function isLastRunFromToday(lastRun = {}) {
@@ -701,14 +677,12 @@ async function refresh() {
     }
 
     renderCurrentRun(currentRun);
-    renderSeasonStandings(payload.season_standings || []);
     renderLastRun(payload.last_run || {});
     const levelRecapShown = renderLevelCompletionOverlay(payload.level_completion || {});
     if (levelRecapShown || runOverlayActive) {
       hideSplashView();
       clearSplashRestartTimer();
       stopAutoScroll('current-standings');
-      stopAutoScroll('season-standings');
     }
 
     const hasNewRunCompletionEvent = runCompletionEventId > lastRunCompletionEventId;
@@ -731,7 +705,6 @@ async function refresh() {
     }
 
   } catch (e) {
-    $('run-status-value').textContent = 'Unavailable';
     $('last-run-summary').textContent = 'Unable to load tilt overlay data from /api/overlay/tilt.';
     hideRecapOverlays();
     // Keep baseline/event memory across transient fetch errors so historical run-complete events are not retriggered.
@@ -746,7 +719,6 @@ function startRefreshTimer() {
 
 window.addEventListener('resize', () => {
   syncStandingsEndSpacer('current-standings');
-  syncStandingsEndSpacer('season-standings');
 });
 
 setRotationView('standings');
