@@ -7850,7 +7850,9 @@ class Bot(commands.Bot):
         today_avg_points_rounded_down = math.floor(today_avg_points * 10) / 10
 
         # Create string for singular or plural "win" based on the count.
-                # Format the numbers with commas and rounded down values.
+        wins_str = "win" if counts['winstoday'] == 1 else "wins"
+
+        # Format the numbers with commas and rounded down values.
         brwins_formatted = '{:,}'.format(counts['brwins'])
         br_points_formatted = '{:,}'.format(counts['br_points'])
         br_count_formatted = '{:,}'.format(counts['br_count'])
@@ -7870,17 +7872,19 @@ class Bot(commands.Bot):
         racestoday_formatted = '{:,}'.format(counts['racestoday'])
         today_avg_points_formatted = '{:.1f}'.format(today_avg_points_rounded_down)
 
-        # Create the formatted output message.
+        # Create the formatted output message using the original syntax style,
+        # while preserving modern tag + emote prefix behavior.
         output_msg = (
-            f"📊 {format_user_tag(winnersdisplayname)} | BRs - {brwins_formatted} {pluralize(counts['brwins'], 'win')}, {br_points_formatted} points, {br_count_formatted} {pluralize(counts['br_count'], 'royale')}, PPR: {br_avg_points_formatted} | "
-            f"Races - {racewins_formatted} {pluralize(counts['racewins'], 'win')}, {race_points_formatted} points, {race_count_formatted} {pluralize(counts['race_count'], 'race')}, PPR: {race_avg_points_formatted} | "
-            f"Season - {seasonwins_formatted} {pluralize(counts['seasonwins'], 'win')}, {seasonpts_formatted} points, {seasonraces_formatted} {pluralize(counts['seasonraces'], 'race')}, PPR: {season_avg_points_formatted} | "
-            f"World Records: {counts['world_record_count']:,} {pluralize(counts['world_record_count'], 'record')}"
+            f"BRs - {brwins_formatted} wins, {br_points_formatted} points, {br_count_formatted} royales, PPR: {br_avg_points_formatted}. | "
+            f"Races - {racewins_formatted} wins, {race_points_formatted} points, {race_count_formatted} races, PPR: {race_avg_points_formatted}. | "
+            f"Season - {seasonwins_formatted} wins, {seasonpts_formatted} points, {seasonraces_formatted} races, PPR: {season_avg_points_formatted}. | "
+            f"World Records - {counts['world_record_count']}"
         )
 
         await send_chat_message(
             ctx.channel,
-            output_msg,
+            f"📊 {format_user_tag(winnersdisplayname)}: Today: {counts['winstoday']} {wins_str}, {pointstoday_formatted} points, {racestoday_formatted} races. "
+            f"PPR: {today_avg_points_formatted} | Season total: {output_msg}",
             category="mystats"
         )
 
