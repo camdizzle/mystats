@@ -290,12 +290,12 @@ function getRunOverlayKey(runCompletion = {}) {
   return `${runCompletion.run_id}|${runCompletion.ended_at}`;
 }
 
-function hideRecapOverlays() {
+function hideRecapOverlays({ resetRotation = true } = {}) {
   if (levelOverlayHideTimer) clearTimeout(levelOverlayHideTimer);
   if (runOverlayHideTimer) clearTimeout(runOverlayHideTimer);
   levelOverlayHideTimer = null;
   runOverlayHideTimer = null;
-  clearRotationTimer();
+  if (resetRotation) clearRotationTimer();
   clearSplashRestartTimer();
   levelOverlayActive = false;
   runOverlayActive = false;
@@ -759,7 +759,7 @@ async function refresh() {
 
   } catch (e) {
     $('last-run-summary').textContent = 'Unable to load tilt overlay data from /api/overlay/tilt.';
-    hideRecapOverlays();
+    hideRecapOverlays({ resetRotation: false });
     // Keep baseline/event memory across transient fetch errors so historical run-complete events are not retriggered.
     updateTrackerVisibility();
   }
