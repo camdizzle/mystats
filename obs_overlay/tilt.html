@@ -17,11 +17,30 @@
     </section>
 
     <section class='panels'>
+      <article class='panel panel--season-top10'>
+        <h2>Top 10 (Season)</h2>
+        <ol id='season-standings' class='standings'>
+          <li class='standings-empty'>No season standings yet.</li>
+        </ol>
+      </article>
+
+      <article class='panel panel--today-top10'>
+        <h2>Top 10 (Today)</h2>
+        <ol id='today-standings' class='standings'>
+          <li class='standings-empty'>No today standings yet.</li>
+        </ol>
+      </article>
+
       <article class='panel panel--standings'>
-        <h2>Current Run + Standings</h2>
+        <h2>Current Standings</h2>
         <ol id='current-standings' class='standings standings--live'>
           <li>No active run standings yet.</li>
         </ol>
+      </article>
+
+      <article class='panel panel--current-run'>
+        <h2>Current Run</h2>
+        <div id='current-run-summary-grid' class='stats-grid'></div>
       </article>
     </section>
 

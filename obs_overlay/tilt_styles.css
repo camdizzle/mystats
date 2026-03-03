@@ -98,7 +98,8 @@ h1 {
 
 .panel--standings,
 .panel--current-run,
-.panel--season-top10 {
+.panel--season-top10,
+.panel--today-top10 {
   flex: 1 1 auto;
   min-height: 0;
 }
@@ -154,11 +155,13 @@ body[data-rotation-view='summary'] .panel--current-run {
 }
 
 body[data-rotation-view='summary'] .panel--standings,
-body[data-rotation-view='summary'] .panel--season-top10 {
+body[data-rotation-view='summary'] .panel--season-top10,
+body[data-rotation-view='summary'] .panel--today-top10 {
   display: none;
 }
 
-.panel--season-top10 {
+.panel--season-top10,
+.panel--today-top10 {
   display: none;
 }
 
@@ -166,13 +169,22 @@ body[data-rotation-view='season'] .panel--season-top10 {
   display: flex;
 }
 
+body[data-rotation-view='today'] .panel--today-top10 {
+  display: flex;
+}
+
 body[data-rotation-view='season'] .panel--standings,
-body[data-rotation-view='season'] .panel--current-run {
+body[data-rotation-view='season'] .panel--current-run,
+body[data-rotation-view='season'] .panel--today-top10,
+body[data-rotation-view='today'] .panel--standings,
+body[data-rotation-view='today'] .panel--current-run,
+body[data-rotation-view='today'] .panel--season-top10 {
   display: none;
 }
 
 .panel--standings,
-.panel--season-top10 {
+.panel--season-top10,
+.panel--today-top10 {
   min-width: 0;
 }
 
@@ -283,6 +295,7 @@ body[data-rotation-view='summary'][data-has-last-run='true'] .panel--current-run
 }
 
 .standings--live .standings-section-title {
+  white-space: nowrap;
   position: sticky;
   top: 0;
   z-index: 2;

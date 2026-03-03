@@ -3370,6 +3370,54 @@ def _build_tilt_overlay_payload():
     if not isinstance(run_deaths_ledger, dict):
         run_deaths_ledger = {}
 
+    def build_tilt_today_standings():
+        directory = config.get_setting('directory')
+        if not directory:
+            return []
+
+        todays_file = os.path.join(directory, f"tilts_{current_timestamp().strftime('%Y-%m-%d')}.csv")
+        if not os.path.isfile(todays_file):
+            return []
+
+        totals = {}
+        try:
+            with open(todays_file, 'rb') as f:
+                raw_data = f.read()
+            result = chardet.detect(raw_data)
+            encoding = result['encoding'] if result and result.get('encoding') else 'utf-8'
+
+            with open(todays_file, 'r', encoding=encoding, errors='ignore') as f:
+                for row in csv.reader(f):
+                    detail = parse_tilt_result_detail(row)
+                    if detail is None:
+                        continue
+                    username = str(detail.get('username') or '').strip().lower()
+                    if not username:
+                        continue
+                    if username not in totals:
+                        totals[username] = {
+                            'name': str(detail.get('username') or username).strip() or username,
+                            'points': 0,
+                            'deaths': 0,
+                        }
+                    totals[username]['points'] += _safe_int(detail.get('points', 0))
+        except Exception:
+            return []
+
+        ranked = sorted(
+            totals.values(),
+            key=lambda row: (-_safe_int(row.get('points', 0)), str(row.get('name', '')).lower()),
+        )[:10]
+
+        return [
+            {
+                'name': row.get('name') or 'Unknown',
+                'points': _safe_int(row.get('points', 0)),
+                'deaths': _safe_int(row.get('deaths', 0)),
+            }
+            for row in ranked
+        ]
+
     sorted_run = sorted(
         (
             (str(name), _safe_int(points))
@@ -3386,6 +3434,7 @@ def _build_tilt_overlay_payload():
             {
                 'name': (stats.get('display_name') or username),
                 'points': _safe_int(stats.get('tilt_points', 0)),
+                'deaths': _safe_int(stats.get('tilt_deaths', 0)),
                 'levels': _safe_int(stats.get('tilt_levels', 0)),
                 'top_tiltee': _safe_int(stats.get('tilt_top_tiltee', 0)),
             }
@@ -3473,6 +3522,7 @@ def _build_tilt_overlay_payload():
         'run_completion': run_completion,
         'run_completion_event_id': run_completion_event_id,
         'season_standings': season_standings,
+        'today_standings': build_tilt_today_standings(),
         'suppress_initial_recaps': True,
     }
     return payload
