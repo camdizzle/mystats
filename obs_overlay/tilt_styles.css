@@ -301,7 +301,7 @@ body[data-rotation-view='summary'][data-has-last-run='true'] .panel--current-run
 .standings--live .standings-stat-row {
   display: flex;
   flex-direction: row;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 14px;
   padding: 10px 12px;
@@ -315,13 +315,14 @@ body[data-rotation-view='summary'][data-has-last-run='true'] .panel--current-run
   letter-spacing: 0.07em;
   text-transform: uppercase;
   opacity: 0.78;
+  text-align: left;
 }
 
 .standings--live .standings-stat-value {
   font-size: calc(1.74rem * var(--text-scale));
   font-weight: 900;
   line-height: 1.1;
-  width: 100%;
+  text-align: right;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
