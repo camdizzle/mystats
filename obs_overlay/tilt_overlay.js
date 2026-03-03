@@ -64,7 +64,7 @@ const defaultSettings = {
   text_scale: 100,
   tilt_scroll_step_px: 1,
   tilt_scroll_interval_ms: 40,
-  tilt_scroll_pause_ms: 900,
+  tilt_scroll_pause_ms: 0,
 };
 
 const themes = {
@@ -107,14 +107,14 @@ const rotationConfig = {
   splashMaxIntervalMs: 15 * 60 * 1000,
 };
 let rotationStepTimer = null;
-const rotationOrder = ['season', 'today', 'standings', 'run'];
+const rotationOrder = ['top10', 'standings', 'run'];
 let rotationIndex = 0;
 let rotationView = rotationOrder[rotationIndex];
 let splashRestartTimer = null;
 let nextSplashDueAt = 0;
 
 function setRotationView(view) {
-  const allowed = new Set(['standings', 'run', 'season', 'today']);
+  const allowed = new Set(['standings', 'run', 'top10']);
   rotationView = allowed.has(view) ? view : 'standings';
   document.body?.setAttribute('data-rotation-view', rotationView);
 }
@@ -143,8 +143,10 @@ function setRotationViewAndAutoscroll(view) {
   stopAutoScroll('current-run-stats');
   setRotationView(view);
   if (view === 'standings') startAutoScroll('current-standings');
-  if (view === 'season') startAutoScroll('season-standings');
-  if (view === 'today') startAutoScroll('today-standings');
+  if (view === 'top10') {
+    startAutoScroll('season-standings');
+    startAutoScroll('today-standings');
+  }
   if (view === 'run') startAutoScroll('current-run-stats');
 }
 
@@ -369,13 +371,12 @@ function startAutoScroll(listId) {
   const host = $(listId);
   if (!host) return;
   if (listId === 'current-standings' && rotationView !== 'standings') return;
-  if (listId === 'season-standings' && rotationView !== 'season') return;
-  if (listId === 'today-standings' && rotationView !== 'today') return;
+  if ((listId === 'season-standings' || listId === 'today-standings') && rotationView !== 'top10') return;
   if (listId === 'current-run-stats' && rotationView !== 'run') return;
 
   stopAutoScroll(listId);
   host.scrollTop = 0;
-  host.dataset.scrollLock = 'false';
+  host.dataset.scrollDirection = '1';
 
   const endSpacer = host.querySelector('.standings-end-spacer');
   const initialTransitionTop = endSpacer ? endSpacer.offsetTop : 0;
@@ -383,27 +384,27 @@ function startAutoScroll(listId) {
   if (initialMaxScrollTop <= 0 && initialTransitionTop <= 0) return;
 
   const timerId = setInterval(() => {
-    // Recompute bounds on every tick so we recover after overlays/splash hide or layout changes.
     const maxScrollTop = Math.max(0, host.scrollHeight - host.clientHeight);
-    const transitionSpacer = host.querySelector('.standings-end-spacer');
-    // Keep trigger within reachable scroll bounds. offsetTop can exceed maxScrollTop.
-    const transitionTop = Math.min(maxScrollTop, transitionSpacer ? transitionSpacer.offsetTop : maxScrollTop);
 
-    // Ignore ticks while the list is not measurable (e.g. tracker hidden under recap overlays).
     if (host.clientHeight <= 0) return;
     if (maxScrollTop <= 0) return;
-    if (host.dataset.scrollLock === 'true') return;
 
-    host.scrollTop = Math.min(maxScrollTop, host.scrollTop + autoScrollConfig.stepPx);
+    let direction = Number(host.dataset.scrollDirection || '1');
+    if (direction !== -1) direction = 1;
 
-    if (host.scrollTop >= transitionTop - 1) {
-      host.dataset.scrollLock = 'true';
-      setTimeout(() => {
-        if (!autoScrollTimers.has(listId)) return;
-        host.scrollTop = 0;
-        host.dataset.scrollLock = 'false';
-      }, autoScrollConfig.pauseMs);
+    const nextScrollTop = host.scrollTop + (autoScrollConfig.stepPx * direction);
+    if (nextScrollTop >= maxScrollTop) {
+      host.scrollTop = maxScrollTop;
+      host.dataset.scrollDirection = '-1';
+      return;
     }
+    if (nextScrollTop <= 0) {
+      host.scrollTop = 0;
+      host.dataset.scrollDirection = '1';
+      return;
+    }
+
+    host.scrollTop = nextScrollTop;
   }, autoScrollConfig.intervalMs);
 
   autoScrollTimers.set(listId, timerId);
