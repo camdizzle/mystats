@@ -3375,7 +3375,7 @@ def _build_tilt_overlay_payload():
         if not directory:
             return []
 
-        todays_file = os.path.join(directory, f"tilts_{current_timestamp().strftime('%Y-%m-%d')}.csv")
+        todays_file = os.path.join(directory, f"tilts_{datetime.now().strftime('%Y-%m-%d')}.csv")
         if not os.path.isfile(todays_file):
             return []
 
