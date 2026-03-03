@@ -4564,47 +4564,59 @@ def open_settings_window():
 
 
     # --- Overlay tab ---
-    ttk.Label(overlay_tab, text="Control OBS overlay visuals from the desktop app", style="Small.TLabel").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
+    overlay_tab.grid_columnconfigure(0, weight=1, uniform="overlay_columns")
+    overlay_tab.grid_columnconfigure(1, weight=1, uniform="overlay_columns")
 
-    ttk.Label(overlay_tab, text="Stats Rotation (seconds)").grid(row=1, column=0, sticky="w", pady=(0, 4))
-    overlay_rotation_entry = ttk.Entry(overlay_tab, width=12, justify='center')
-    overlay_rotation_entry.grid(row=1, column=1, sticky="w", pady=(0, 4), padx=(8, 0))
+    ttk.Label(overlay_tab, text="Control OBS overlay visuals from the desktop app", style="Small.TLabel").grid(
+        row=0, column=0, columnspan=2, sticky="w", pady=(0, 8)
+    )
+
+    core_overlay_frame = ttk.LabelFrame(overlay_tab, text="Results Overlay", style="Card.TLabelframe")
+    core_overlay_frame.grid(row=1, column=0, sticky="nsew", padx=(0, 8), pady=(0, 0))
+    core_overlay_frame.grid_columnconfigure(0, weight=1)
+
+    overlay_fields_frame = ttk.Frame(core_overlay_frame, style="App.TFrame")
+    overlay_fields_frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=(8, 6))
+
+    ttk.Label(overlay_fields_frame, text="Stats Rotation (seconds)").grid(row=0, column=0, sticky="w", pady=(0, 4))
+    overlay_rotation_entry = ttk.Entry(overlay_fields_frame, width=12, justify='center')
+    overlay_rotation_entry.grid(row=0, column=1, sticky="w", pady=(0, 4), padx=(8, 0))
     overlay_rotation_entry.insert(0, config.get_setting("overlay_rotation_seconds") or "10")
 
-    ttk.Label(overlay_tab, text="Data Refresh (seconds)").grid(row=2, column=0, sticky="w", pady=(0, 4))
-    overlay_refresh_entry = ttk.Entry(overlay_tab, width=12, justify='center')
-    overlay_refresh_entry.grid(row=2, column=1, sticky="w", pady=(0, 4), padx=(8, 0))
+    ttk.Label(overlay_fields_frame, text="Data Refresh (seconds)").grid(row=1, column=0, sticky="w", pady=(0, 4))
+    overlay_refresh_entry = ttk.Entry(overlay_fields_frame, width=12, justify='center')
+    overlay_refresh_entry.grid(row=1, column=1, sticky="w", pady=(0, 4), padx=(8, 0))
     overlay_refresh_entry.insert(0, config.get_setting("overlay_refresh_seconds") or "3")
 
-    ttk.Label(overlay_tab, text="Server Port").grid(row=3, column=0, sticky="w", pady=(0, 4))
-    overlay_port_entry = ttk.Entry(overlay_tab, width=12, justify='center')
-    overlay_port_entry.grid(row=3, column=1, sticky="w", pady=(0, 4), padx=(8, 0))
+    ttk.Label(overlay_fields_frame, text="Server Port").grid(row=2, column=0, sticky="w", pady=(0, 4))
+    overlay_port_entry = ttk.Entry(overlay_fields_frame, width=12, justify='center')
+    overlay_port_entry.grid(row=2, column=1, sticky="w", pady=(0, 4), padx=(8, 0))
     overlay_port_entry.insert(0, config.get_setting("overlay_server_port") or "5000")
 
-    ttk.Label(overlay_tab, text="Theme").grid(row=4, column=0, sticky="w", pady=(0, 4))
+    ttk.Label(overlay_fields_frame, text="Theme").grid(row=3, column=0, sticky="w", pady=(0, 4))
     overlay_theme_var = tk.StringVar(value=(config.get_setting("overlay_theme") or "midnight"))
-    overlay_theme_combo = ttk.Combobox(overlay_tab, textvariable=overlay_theme_var, values=["midnight", "ocean", "sunset", "forest", "mono", "violethearts"], width=18, state="readonly")
-    overlay_theme_combo.grid(row=4, column=1, sticky="w", pady=(0, 4), padx=(8, 0))
+    overlay_theme_combo = ttk.Combobox(overlay_fields_frame, textvariable=overlay_theme_var, values=["midnight", "ocean", "sunset", "forest", "mono", "violethearts"], width=18, state="readonly")
+    overlay_theme_combo.grid(row=3, column=1, sticky="w", pady=(0, 4), padx=(8, 0))
 
-    ttk.Label(overlay_tab, text="Card Opacity (65-100)").grid(row=5, column=0, sticky="w", pady=(0, 4))
-    overlay_opacity_entry = ttk.Entry(overlay_tab, width=12, justify='center')
-    overlay_opacity_entry.grid(row=5, column=1, sticky="w", pady=(0, 4), padx=(8, 0))
+    ttk.Label(overlay_fields_frame, text="Card Opacity (65-100)").grid(row=4, column=0, sticky="w", pady=(0, 4))
+    overlay_opacity_entry = ttk.Entry(overlay_fields_frame, width=12, justify='center')
+    overlay_opacity_entry.grid(row=4, column=1, sticky="w", pady=(0, 4), padx=(8, 0))
     overlay_opacity_entry.insert(0, config.get_setting("overlay_card_opacity") or "84")
 
-    ttk.Label(overlay_tab, text="Text Scale (75-175)").grid(row=6, column=0, sticky="w", pady=(0, 4))
-    overlay_text_scale_entry = ttk.Entry(overlay_tab, width=12, justify='center')
-    overlay_text_scale_entry.grid(row=6, column=1, sticky="w", pady=(0, 4), padx=(8, 0))
+    ttk.Label(overlay_fields_frame, text="Text Scale (75-175)").grid(row=5, column=0, sticky="w", pady=(0, 4))
+    overlay_text_scale_entry = ttk.Entry(overlay_fields_frame, width=12, justify='center')
+    overlay_text_scale_entry.grid(row=5, column=1, sticky="w", pady=(0, 4), padx=(8, 0))
     overlay_text_scale_entry.insert(0, config.get_setting("overlay_text_scale") or "100")
 
     overlay_show_medals_var = tk.BooleanVar(value=str(config.get_setting("overlay_show_medals") or "True") == "True")
     overlay_compact_rows_var = tk.BooleanVar(value=str(config.get_setting("overlay_compact_rows") or "False") == "True")
     overlay_horizontal_layout_var = tk.BooleanVar(value=str(config.get_setting("overlay_horizontal_layout") or "False") == "True")
-    ttk.Checkbutton(overlay_tab, text="Show top-3 medal emotes", variable=overlay_show_medals_var).grid(row=7, column=0, sticky="w", pady=(6, 2), columnspan=2)
-    ttk.Checkbutton(overlay_tab, text="Compact row spacing", variable=overlay_compact_rows_var).grid(row=8, column=0, sticky="w", pady=(0, 2), columnspan=2)
-    ttk.Checkbutton(overlay_tab, text="Horizontal ticker layout (1080x100)", variable=overlay_horizontal_layout_var).grid(row=9, column=0, sticky="w", pady=(0, 2), columnspan=2)
+    ttk.Checkbutton(core_overlay_frame, text="Show top-3 medal emotes", variable=overlay_show_medals_var).grid(row=1, column=0, sticky="w", padx=10, pady=(0, 2))
+    ttk.Checkbutton(core_overlay_frame, text="Compact row spacing", variable=overlay_compact_rows_var).grid(row=2, column=0, sticky="w", padx=10, pady=(0, 2))
+    ttk.Checkbutton(core_overlay_frame, text="Horizontal ticker layout (1080x100)", variable=overlay_horizontal_layout_var).grid(row=3, column=0, sticky="w", padx=10, pady=(0, 8))
 
     tilt_overlay_frame = ttk.LabelFrame(overlay_tab, text="Tilt Overlay", style="Card.TLabelframe")
-    tilt_overlay_frame.grid(row=11, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+    tilt_overlay_frame.grid(row=1, column=1, sticky="nsew", padx=(8, 0), pady=(0, 0))
 
     ttk.Label(tilt_overlay_frame, text="Starting Lifetime XP", style="Small.TLabel").grid(row=0, column=0, sticky="w", padx=(10, 8), pady=(8, 4))
     tilt_lifetime_base_entry = ttk.Entry(tilt_overlay_frame, width=12, justify='center')
@@ -4641,7 +4653,7 @@ def open_settings_window():
     tilt_scroll_pause_entry.insert(0, config.get_setting("tilt_scroll_pause_ms") or "900")
 
     ttk.Label(tilt_overlay_frame, text="Tip: Best level settings are minimum floors for Season/Personal Best output files.", style="Small.TLabel").grid(row=7, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 8))
-    ttk.Label(overlay_tab, text="Restart MyStats after changing port. Visual changes apply on next refresh.", style="Small.TLabel").grid(row=12, column=0, columnspan=2, sticky="w", pady=(8, 0))
+    ttk.Label(overlay_tab, text="Restart MyStats after changing port. Visual changes apply on next refresh.", style="Small.TLabel").grid(row=2, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
 
     def reset_settings_defaults():
