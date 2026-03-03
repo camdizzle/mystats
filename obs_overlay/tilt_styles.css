@@ -40,15 +40,24 @@ h1 {
 }
 
 .status-bar {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  display: flex;
   gap: 4px;
+}
+
+#top-tiltee-pill,
+#run-elapsed {
+  flex: 1 1 0;
+}
+
+#run-level {
+  flex: 0.5 1 0;
 }
 
 .pill {
   width: 100%;
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
+  justify-items: center;
   text-align: center;
   padding: 7px 8px;
   border-radius: 16px;
@@ -291,9 +300,10 @@ body[data-rotation-view='summary'][data-has-last-run='true'] .panel--current-run
 
 .standings--live .standings-stat-row {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
+  flex-direction: row;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
   padding: 10px 12px;
   border-radius: 12px;
   background: linear-gradient(145deg, rgba(127, 216, 255, 0.14), rgba(255, 255, 255, 0.05));
@@ -301,14 +311,14 @@ body[data-rotation-view='summary'][data-has-last-run='true'] .panel--current-run
 }
 
 .standings--live .standings-stat-label {
-  font-size: calc(0.88rem * var(--text-scale));
+  font-size: calc(1.32rem * var(--text-scale));
   letter-spacing: 0.07em;
   text-transform: uppercase;
   opacity: 0.78;
 }
 
 .standings--live .standings-stat-value {
-  font-size: calc(1.48rem * var(--text-scale));
+  font-size: calc(1.74rem * var(--text-scale));
   font-weight: 900;
   line-height: 1.1;
   width: 100%;
