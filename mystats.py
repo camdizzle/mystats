@@ -7260,6 +7260,21 @@ class Bot(commands.Bot):
     async def event_disconnect(self):
         print("Disconnected from Twitch chat. Waiting for reconnection...")
 
+    async def event_error(self, error, data=None):
+        """
+        Handle intermittent websocket teardown errors from TwitchIO gracefully.
+
+        Twitch can close the websocket transport while TwitchIO is still sending a
+        heartbeat ping, which raises a connection reset error in aiohttp.
+        This is transient during reconnects and should not crash or spam users.
+        """
+        error_message = str(error)
+        if isinstance(error, ConnectionResetError) or "Cannot write to closing transport" in error_message:
+            print("Twitch websocket closed during ping; waiting for automatic reconnect...")
+            return
+
+        raise error
+
     async def event_message(self, message):
         if message.author is None:
             return
