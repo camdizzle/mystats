@@ -474,9 +474,9 @@ function renderCombinedFeed(run = {}, seasonRows = [], todayRows = []) {
     buildTop10Rows(seasonRows, t('No season standings yet.')),
     `<li class="standings-section-title">Top 10 (Today)</li>`,
     buildTop10Rows(todayRows, t('No Tilt Levels Completed Today')),
-    `<li class="standings-section-title">${hasActiveRun ? 'Current Standings' : 'Last Run'}</li>`,
+    `<li class="standings-section-title">${hasActiveRun ? 'Current Standings' : 'Last Run Standings'}</li>`,
     buildCurrentStandingsRows(run.standings || []),
-    `<li class="standings-section-title">Current Run</li>`,
+    `<li class="standings-section-title">${hasActiveRun ? 'Current Run' : 'Last Run'}</li>`,
     buildCurrentRunRows(run),
   ].join('');
 
