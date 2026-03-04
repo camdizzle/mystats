@@ -679,10 +679,17 @@ function renderRunCompletionOverlay(lastRun = {}, shouldDisplay = true) {
 
 async function refresh() {
   try {
-    const response = await fetch('/api/overlay/tilt', { cache: 'no-store' });
+    const response = await fetch('/api/overlay', { cache: 'no-store' });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
-    const payload = await response.json();
+    const unifiedPayload = await response.json();
+    const overlayMode = String(unifiedPayload?.active_mode || '').trim().toLowerCase();
+    if (overlayMode && overlayMode !== 'tilt') {
+      window.location.replace('/overlay');
+      return;
+    }
+
+    const payload = unifiedPayload?.tilt || unifiedPayload;
     saveOverlaySnapshot(payload);
     currentLanguage = String(payload?.settings?.language || currentLanguage || 'en').toLowerCase();
     $('overlay-title').textContent = t(payload.title || 'MyStats Tilt Run Tracker');
@@ -746,7 +753,7 @@ async function refresh() {
     }
 
   } catch (e) {
-    $('last-run-summary').textContent = 'Unable to load tilt overlay data from /api/overlay/tilt.';
+    $('last-run-summary').textContent = 'Unable to load tilt overlay data from /api/overlay.';
     hideRecapOverlays({ resetRotation: false });
     // Keep baseline/event memory across transient fetch errors so historical run-complete events are not retriggered.
     updateTrackerVisibility();
