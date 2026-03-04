@@ -6832,10 +6832,8 @@ def _start_installer_and_exit(installer_path, silent_mode=True):
             detached_flags = 0
             detached_flags |= getattr(subprocess, 'DETACHED_PROCESS', 0)
             detached_flags |= getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
-
-            cmdline = subprocess.list2cmdline(command)
             subprocess.Popen(
-                ["cmd", "/c", f'start "" {cmdline}'],
+                command,
                 shell=False,
                 close_fds=True,
                 creationflags=detached_flags
