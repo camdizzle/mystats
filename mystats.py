@@ -29,6 +29,7 @@ import copy
 import chardet
 from collections import defaultdict
 import csv
+csv.field_size_limit(2 ** 24)  # raise from 128 KB to 16 MB
 import pytz
 from collections import defaultdict
 from colorama import Fore, Style
