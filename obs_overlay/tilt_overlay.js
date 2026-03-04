@@ -11,7 +11,7 @@ const I18N = {
     'No active run standings yet.': 'Aún no hay posiciones de la partida activa.',
     'No completed tilt run yet.': 'Aún no hay una partida tilt completada.',
     'No season standings yet.': 'Aún no hay posiciones de temporada.',
-    'No today standings yet.': 'Aún no hay posiciones de hoy.',
+    'No Tilt Levels Completed Today': 'No se completaron niveles de tilt hoy.',
   },
   au: {
     'MyStats Tilt Run Tracker': 'MyStats Tilt Run Tracker, cobber',
@@ -20,7 +20,7 @@ const I18N = {
     'No active run standings yet.': 'No active run standings yet, still warming up.',
     'No completed tilt run yet.': 'No completed tilt run yet, hang tight.',
     'No season standings yet.': 'No season standings yet, still warming up.',
-    'No today standings yet.': 'No today standings yet, still warming up.',
+    'No Tilt Levels Completed Today': 'No Tilt Levels Completed Today, still warming up.',
   },
 };
 const AUSSIE_SLANG_REPLACEMENTS = [
@@ -461,6 +461,7 @@ function buildCurrentRunRows(run = {}) {
 }
 
 function renderCombinedFeed(run = {}, seasonRows = [], todayRows = []) {
+  const hasActiveRun = run.status === 'active';
   const standingsHost = $('current-standings');
   if (!standingsHost) return;
 
@@ -472,10 +473,10 @@ function renderCombinedFeed(run = {}, seasonRows = [], todayRows = []) {
     `<li class="standings-section-title">Top 10 (Season)</li>`,
     buildTop10Rows(seasonRows, t('No season standings yet.')),
     `<li class="standings-section-title">Top 10 (Today)</li>`,
-    buildTop10Rows(todayRows, t('No today standings yet.')),
-    `<li class="standings-section-title">Current Standings</li>`,
+    buildTop10Rows(todayRows, t('No Tilt Levels Completed Today')),
+    `<li class="standings-section-title">${hasActiveRun ? 'Current Standings' : 'Last Run Standings'}</li>`,
     buildCurrentStandingsRows(run.standings || []),
-    `<li class="standings-section-title">Current Run</li>`,
+    `<li class="standings-section-title">${hasActiveRun ? 'Current Run' : 'Last Run'}</li>`,
     buildCurrentRunRows(run),
   ].join('');
 
