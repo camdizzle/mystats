@@ -1488,6 +1488,7 @@ def write_tilt_output_files(values):
                 fp.write(str(value))
         except Exception as e:
             logger.warning(f"Failed writing tilt output file '{filename}': {e}")
+    logger.info("Data synced: tilt output files updated")
 
 
 def get_tilt_best_floor_level_num(setting_key):
@@ -9340,6 +9341,7 @@ async def tilted(bot):
                                 is_top_tiltee = normalize_tilt_player_name(username) == normalized_top_tiltee
                                 data_to_write = [run_id, current_level] + row + [str(is_top_tiltee), event_ids]
                                 writer.writerow(data_to_write)
+                        logger.info("Data synced: tilt results written to tilts results file")
                     except Exception as e:
                         logger.error("Error opening/writing to tilts_results_file", exc_info=True)
 
