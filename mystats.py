@@ -3366,6 +3366,58 @@ def _build_tilt_overlay_payload():
     if not isinstance(run_ledger, dict):
         run_ledger = {}
 
+    run_deaths_ledger = parse_json_setting('tilt_run_deaths_ledger', {})
+    if not isinstance(run_deaths_ledger, dict):
+        run_deaths_ledger = {}
+
+    def build_tilt_today_standings():
+        directory = config.get_setting('directory')
+        if not directory:
+            return []
+
+        todays_file = os.path.join(directory, f"tilts_{datetime.now().strftime('%Y-%m-%d')}.csv")
+        if not os.path.isfile(todays_file):
+            return []
+
+        totals = {}
+        try:
+            with open(todays_file, 'rb') as f:
+                raw_data = f.read()
+            result = chardet.detect(raw_data)
+            encoding = result['encoding'] if result and result.get('encoding') else 'utf-8'
+
+            with open(todays_file, 'r', encoding=encoding, errors='ignore') as f:
+                for row in csv.reader(f):
+                    detail = parse_tilt_result_detail(row)
+                    if detail is None:
+                        continue
+                    username = str(detail.get('username') or '').strip().lower()
+                    if not username:
+                        continue
+                    if username not in totals:
+                        totals[username] = {
+                            'name': str(detail.get('username') or username).strip() or username,
+                            'points': 0,
+                            'deaths': 0,
+                        }
+                    totals[username]['points'] += _safe_int(detail.get('points', 0))
+        except Exception:
+            return []
+
+        ranked = sorted(
+            totals.values(),
+            key=lambda row: (-_safe_int(row.get('points', 0)), str(row.get('name', '')).lower()),
+        )[:10]
+
+        return [
+            {
+                'name': row.get('name') or 'Unknown',
+                'points': _safe_int(row.get('points', 0)),
+                'deaths': _safe_int(row.get('deaths', 0)),
+            }
+            for row in ranked
+        ]
+
     sorted_run = sorted(
         (
             (str(name), _safe_int(points))
@@ -3382,6 +3434,7 @@ def _build_tilt_overlay_payload():
             {
                 'name': (stats.get('display_name') or username),
                 'points': _safe_int(stats.get('tilt_points', 0)),
+                'deaths': _safe_int(stats.get('tilt_deaths', 0)),
                 'levels': _safe_int(stats.get('tilt_levels', 0)),
                 'top_tiltee': _safe_int(stats.get('tilt_top_tiltee', 0)),
             }
@@ -3407,7 +3460,11 @@ def _build_tilt_overlay_payload():
         fallback = last_run_summary.get('standings')
         if isinstance(fallback, list):
             display_standings = [
-                (str(item.get('name') or 'Unknown'), _safe_int(item.get('points', 0)))
+                (
+                    str(item.get('name') or 'Unknown'),
+                    _safe_int(item.get('points', 0)),
+                    _safe_int(item.get('deaths', item.get('death_count', item.get('run_deaths', 0)))),
+                )
                 for item in fallback if isinstance(item, dict)
             ]
 
@@ -3427,7 +3484,19 @@ def _build_tilt_overlay_payload():
         'total_deaths_today': get_int_setting('tilt_total_deaths_today', 0),
         'lifetime_expertise': get_int_setting('tilt_lifetime_expertise', 0),
         'leader': {'name': display_standings[0][0], 'points': display_standings[0][1]} if display_standings else None,
-        'standings': [{'name': name, 'points': points} for name, points in display_standings],
+        'standings': [
+            {
+                'name': name,
+                'points': points,
+                'deaths': _safe_int(deaths if len(entry) > 2 else run_deaths_ledger.get(name, 0)),
+            }
+            for entry in display_standings
+            for name, points, deaths in [(
+                str(entry[0]) if isinstance(entry, (list, tuple)) and len(entry) > 0 else 'Unknown',
+                _safe_int(entry[1]) if isinstance(entry, (list, tuple)) and len(entry) > 1 else 0,
+                _safe_int(entry[2]) if isinstance(entry, (list, tuple)) and len(entry) > 2 else 0,
+            )]
+        ],
     }
 
     level_completion = parse_json_setting('tilt_level_completion_overlay', {})
@@ -3453,6 +3522,7 @@ def _build_tilt_overlay_payload():
         'run_completion': run_completion,
         'run_completion_event_id': run_completion_event_id,
         'season_standings': season_standings,
+        'today_standings': build_tilt_today_standings(),
         'suppress_initial_recaps': True,
     }
     return payload
@@ -4494,84 +4564,98 @@ def open_settings_window():
 
 
     # --- Overlay tab ---
-    ttk.Label(overlay_tab, text="Control OBS overlay visuals from the desktop app", style="Small.TLabel").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
+    overlay_tab.grid_columnconfigure(0, weight=1, uniform="overlay_columns")
+    overlay_tab.grid_columnconfigure(1, weight=1, uniform="overlay_columns")
 
-    ttk.Label(overlay_tab, text="Stats Rotation (seconds)").grid(row=1, column=0, sticky="w", pady=(0, 4))
-    overlay_rotation_entry = ttk.Entry(overlay_tab, width=12, justify='center')
-    overlay_rotation_entry.grid(row=1, column=1, sticky="w", pady=(0, 4), padx=(8, 0))
+    ttk.Label(overlay_tab, text="Control OBS overlay visuals from the desktop app", style="Small.TLabel").grid(
+        row=0, column=0, columnspan=2, sticky="w", pady=(0, 8)
+    )
+
+    core_overlay_frame = ttk.LabelFrame(overlay_tab, text="Results Overlay", style="Card.TLabelframe")
+    core_overlay_frame.grid(row=1, column=0, sticky="nsew", padx=(0, 8), pady=(0, 0))
+    core_overlay_frame.grid_columnconfigure(0, weight=1)
+
+    overlay_fields_frame = ttk.Frame(core_overlay_frame, style="App.TFrame")
+    overlay_fields_frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=(8, 6))
+
+    ttk.Label(overlay_fields_frame, text="Stats Rotation (seconds)").grid(row=0, column=0, sticky="w", pady=(0, 4))
+    overlay_rotation_entry = ttk.Entry(overlay_fields_frame, width=12, justify='center')
+    overlay_rotation_entry.grid(row=0, column=1, sticky="w", pady=(0, 4), padx=(8, 0))
     overlay_rotation_entry.insert(0, config.get_setting("overlay_rotation_seconds") or "10")
 
-    ttk.Label(overlay_tab, text="Data Refresh (seconds)").grid(row=2, column=0, sticky="w", pady=(0, 4))
-    overlay_refresh_entry = ttk.Entry(overlay_tab, width=12, justify='center')
-    overlay_refresh_entry.grid(row=2, column=1, sticky="w", pady=(0, 4), padx=(8, 0))
+    ttk.Label(overlay_fields_frame, text="Data Refresh (seconds)").grid(row=1, column=0, sticky="w", pady=(0, 4))
+    overlay_refresh_entry = ttk.Entry(overlay_fields_frame, width=12, justify='center')
+    overlay_refresh_entry.grid(row=1, column=1, sticky="w", pady=(0, 4), padx=(8, 0))
     overlay_refresh_entry.insert(0, config.get_setting("overlay_refresh_seconds") or "3")
 
-    ttk.Label(overlay_tab, text="Server Port").grid(row=3, column=0, sticky="w", pady=(0, 4))
-    overlay_port_entry = ttk.Entry(overlay_tab, width=12, justify='center')
-    overlay_port_entry.grid(row=3, column=1, sticky="w", pady=(0, 4), padx=(8, 0))
+    ttk.Label(overlay_fields_frame, text="Server Port").grid(row=2, column=0, sticky="w", pady=(0, 4))
+    overlay_port_entry = ttk.Entry(overlay_fields_frame, width=12, justify='center')
+    overlay_port_entry.grid(row=2, column=1, sticky="w", pady=(0, 4), padx=(8, 0))
     overlay_port_entry.insert(0, config.get_setting("overlay_server_port") or "5000")
 
-    ttk.Label(overlay_tab, text="Theme").grid(row=4, column=0, sticky="w", pady=(0, 4))
+    ttk.Label(overlay_fields_frame, text="Theme").grid(row=3, column=0, sticky="w", pady=(0, 4))
     overlay_theme_var = tk.StringVar(value=(config.get_setting("overlay_theme") or "midnight"))
-    overlay_theme_combo = ttk.Combobox(overlay_tab, textvariable=overlay_theme_var, values=["midnight", "ocean", "sunset", "forest", "mono", "violethearts"], width=18, state="readonly")
-    overlay_theme_combo.grid(row=4, column=1, sticky="w", pady=(0, 4), padx=(8, 0))
+    overlay_theme_combo = ttk.Combobox(overlay_fields_frame, textvariable=overlay_theme_var, values=["midnight", "ocean", "sunset", "forest", "mono", "violethearts"], width=18, state="readonly")
+    overlay_theme_combo.grid(row=3, column=1, sticky="w", pady=(0, 4), padx=(8, 0))
 
-    ttk.Label(overlay_tab, text="Card Opacity (65-100)").grid(row=5, column=0, sticky="w", pady=(0, 4))
-    overlay_opacity_entry = ttk.Entry(overlay_tab, width=12, justify='center')
-    overlay_opacity_entry.grid(row=5, column=1, sticky="w", pady=(0, 4), padx=(8, 0))
+    ttk.Label(overlay_fields_frame, text="Card Opacity (65-100)").grid(row=4, column=0, sticky="w", pady=(0, 4))
+    overlay_opacity_entry = ttk.Entry(overlay_fields_frame, width=12, justify='center')
+    overlay_opacity_entry.grid(row=4, column=1, sticky="w", pady=(0, 4), padx=(8, 0))
     overlay_opacity_entry.insert(0, config.get_setting("overlay_card_opacity") or "84")
 
-    ttk.Label(overlay_tab, text="Text Scale (75-175)").grid(row=6, column=0, sticky="w", pady=(0, 4))
-    overlay_text_scale_entry = ttk.Entry(overlay_tab, width=12, justify='center')
-    overlay_text_scale_entry.grid(row=6, column=1, sticky="w", pady=(0, 4), padx=(8, 0))
+    ttk.Label(overlay_fields_frame, text="Text Scale (75-175)").grid(row=5, column=0, sticky="w", pady=(0, 4))
+    overlay_text_scale_entry = ttk.Entry(overlay_fields_frame, width=12, justify='center')
+    overlay_text_scale_entry.grid(row=5, column=1, sticky="w", pady=(0, 4), padx=(8, 0))
     overlay_text_scale_entry.insert(0, config.get_setting("overlay_text_scale") or "100")
 
     overlay_show_medals_var = tk.BooleanVar(value=str(config.get_setting("overlay_show_medals") or "True") == "True")
     overlay_compact_rows_var = tk.BooleanVar(value=str(config.get_setting("overlay_compact_rows") or "False") == "True")
     overlay_horizontal_layout_var = tk.BooleanVar(value=str(config.get_setting("overlay_horizontal_layout") or "False") == "True")
-    ttk.Checkbutton(overlay_tab, text="Show top-3 medal emotes", variable=overlay_show_medals_var).grid(row=7, column=0, sticky="w", pady=(6, 2), columnspan=2)
-    ttk.Checkbutton(overlay_tab, text="Compact row spacing", variable=overlay_compact_rows_var).grid(row=8, column=0, sticky="w", pady=(0, 2), columnspan=2)
-    ttk.Checkbutton(overlay_tab, text="Horizontal ticker layout (1080x100)", variable=overlay_horizontal_layout_var).grid(row=9, column=0, sticky="w", pady=(0, 2), columnspan=2)
+    ttk.Checkbutton(core_overlay_frame, text="Show top-3 medal emotes", variable=overlay_show_medals_var).grid(row=1, column=0, sticky="w", padx=10, pady=(0, 2))
+    ttk.Checkbutton(core_overlay_frame, text="Compact row spacing", variable=overlay_compact_rows_var).grid(row=2, column=0, sticky="w", padx=10, pady=(0, 2))
+    ttk.Checkbutton(core_overlay_frame, text="Horizontal ticker layout (1080x100)", variable=overlay_horizontal_layout_var).grid(row=3, column=0, sticky="w", padx=10, pady=(0, 8))
 
     tilt_overlay_frame = ttk.LabelFrame(overlay_tab, text="Tilt Overlay", style="Card.TLabelframe")
-    tilt_overlay_frame.grid(row=11, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+    tilt_overlay_frame.grid(row=1, column=1, sticky="nsew", padx=(8, 0), pady=(0, 0))
 
-    ttk.Label(tilt_overlay_frame, text="Starting Lifetime XP", style="Small.TLabel").grid(row=0, column=0, sticky="w", padx=(10, 8), pady=(8, 4))
+    tilt_overlay_frame.grid_columnconfigure(0, weight=1)
+
+    ttk.Label(tilt_overlay_frame, text="Starting Lifetime XP", style="Small.TLabel").grid(row=0, column=0, sticky="w", padx=10, pady=(8, 2))
     tilt_lifetime_base_entry = ttk.Entry(tilt_overlay_frame, width=12, justify='center')
-    tilt_lifetime_base_entry.grid(row=0, column=1, sticky="w", padx=(0, 10), pady=(8, 4))
+    tilt_lifetime_base_entry.grid(row=1, column=0, sticky="w", padx=10, pady=(0, 6))
     tilt_lifetime_base_entry.insert(0, config.get_setting("tilt_lifetime_base_xp") or "0")
 
-    ttk.Label(tilt_overlay_frame, text="Season Best Level", style="Small.TLabel").grid(row=1, column=0, sticky="w", padx=(10, 8), pady=4)
+    ttk.Label(tilt_overlay_frame, text="Season Best Level", style="Small.TLabel").grid(row=2, column=0, sticky="w", padx=10, pady=(0, 2))
     tilt_season_best_entry = ttk.Entry(tilt_overlay_frame, width=12, justify='center')
-    tilt_season_best_entry.grid(row=1, column=1, sticky="w", padx=(0, 10), pady=4)
+    tilt_season_best_entry.grid(row=3, column=0, sticky="w", padx=10, pady=(0, 6))
     tilt_season_best_entry.insert(0, config.get_setting("tilt_season_best_level") or "1")
 
-    ttk.Label(tilt_overlay_frame, text="Personal Best Level", style="Small.TLabel").grid(row=2, column=0, sticky="w", padx=(10, 8), pady=4)
+    ttk.Label(tilt_overlay_frame, text="Personal Best Level", style="Small.TLabel").grid(row=4, column=0, sticky="w", padx=10, pady=(0, 2))
     tilt_personal_best_entry = ttk.Entry(tilt_overlay_frame, width=12, justify='center')
-    tilt_personal_best_entry.grid(row=2, column=1, sticky="w", padx=(0, 10), pady=4)
+    tilt_personal_best_entry.grid(row=5, column=0, sticky="w", padx=10, pady=(0, 6))
     tilt_personal_best_entry.insert(0, config.get_setting("tilt_personal_best_level") or "1")
 
-    ttk.Label(tilt_overlay_frame, text="Tilt Theme", style="Small.TLabel").grid(row=3, column=0, sticky="w", padx=(10, 8), pady=4)
+    ttk.Label(tilt_overlay_frame, text="Tilt Theme", style="Small.TLabel").grid(row=6, column=0, sticky="w", padx=10, pady=(0, 2))
     tilt_overlay_theme_var = tk.StringVar(value=(config.get_setting("tilt_overlay_theme") or config.get_setting("overlay_theme") or "midnight"))
-    ttk.Combobox(tilt_overlay_frame, textvariable=tilt_overlay_theme_var, values=["midnight", "ocean", "sunset", "forest", "mono", "violethearts"], width=18, state="readonly").grid(row=3, column=1, sticky="w", padx=(0, 10), pady=4)
+    ttk.Combobox(tilt_overlay_frame, textvariable=tilt_overlay_theme_var, values=["midnight", "ocean", "sunset", "forest", "mono", "violethearts"], width=18, state="readonly").grid(row=7, column=0, sticky="w", padx=10, pady=(0, 6))
 
-    ttk.Label(tilt_overlay_frame, text="Scroll Step (px)", style="Small.TLabel").grid(row=4, column=0, sticky="w", padx=(10, 8), pady=4)
+    ttk.Label(tilt_overlay_frame, text="Scroll Step (px)", style="Small.TLabel").grid(row=8, column=0, sticky="w", padx=10, pady=(0, 2))
     tilt_scroll_step_entry = ttk.Entry(tilt_overlay_frame, width=12, justify='center')
-    tilt_scroll_step_entry.grid(row=4, column=1, sticky="w", padx=(0, 10), pady=4)
+    tilt_scroll_step_entry.grid(row=9, column=0, sticky="w", padx=10, pady=(0, 6))
     tilt_scroll_step_entry.insert(0, config.get_setting("tilt_scroll_step_px") or "1")
 
-    ttk.Label(tilt_overlay_frame, text="Scroll Tick (ms)", style="Small.TLabel").grid(row=5, column=0, sticky="w", padx=(10, 8), pady=4)
+    ttk.Label(tilt_overlay_frame, text="Scroll Tick (ms)", style="Small.TLabel").grid(row=10, column=0, sticky="w", padx=10, pady=(0, 2))
     tilt_scroll_interval_entry = ttk.Entry(tilt_overlay_frame, width=12, justify='center')
-    tilt_scroll_interval_entry.grid(row=5, column=1, sticky="w", padx=(0, 10), pady=4)
+    tilt_scroll_interval_entry.grid(row=11, column=0, sticky="w", padx=10, pady=(0, 6))
     tilt_scroll_interval_entry.insert(0, config.get_setting("tilt_scroll_interval_ms") or "40")
 
-    ttk.Label(tilt_overlay_frame, text="Edge Pause (ms)", style="Small.TLabel").grid(row=6, column=0, sticky="w", padx=(10, 8), pady=(4, 8))
+    ttk.Label(tilt_overlay_frame, text="Edge Pause (ms)", style="Small.TLabel").grid(row=12, column=0, sticky="w", padx=10, pady=(0, 2))
     tilt_scroll_pause_entry = ttk.Entry(tilt_overlay_frame, width=12, justify='center')
-    tilt_scroll_pause_entry.grid(row=6, column=1, sticky="w", padx=(0, 10), pady=(4, 8))
+    tilt_scroll_pause_entry.grid(row=13, column=0, sticky="w", padx=10, pady=(0, 8))
     tilt_scroll_pause_entry.insert(0, config.get_setting("tilt_scroll_pause_ms") or "900")
 
-    ttk.Label(tilt_overlay_frame, text="Tip: Best level settings are minimum floors for Season/Personal Best output files.", style="Small.TLabel").grid(row=7, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 8))
-    ttk.Label(overlay_tab, text="Restart MyStats after changing port. Visual changes apply on next refresh.", style="Small.TLabel").grid(row=12, column=0, columnspan=2, sticky="w", pady=(8, 0))
+    ttk.Label(tilt_overlay_frame, text="Tip: Best level settings are minimum floors for Season/Personal Best output files.", style="Small.TLabel", wraplength=280, justify="left").grid(row=14, column=0, sticky="w", padx=10, pady=(0, 8))
+    ttk.Label(overlay_tab, text="Restart MyStats after changing port. Visual changes apply on next refresh.", style="Small.TLabel").grid(row=2, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
 
     def reset_settings_defaults():
@@ -5741,7 +5825,7 @@ root.config(menu=menu_bar)
 TILT_RUNTIME_PERSISTENT_KEYS = {
     "tilt_current_level", "tilt_current_elapsed", "tilt_current_top_tiltee",
     "tilt_current_run_id", "tilt_run_started_at", "tilt_run_ledger",
-    "tilt_top_tiltee_ledger", "tilt_current_top_tiltee_count", "tilt_run_xp",
+    "tilt_run_deaths_ledger", "tilt_top_tiltee_ledger", "tilt_current_top_tiltee_count", "tilt_run_xp",
     "tilt_run_points", "tilt_run_total_seconds", "tilt_previous_run_xp", "tilt_level_completion_overlay",
     "tilt_run_completion_overlay", "tilt_run_completion_event_id",
     "tilt_last_run_summary", "tilt_best_run_xp_today", "tilt_highest_level_points_today",
@@ -5791,7 +5875,9 @@ class ConfigManager:
                                 'overlay_compact_rows', 'overlay_horizontal_layout', 'overlay_server_port', 'tilt_lifetime_base_xp',
                                 'tilt_season_best_level', 'tilt_personal_best_level', 'tilt_overlay_theme', 'tilt_scroll_step_px', 'tilt_scroll_interval_ms',
                                 'tilt_scroll_pause_ms', 'tiltsurvivors_min_levels', 'tiltdeath_min_levels',
-                                'update_later_clicks', 'update_later_version', 'minimize_to_tray', 'tray_hint_toast_shown', 'app_language', *TILT_RUNTIME_PERSISTENT_KEYS}
+                                'update_later_clicks', 'update_later_version', 'pending_update_installer_path',
+                                'pending_update_silent_mode', 'pending_update_version_label',
+                                'minimize_to_tray', 'tray_hint_toast_shown', 'app_language', *TILT_RUNTIME_PERSISTENT_KEYS}
         self.transient_keys = set([])
         self.defaults = {
             'chat_br_results': 'True',
@@ -5876,6 +5962,7 @@ class ConfigManager:
             'tilt_current_run_id': '',
             'tilt_run_started_at': '',
             'tilt_run_ledger': '{}',
+            'tilt_run_deaths_ledger': '{}',
             'tilt_top_tiltee_ledger': '{}',
             'tilt_current_top_tiltee_count': '0',
             'tilt_run_xp': '0',
@@ -5895,7 +5982,10 @@ class ConfigManager:
             'tilt_total_deaths_today': '0',
             'tilt_lifetime_expertise': '0',
             'update_later_clicks': '0',
-            'update_later_version': ''
+            'update_later_version': '',
+            'pending_update_installer_path': '',
+            'pending_update_silent_mode': 'True',
+            'pending_update_version_label': ''
         }
         self.load_settings()
 
@@ -6733,6 +6823,10 @@ def _start_installer_and_exit(installer_path, silent_mode=True):
 
     command = [installer_path, *args]
 
+    config.set_setting('pending_update_installer_path', installer_path, persistent=True)
+    config.set_setting('pending_update_silent_mode', 'True' if silent_mode else 'False', persistent=True)
+    config.set_setting('pending_update_version_label', str(config.get_setting('update_later_version') or ''), persistent=True)
+
     try:
         if os.name == 'nt':
             detached_flags = 0
@@ -6761,6 +6855,53 @@ def _start_installer_and_exit(installer_path, silent_mode=True):
                 "Could not start installer. "
                 f"Primary launcher error: {primary_exc} | Fallback error: {fallback_exc}"
             )
+
+
+def recover_pending_update_launch(parent=None):
+    installer_path = str(config.get_setting('pending_update_installer_path') or '').strip()
+    silent_mode_raw = str(config.get_setting('pending_update_silent_mode') or 'True').strip().lower()
+    silent_mode = silent_mode_raw == 'true'
+    version_label = str(config.get_setting('pending_update_version_label') or '').strip()
+
+    if not installer_path:
+        return False
+
+    if not os.path.exists(installer_path):
+        config.set_setting('pending_update_installer_path', '', persistent=True)
+        config.set_setting('pending_update_silent_mode', 'True', persistent=True)
+        config.set_setting('pending_update_version_label', '', persistent=True)
+        return False
+
+    command = [installer_path]
+    if silent_mode:
+        command.extend(["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS"])
+
+    try:
+        creationflags = 0
+        if sys.platform == "win32":
+            creationflags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+
+        subprocess.Popen(command, shell=False, creationflags=creationflags)
+        config.set_setting('pending_update_installer_path', '', persistent=True)
+        config.set_setting('pending_update_silent_mode', 'True', persistent=True)
+        config.set_setting('pending_update_version_label', '', persistent=True)
+
+        label_suffix = f" {version_label}" if version_label else ""
+        show_windows_toast("MyStats Update", f"Resuming installer launch{label_suffix}.")
+
+        if parent is not None and parent.winfo_exists():
+            parent.after(150, force_exit_application)
+        return True
+    except Exception as exc:
+        logger.warning(f"Pending update installer launch failed: {exc}")
+        if parent is not None and parent.winfo_exists():
+            parent.after(0, lambda: messagebox.showwarning(
+                "Update Resume Failed",
+                "MyStats found a pending update installer but could not launch it. "
+                "Please run the installer manually from your temp folder or trigger update again.",
+                parent=parent,
+            ))
+        return False
 
 
 def download_and_install_update(download_url, version_label, silent_mode=True):
@@ -6896,7 +7037,7 @@ def show_update_message(versioncheck, download_url):
 
     hyperlink = tk.Label(popup, text="Release/download page", fg="blue", cursor="hand2")
     hyperlink.pack(pady=5)
-    hyperlink.bind("<Button-1>", lambda e: open_url(download_url or "https://mystats.camwow.tv/download"))
+    hyperlink.bind("<Button-1>", lambda e: open_url("https://mystats.camwow.tv/download"))
 
     button_frame = ttk.Frame(popup)
     button_frame.pack(pady=16)
@@ -6905,6 +7046,7 @@ def show_update_message(versioncheck, download_url):
 
     def start_update():
         update_now_requested['value'] = True
+        config.set_setting('pending_update_version_label', str(versioncheck), persistent=True)
         popup.destroy()
         download_and_install_update(download_url, versioncheck, silent_mode=True)
 
@@ -7128,6 +7270,9 @@ def startup(text_widget):
     display_welcome_message(text_widget, version, config, timestamp)
 
 
+# Try to recover a previously downloaded installer if a prior update launch was interrupted.
+recover_pending_update_launch(root)
+
 # Schedule the startup function to run after the window is ready
 root.after(100, lambda: startup(text_area))
 root.after(250, refresh_main_leaderboards)
@@ -7217,6 +7362,21 @@ class Bot(commands.Bot):
 
     async def event_disconnect(self):
         print("Disconnected from Twitch chat. Waiting for reconnection...")
+
+    async def event_error(self, error, data=None):
+        """
+        Handle intermittent websocket teardown errors from TwitchIO gracefully.
+
+        Twitch can close the websocket transport while TwitchIO is still sending a
+        heartbeat ping, which raises a connection reset error in aiohttp.
+        This is transient during reconnects and should not crash or spam users.
+        """
+        error_message = str(error)
+        if isinstance(error, ConnectionResetError) or "Cannot write to closing transport" in error_message:
+            print("Twitch websocket closed during ping; waiting for automatic reconnect...")
+            return
+
+        raise error
 
     async def event_message(self, message):
         if message.author is None:
@@ -7429,14 +7589,14 @@ class Bot(commands.Bot):
 
     @commands.command(name='commands')
     async def list_commands(self, ctx):
-        excluded_commands = ['commands', 'mplreset']
+        excluded_commands = ['commands', 'mplreset', 'highfive']
         commands_list = [f'!{cmd.name}' for cmd in self.commands.values() if cmd.name not in excluded_commands]
         commands_description = ', '.join(commands_list)
         await ctx.send(f'MyStats commands: {commands_description}')
 
     # Method to expose the command list outside the class
     def get_commands(self):
-        excluded_commands = ['commands', 'mplreset']
+        excluded_commands = ['commands', 'mplreset', 'highfive']
         return [f'!{cmd.name}' for cmd in self.commands.values() if cmd.name not in excluded_commands]
 
     @commands.command(name='rivals')
@@ -7808,7 +7968,9 @@ class Bot(commands.Bot):
         today_avg_points_rounded_down = math.floor(today_avg_points * 10) / 10
 
         # Create string for singular or plural "win" based on the count.
-                # Format the numbers with commas and rounded down values.
+        wins_str = "win" if counts['winstoday'] == 1 else "wins"
+
+        # Format the numbers with commas and rounded down values.
         brwins_formatted = '{:,}'.format(counts['brwins'])
         br_points_formatted = '{:,}'.format(counts['br_points'])
         br_count_formatted = '{:,}'.format(counts['br_count'])
@@ -7828,17 +7990,19 @@ class Bot(commands.Bot):
         racestoday_formatted = '{:,}'.format(counts['racestoday'])
         today_avg_points_formatted = '{:.1f}'.format(today_avg_points_rounded_down)
 
-        # Create the formatted output message.
+        # Create the formatted output message using the original syntax style,
+        # while preserving modern tag + emote prefix behavior.
         output_msg = (
-            f"📊 {format_user_tag(winnersdisplayname)} | BRs - {brwins_formatted} {pluralize(counts['brwins'], 'win')}, {br_points_formatted} points, {br_count_formatted} {pluralize(counts['br_count'], 'royale')}, PPR: {br_avg_points_formatted} | "
-            f"Races - {racewins_formatted} {pluralize(counts['racewins'], 'win')}, {race_points_formatted} points, {race_count_formatted} {pluralize(counts['race_count'], 'race')}, PPR: {race_avg_points_formatted} | "
-            f"Season - {seasonwins_formatted} {pluralize(counts['seasonwins'], 'win')}, {seasonpts_formatted} points, {seasonraces_formatted} {pluralize(counts['seasonraces'], 'race')}, PPR: {season_avg_points_formatted} | "
-            f"World Records: {counts['world_record_count']:,} {pluralize(counts['world_record_count'], 'record')}"
+            f"BRs - {brwins_formatted} wins, {br_points_formatted} points, {br_count_formatted} royales, PPR: {br_avg_points_formatted}. | "
+            f"Races - {racewins_formatted} wins, {race_points_formatted} points, {race_count_formatted} races, PPR: {race_avg_points_formatted}. | "
+            f"Season - {seasonwins_formatted} wins, {seasonpts_formatted} points, {seasonraces_formatted} races, PPR: {season_avg_points_formatted}. | "
+            f"World Records - {counts['world_record_count']}"
         )
 
         await send_chat_message(
             ctx.channel,
-            output_msg,
+            f"📊 {format_user_tag(winnersdisplayname)}: Today: {counts['winstoday']} {wins_str}, {pointstoday_formatted} points, {racestoday_formatted} races. "
+            f"PPR: {today_avg_points_formatted} | Season total: {output_msg}",
             category="mystats"
         )
 
@@ -8741,7 +8905,6 @@ async def competitive_raid_monitor(bot):
             payload_fields = _collect_payload_field_names(payload)
             payload_signature = '|'.join(payload_fields)
             if payload_signature != bot.last_competitive_raid_field_list_signature:
-                print(f"Competitive raid payload fields ({len(payload_fields)}): {', '.join(payload_fields)}")
                 bot.last_competitive_raid_field_list_signature = payload_signature
 
             local_streamer = normalize_channel_name(bot.channel_name)
@@ -8929,6 +9092,7 @@ async def tilted(bot):
                 run_id = base64.urlsafe_b64encode(uuid.uuid4().bytes).rstrip(b'=').decode('utf-8')
                 set_tilt_runtime_setting('tilt_run_started_at', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
                 set_tilt_runtime_setting('tilt_run_ledger', '{}')
+                set_tilt_runtime_setting('tilt_run_deaths_ledger', '{}')
                 set_tilt_runtime_setting('tilt_top_tiltee_ledger', '{}')
                 set_tilt_runtime_setting('tilt_current_top_tiltee_count', '0')
                 set_tilt_runtime_setting('tilt_run_xp', '0')
@@ -8950,6 +9114,13 @@ async def tilted(bot):
                     run_ledger = {}
             except Exception:
                 run_ledger = {}
+
+            try:
+                run_deaths_ledger = json.loads(config.get_setting('tilt_run_deaths_ledger') or '{}')
+                if not isinstance(run_deaths_ledger, dict):
+                    run_deaths_ledger = {}
+            except Exception:
+                run_deaths_ledger = {}
 
             try:
                 tilt_top_tiltee_ledger = json.loads(config.get_setting('tilt_top_tiltee_ledger') or '{}')
@@ -8997,6 +9168,7 @@ async def tilted(bot):
                     run_ledger[username] = int(run_ledger.get(username, 0)) + level_points
                 else:
                     deaths_this_level += 1
+                    run_deaths_ledger[username] = int(run_deaths_ledger.get(username, 0)) + 1
 
             terminal_run_death = 1 if (not level_passed and 1 <= len(survivors) <= 2) else 0
             deaths_this_level += terminal_run_death
@@ -9048,6 +9220,7 @@ async def tilted(bot):
                 config.set_setting('tilt_personal_best_level', str(updated_personal_best_setting_level), persistent=True)
 
             set_tilt_runtime_setting('tilt_run_ledger', json.dumps(run_ledger))
+            set_tilt_runtime_setting('tilt_run_deaths_ledger', json.dumps(run_deaths_ledger))
 
             lifetime_expertise = get_int_setting('tilt_lifetime_expertise', 0)
             lifetime_base_xp = get_int_setting('tilt_lifetime_base_xp', 0)
@@ -9254,7 +9427,14 @@ async def tilted(bot):
                     'best_run_xp_today': best_run_xp_today,
                     'total_xp_today': total_xp_today,
                     'total_deaths_today': total_deaths_today,
-                    'standings': [{'name': name, 'points': int(points)} for name, points in participants_with_points],
+                    'standings': [
+                        {
+                            'name': name,
+                            'points': int(points),
+                            'deaths': _safe_int(run_deaths_ledger.get(name, 0)),
+                        }
+                        for name, points in participants_with_points
+                    ],
                 }
                 set_tilt_runtime_setting('tilt_last_run_summary', json.dumps(last_run_summary))
                 set_tilt_runtime_setting('tilt_run_completion_overlay', json.dumps(last_run_summary))
@@ -9267,6 +9447,7 @@ async def tilted(bot):
                 set_tilt_runtime_setting('tilt_run_points', '0')
                 set_tilt_runtime_setting('tilt_run_total_seconds', '0')
                 set_tilt_runtime_setting('tilt_run_ledger', '{}')
+                set_tilt_runtime_setting('tilt_run_deaths_ledger', '{}')
                 set_tilt_runtime_setting('tilt_top_tiltee_ledger', '{}')
                 set_tilt_runtime_setting('tilt_current_top_tiltee_count', '0')
                 set_tilt_runtime_setting('tilt_level_completion_overlay', '{}')
