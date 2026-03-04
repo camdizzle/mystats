@@ -6868,9 +6868,9 @@ def _start_installer_and_exit(installer_path, silent_mode=True):
         messagebox.showerror("Update Failed", "Downloaded installer was not found on disk.")
         return
 
-    args = []
+    args = ["/NORESTART", "/CLOSEAPPLICATIONS"]
     if silent_mode:
-        args.extend(["/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS"])
+        args.extend(["/SILENT", "/SUPPRESSMSGBOXES"])
 
     command = [installer_path, *args]
 
@@ -6937,9 +6937,9 @@ def recover_pending_update_launch(parent=None):
         config.set_setting('pending_update_version_label', '', persistent=True)
         return False
 
-    command = [installer_path]
+    command = [installer_path, "/NORESTART", "/CLOSEAPPLICATIONS"]
     if silent_mode:
-        command.extend(["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS"])
+        command.extend(["/VERYSILENT", "/SUPPRESSMSGBOXES"])
 
     try:
         creationflags = 0
@@ -7113,7 +7113,7 @@ def show_update_message(versioncheck, download_url):
         update_now_requested['value'] = True
         config.set_setting('pending_update_version_label', str(versioncheck), persistent=True)
         popup.destroy()
-        download_and_install_update(download_url, versioncheck, silent_mode=True)
+        download_and_install_update(download_url, versioncheck, silent_mode=False)
 
     ttk.Button(
         button_frame,
