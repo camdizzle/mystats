@@ -6874,6 +6874,8 @@ def _start_installer_and_exit(installer_path, silent_mode=True):
 
     command = [installer_path, *args]
 
+    # Save recovery settings BEFORE launch so if the app crashes mid-launch,
+    # recovery can retry on next startup.
     config.set_setting('pending_update_installer_path', installer_path, persistent=True)
     config.set_setting('pending_update_silent_mode', 'True' if silent_mode else 'False', persistent=True)
     config.set_setting('pending_update_version_label', str(config.get_setting('update_later_version') or ''), persistent=True)
@@ -6892,12 +6894,26 @@ def _start_installer_and_exit(installer_path, silent_mode=True):
         else:
             subprocess.Popen(command, shell=False, close_fds=True)
 
-        force_exit_application()
+        # Installer launched successfully — clear recovery settings so the
+        # recovery function does NOT re-launch the installer on the next
+        # startup (which was causing the double-close bug).
+        config.set_setting('pending_update_installer_path', '', persistent=True)
+        config.set_setting('pending_update_silent_mode', 'True', persistent=True)
+        config.set_setting('pending_update_version_label', '', persistent=True)
+
+        # Do NOT call force_exit_application() here.  The installer was
+        # launched with /CLOSEAPPLICATIONS, so it will close MyStats when
+        # it is ready to install.  This guarantees the installer is fully
+        # running before MyStats shuts down, preventing the race condition
+        # where MyStats exits before the installer can start.
     except Exception as primary_exc:
         try:
             subprocess.Popen(command, shell=False, close_fds=True)
-            force_exit_application()
-            return
+
+            # Clear recovery settings on fallback success too.
+            config.set_setting('pending_update_installer_path', '', persistent=True)
+            config.set_setting('pending_update_silent_mode', 'True', persistent=True)
+            config.set_setting('pending_update_version_label', '', persistent=True)
         except Exception as fallback_exc:
             messagebox.showerror(
                 "Update Failed",
