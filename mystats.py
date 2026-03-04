@@ -6813,30 +6813,48 @@ def _create_update_progress_dialog(version_label):
 
 
 def _start_installer_and_exit(installer_path, silent_mode=True):
-    if not installer_path:
-        messagebox.showerror("Update Failed", "Installer path was empty.")
+    if not installer_path or not os.path.exists(installer_path):
+        messagebox.showerror("Update Failed", "Downloaded installer was not found on disk.")
         return
 
-    command = [installer_path]
+    args = []
     if silent_mode:
-        command.extend(["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS"])
+        args.extend(["/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS"])
+
+    command = [installer_path, *args]
 
     config.set_setting('pending_update_installer_path', installer_path, persistent=True)
     config.set_setting('pending_update_silent_mode', 'True' if silent_mode else 'False', persistent=True)
     config.set_setting('pending_update_version_label', str(config.get_setting('update_later_version') or ''), persistent=True)
 
     try:
-        creationflags = 0
-        if sys.platform == "win32":
-            creationflags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        if os.name == 'nt':
+            detached_flags = 0
+            detached_flags |= getattr(subprocess, 'DETACHED_PROCESS', 0)
+            detached_flags |= getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
 
-        subprocess.Popen(command, shell=False, creationflags=creationflags)
-        config.set_setting('pending_update_installer_path', '', persistent=True)
-        config.set_setting('pending_update_silent_mode', 'True', persistent=True)
-        config.set_setting('pending_update_version_label', '', persistent=True)
+            cmdline = subprocess.list2cmdline(command)
+            subprocess.Popen(
+                ["cmd", "/c", f'start "" {cmdline}'],
+                shell=False,
+                close_fds=True,
+                creationflags=detached_flags
+            )
+        else:
+            subprocess.Popen(command, shell=False, close_fds=True)
+
         force_exit_application()
-    except Exception as exc:
-        messagebox.showerror("Update Failed", f"Could not start installer: {exc}")
+    except Exception as primary_exc:
+        try:
+            subprocess.Popen(command, shell=False, close_fds=True)
+            force_exit_application()
+            return
+        except Exception as fallback_exc:
+            messagebox.showerror(
+                "Update Failed",
+                "Could not start installer. "
+                f"Primary launcher error: {primary_exc} | Fallback error: {fallback_exc}"
+            )
 
 
 def recover_pending_update_launch(parent=None):
