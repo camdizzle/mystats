@@ -29,7 +29,6 @@ import copy
 import chardet
 from collections import defaultdict
 import csv
-csv.field_size_limit(2 ** 24)  # raise from 128 KB to 16 MB
 import pytz
 from collections import defaultdict
 from colorama import Fore, Style
@@ -6598,6 +6597,8 @@ def load_additional_settings():
         print(f"File not found: " + config.get_setting('allraces_file'))
         with open(config.get_setting('allraces_file'), 'w', encoding='utf-8', errors='ignore'):
             pass
+    except csv.Error as e:
+        logger.error("Malformed CSV in allraces_file (possible bad quoting): %s", e)
 
     if load_totalcounttoday == 0:
         load_averagepointstoday = 0
