@@ -2944,6 +2944,24 @@ def _safe_int(value):
         return 0
 
 
+def normalize_overlay_mode(value):
+    mode = str(value or '').strip().lower()
+    if mode in ('race', 'br', 'tilt'):
+        return mode
+    return 'race'
+
+
+def set_overlay_mode(mode):
+    config.set_setting('overlay_active_mode', normalize_overlay_mode(mode), persistent=False)
+
+
+def get_overlay_mode():
+    current_run_id = str(config.get_setting('tilt_current_run_id') or '').strip()
+    if current_run_id:
+        return 'tilt'
+    return normalize_overlay_mode(config.get_setting('overlay_active_mode'))
+
+
 def _is_first_place_row(row):
     if not row:
         return False
@@ -3528,6 +3546,15 @@ def _build_tilt_overlay_payload():
     return payload
 
 
+def _build_unified_overlay_payload():
+    return {
+        'updated_at': datetime.now().isoformat(timespec='seconds'),
+        'active_mode': get_overlay_mode(),
+        'top3': _build_overlay_top3_payload(),
+        'tilt': _build_tilt_overlay_payload(),
+    }
+
+
 @app.route('/overlay')
 def overlay_page():
     for candidate in _overlay_dir_candidates():
@@ -3564,12 +3591,21 @@ def overlay_settings():
 
 @app.route('/api/overlay/top3')
 def overlay_top3():
-    return jsonify(_build_overlay_top3_payload())
+    payload = _build_overlay_top3_payload()
+    payload['active_mode'] = get_overlay_mode()
+    return jsonify(payload)
 
 
 @app.route('/api/overlay/tilt')
 def overlay_tilt_payload():
-    return jsonify(_build_tilt_overlay_payload())
+    payload = _build_tilt_overlay_payload()
+    payload['active_mode'] = get_overlay_mode()
+    return jsonify(payload)
+
+
+@app.route('/api/overlay')
+def overlay_unified_payload():
+    return jsonify(_build_unified_overlay_payload())
 
 
 def _build_main_dashboard_payload():
@@ -9056,6 +9092,7 @@ async def tilted(bot):
             continue
 
         await asyncio.sleep(1)
+        set_overlay_mode('tilt')
 
         try:
             level_rows = safe_read_csv_rows(tilt_level_file)
@@ -9749,6 +9786,7 @@ async def race(bot):
             reset()
 
         if current_modified_race != last_modified_race:
+            set_overlay_mode('race')
             await asyncio.sleep(3)
             racedata = []
             namecolordata = []
@@ -10494,6 +10532,7 @@ async def royale(bot):
         timestamp, timestampMDY, timestampHMS, adjusted_time = time_manager.get_adjusted_time()
 
         if current_modified_royale != last_modified_royale:
+            set_overlay_mode('br')
             await asyncio.sleep(3)
             brdata = []
             metadata = []

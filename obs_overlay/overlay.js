@@ -759,6 +759,12 @@ function syncViews(views = []) {
   ensureLeaderboardAutoScroll();
 }
 
+function normalizeOverlayMode(value) {
+  const mode = String(value || '').trim().toLowerCase();
+  if (mode === 'tilt' || mode === 'race' || mode === 'br') return mode;
+  return '';
+}
+
 function normalizeRaceType(value) {
   const type = String(value || '').trim().toLowerCase();
   if (type === 'br' || type === 'battle royale' || type === 'royale') return 'br';
@@ -781,8 +787,15 @@ function selectViewsForMode(views = [], mode = '') {
 
 async function refresh() {
   try {
-    const r = await fetch('/api/overlay/top3', { cache: 'no-store' });
-    const p = await r.json();
+    const r = await fetch('/api/overlay', { cache: 'no-store' });
+    const payload = await r.json();
+    const overlayMode = normalizeOverlayMode(payload?.active_mode);
+    if (overlayMode === 'tilt') {
+      window.location.replace('/overlay/tilt');
+      return;
+    }
+
+    const p = payload?.top3 || payload;
 
     currentLanguage = (p?.settings?.language || 'en').toLowerCase();
     $('overlay-title').textContent = t(p.title || 'MyStats Live Results');
@@ -802,7 +815,9 @@ async function refresh() {
         ];
 
     const raceType = normalizeRaceType(p?.recent_race_top3?.race_type);
-    if (raceType) {
+    if (overlayMode === 'race' || overlayMode === 'br') {
+      currentResultsMode = overlayMode;
+    } else if (raceType) {
       currentResultsMode = raceType;
     }
 
