@@ -6832,10 +6832,8 @@ def _start_installer_and_exit(installer_path, silent_mode=True):
             detached_flags = 0
             detached_flags |= getattr(subprocess, 'DETACHED_PROCESS', 0)
             detached_flags |= getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
-
-            cmdline = subprocess.list2cmdline(command)
             subprocess.Popen(
-                ["cmd", "/c", f'start "" {cmdline}'],
+                command,
                 shell=False,
                 close_fds=True,
                 creationflags=detached_flags
@@ -7271,11 +7269,12 @@ def startup(text_widget):
 
 
 # Try to recover a previously downloaded installer if a prior update launch was interrupted.
-recover_pending_update_launch(root)
+pending_update_resumed = recover_pending_update_launch(root)
 
-# Schedule the startup function to run after the window is ready
-root.after(100, lambda: startup(text_area))
-root.after(250, refresh_main_leaderboards)
+# Schedule startup only when the normal UI flow should continue.
+if not pending_update_resumed:
+    root.after(100, lambda: startup(text_area))
+    root.after(250, refresh_main_leaderboards)
 
 
 # Initialize the Bot
