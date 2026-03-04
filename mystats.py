@@ -115,6 +115,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger("mystats")
 
+# Central file handler — all log output (DEBUG and above) goes to mystats.log
+_log_file_handler = logging.FileHandler("mystats.log", encoding="utf-8")
+_log_file_handler.setLevel(logging.DEBUG)
+_log_file_handler.setFormatter(
+    logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+)
+logger.addHandler(_log_file_handler)
+logger.setLevel(logging.DEBUG)
+
 SUPPORTED_UI_LANGUAGES = {'en', 'es', 'fr', 'de', 'pt', 'au'}
 
 LANGUAGE_DISPLAY_NAMES = {
@@ -9684,8 +9693,7 @@ def read_latest_map_data(map_data_file):
     map_encoding = encoding_result['encoding'] or 'utf-8'
     map_text = map_data.decode(map_encoding, errors='ignore')
 
-    if DEBUG == True:
-        print('Debug: Read Map Data File')
+    logger.debug('Debug: Read Map Data File')
 
     sample = '\n'.join(map_text.splitlines()[:3])
     delimiter = ','
@@ -9757,10 +9765,7 @@ async def race(bot):
         'RecordStreamer': None,
     }
     while True:
-        if DEBUG == True:
-            print('Debug: Race file check')
-        else:
-            pass
+        logger.debug('Debug: Race file check')
         try:
             current_modified_race = await asyncio.to_thread(os.path.getmtime, config.get_setting('race_file'))
         except FileNotFoundError:
@@ -9821,8 +9826,7 @@ async def race(bot):
                     else:
                         print(f"The map data file {map_data_file} does not contain enough data.")
                 else:
-                    if DEBUG == True:
-                        print("Debug: Map file has not been modified; reusing cached map data.")
+                    logger.debug("Debug: Map file has not been modified; reusing cached map data.")
 
             except FileNotFoundError:
                 print(f"Map data file {map_data_file} not found.")
@@ -9848,10 +9852,7 @@ async def race(bot):
 
             with open(config.get_setting('race_file'), 'r', encoding=encoding, errors='ignore') as f:
                 lines = f.readlines()
-                if DEBUG == True:
-                    print('Debug: Read Race File')
-                else:
-                    pass
+                logger.debug('Debug: Read Race File')
 
             if all(line.split(',')[6].strip() == 'true' for line in lines[1:]):
                 nowinner = True
@@ -9871,10 +9872,7 @@ async def race(bot):
             # Step 3: Comparison between race finish time and record time
             first_row_full = lines[1].replace('\x00', '').strip().split(',')
             race_finish_time = float(first_row_full[5])
-            if DEBUG == True:
-                print('Debug: Calculating World Record')
-            else:
-                pass
+            logger.debug('Debug: Calculating World Record')
 
             if RecordTime and race_finish_time < RecordTime:
                 RecordAmount = RecordTime - race_finish_time
@@ -9900,10 +9898,7 @@ async def race(bot):
 
             # first row with WR flagged
             if config.get_setting('wr').lower() == 'yes':
-                if DEBUG == True:
-                    print('Debug: World Record Detected, processing')
-                else:
-                    pass
+                logger.debug('Debug: World Record Detected, processing')
                 first_row = [first_row_full[0], first_row_full[1], first_row_full[2], first_row_full[4], 'Race',
                              timestamp, marbcount, first_row_full[6], 0, 0, event_ids, 1]
             else:
@@ -9922,10 +9917,7 @@ async def race(bot):
             totalpointsrace += int(first_row_full[4])
 
             # Process remaining lines
-            if DEBUG == True:
-                print('Debug: Processing Race File Rows, Cleaning Data')
-            else:
-                pass
+            logger.debug('Debug: Processing Race File Rows, Cleaning Data')
             for line in lines[2:]:
                 cleaned_line = line.replace('\x00', '').strip().split(',')
                 row = [cleaned_line[0], cleaned_line[1], cleaned_line[2], cleaned_line[4], 'Race', timestamp, marbcount,
@@ -9944,10 +9936,7 @@ async def race(bot):
                 for row in racedata:
                     writer.writerow(row)
 
-            if DEBUG == True:
-                print('Debug: Write Race Data to Data File')
-            else:
-                pass
+            logger.debug('Debug: Write Race Data to Data File')
 
             race_counts = {row[1]: 0 for row in racedata}
             points_by_player = {}
@@ -9968,10 +9957,7 @@ async def race(bot):
                         continue
                     points_by_player[racer_username] = points_by_player.get(racer_username, 0) + racer_points
 
-            if DEBUG == True:
-                print('Debug: Check for 120 Race Checkmark')
-            else:
-                pass
+            logger.debug('Debug: Check for 120 Race Checkmark')
 
             for player_name, count in race_counts.items():
                 if count == 120:
@@ -9983,10 +9969,7 @@ async def race(bot):
                         await send_chat_message(bot.channel, announcement_message, category="race")
 
             # MPL Code
-            if DEBUG == True:
-                print('Debug: Skipping MPL Code, Not MPL event')
-            else:
-                pass
+            logger.debug('Debug: Skipping MPL Code, Not MPL event')
             if config.get_setting('MPL') == 'True':
                 checkpointdata = []
                 with open(config.get_setting('checkpoint_file'), 'r', encoding='utf-8', errors='ignore') as f:
@@ -10029,20 +10012,14 @@ async def race(bot):
                     worksheet.append_row(row_to_append)
 
             # Chunk Alert Code
-            if DEBUG == True:
-                print('Debug: Checking for Chunk Alert Threshold')
-            else:
-                pass
+            logger.debug('Debug: Checking for Chunk Alert Threshold')
             if int(first_row[3]) >= int(config.get_setting('chunk_alert_value')) and config.get_setting('chunk_alert') == 'True':
                 audio_device = config.get_setting('audio_device')
                 audio_file_path = config.get_setting('chunk_alert_sound')
 
                 if audio_file_path:
                     play_audio_file(audio_file_path, device_name=audio_device)
-                    if DEBUG == True:
-                        print('Debug: Play Chunk Alert Audio')
-                    else:
-                        pass
+                    logger.debug('Debug: Play Chunk Alert Audio')
 
             if first_row[1] != first_row[2].lower():
                 winnersname = first_row[1]
@@ -10066,10 +10043,7 @@ async def race(bot):
             if current_score > int(config.get_setting('race_hs_today')):
                 config.set_setting('race_hs_today', current_score, persistent=False)
 
-            if DEBUG == True:
-                print('Debug: Process High Score check')
-            else:
-                pass
+            logger.debug('Debug: Process High Score check')
 
             # Write last winners
             lastwinner1 = ""
@@ -10095,18 +10069,16 @@ async def race(bot):
             config.set_setting('totalcountseason', s_t_count, persistent=False)
             update_config_labels()
 
-            if config.get_setting('totalpointstoday') != 0:
-                avgptstoday = int(config.get_setting('totalpointstoday')) / int(config.get_setting('totalcounttoday'))
+            t_count_today = int(config.get_setting('totalcounttoday'))
+            if t_count_today > 0:
+                avgptstoday = int(config.get_setting('totalpointstoday')) / t_count_today
             else:
                 avgptstoday = 0
 
             config.set_setting('avgpointstoday', avgptstoday, persistent=False)
 
             # Add color tags for the text widget
-            if DEBUG == True:
-                print('Debug: Calculate colors for application output')
-            else:
-                pass
+            logger.debug('Debug: Calculate colors for application output')
             def add_color_tag(widget, tag_name, color):
                 try:
                     widget.tag_configure(tag_name, foreground=color)
@@ -10220,10 +10192,7 @@ async def race(bot):
                 text_widget.see(tk.END)
 
             # Display in text_area
-            if DEBUG == True:
-                print('Debug: Display Winners in Application')
-            else:
-                pass
+            logger.debug('Debug: Display Winners in Application')
             display_race_winners(text_area, marbcount, namecolordata, nowinner)
 
             # Prepare messages for Twitch chat
@@ -10405,8 +10374,9 @@ async def race(bot):
             config.set_setting('totalpointsseason', s_t_points, persistent=False)
             config.set_setting('totalcountseason', s_t_count, persistent=False)
 
-            if config.get_setting('totalpointstoday') != 0:
-                avgptstoday = int(config.get_setting('totalpointstoday')) / int(config.get_setting('totalcounttoday'))
+            t_count_today = int(config.get_setting('totalcounttoday'))
+            if t_count_today > 0:
+                avgptstoday = int(config.get_setting('totalpointstoday')) / t_count_today
             else:
                 avgptstoday = 0
 
@@ -10516,10 +10486,7 @@ async def royale(bot):
         text_area.see(tk.END)
 
     while True:
-        if DEBUG == True:
-            print('Debug: BR file check')
-        else:
-            pass
+        logger.debug('Debug: BR file check')
         try:
             current_modified_royale = await asyncio.to_thread(os.path.getmtime, config.get_setting('br_file'))
         except FileNotFoundError:
@@ -10582,8 +10549,8 @@ async def royale(bot):
                     time.sleep(retry_delay)
 
             # After retry attempts, handle failure if the file could not be opened
-            if attempts == max_retries or lines is None:
-                print(f"Failed to open the file after {max_retries} attempts.")
+            if lines is None:
+                logger.error("Failed to open BR file after %d attempts.", max_retries)
             else:
                 # Ensure that lines is not empty before accessing elements
                 if lines:
@@ -10646,7 +10613,7 @@ async def royale(bot):
                     print("The file is empty or could not be processed.")
 
                 # Check if br_winner is assigned before using it
-                if br_winner is not None and len(br_winner) >= 5 and br_winner[4]:
+                if br_winner is not None and len(br_winner) >= 8 and br_winner[4]:
                     t_points += int(br_winner[4])
                     s_t_points += int(br_winner[4])
 
@@ -10660,7 +10627,7 @@ async def royale(bot):
                     with open(config.get_setting('allraces_file'), 'r', encoding='utf-8', errors='ignore') as f:
                         reader = csv.reader(f)
                         for row in reader:
-                            if row[1] in race_counts:
+                            if len(row) >= 2 and row[1] in race_counts:
                                 race_counts[row[1]] += 1
 
                     for player_name, count in race_counts.items():
@@ -10679,11 +10646,8 @@ async def royale(bot):
 
                         if audio_file_path:
                             play_audio_file(audio_file_path, device_name=audio_device)
-                            if DEBUG == True:
-                                print('Debug: Audio Chunk Alert Played')
-                                print('Points for winner ' + str(br_winner[4]))
-                            else:
-                                pass
+                            logger.debug('Debug: Audio Chunk Alert Played')
+                            logger.debug('Points for winner ' + str(br_winner[4]))
 
                     if br_winner[1] != br_winner[2].lower():
                         winnersname = br_winner[1]
@@ -10706,10 +10670,7 @@ async def royale(bot):
 
                     if current_score > int(config.get_setting('br_hs_today')):
                         config.set_setting('br_hs_today', current_score, persistent=False)
-                    if DEBUG == True:
-                        print('Debug: High Score File Updated')
-                    else:
-                        pass
+                    logger.debug('Debug: High Score File Updated')
                     lastwinner1 = ""
 
                     if br_winner[1] != br_winner[2].lower():
@@ -10726,12 +10687,9 @@ async def royale(bot):
 
                     with open('LatestWinner_horizontal.txt', 'w', encoding='utf-8', errors='replace') as lwh:
                         lwh.write("Previous Winner: " + lastwinner1 + lastwinner2)
-                        if DEBUG == True:
-                            print('Debug: Latest Winner File Updated')
-                        else:
-                            pass
+                        logger.debug('Debug: Latest Winner File Updated')
 
-                    if config.get_setting('totalpointstoday') != 0:
+                    if t_count > 0:
                         avgptstoday = t_points / t_count
                     else:
                         avgptstoday = 0
@@ -10742,10 +10700,7 @@ async def royale(bot):
                     config.set_setting('totalpointsseason', s_t_points, persistent=False)
                     config.set_setting('totalcountseason', s_t_count, persistent=False)
                     update_config_labels()
-                    if DEBUG == True:
-                        print('Debug: Counts and Points Updated in UI and Config Manager')
-                    else:
-                        pass
+                    logger.debug('Debug: Counts and Points Updated in UI and Config Manager')
                     winnertotalpoints = 0
                     wcount = 0
                     totalcount = 0
@@ -10775,25 +10730,16 @@ async def royale(bot):
                     wkills = br_winner[6]
                     wdam = br_winner[7]
 
-                    if DEBUG == True:
-                        print(config.get_setting('chunk_alert'))
-                        print(int(config.get_setting('chunk_alert_value')))
-                        print(str(wpoints))
-                        print(str(crownwin))
-                    else:
-                        pass
+                    logger.debug(config.get_setting('chunk_alert'))
+                    logger.debug(int(config.get_setting('chunk_alert_value')))
+                    logger.debug(str(wpoints))
+                    logger.debug(str(crownwin))
 
                     if int(br_winner[4]) >= int(config.get_setting('chunk_alert_value')) and config.get_setting(
                             'chunk_alert') == 'True':
-                        if DEBUG == True:
-                            print('Debug: Chunk Alert: True, Winner Points: ' + str(wpoints))
-                        else:
-                            pass
+                        logger.debug('Debug: Chunk Alert: True, Winner Points: ' + str(wpoints))
                         if crownwin:
-                            if DEBUG == True:
-                                print('Debug: Chunk Alert: True, Crown Win: True')
-                            else:
-                                pass
+                            logger.debug('Debug: Chunk Alert: True, Crown Win: True')
                             if br_winner[1] != br_winner[2].lower():
                                 message = "🧃 CROWN WIN! 👑: {}({}) | {} points | {} eliminations | {} damage | ".format(
                                     br_winner[2], br_winner[1], '{:,}'.format(int(br_winner[4])), br_winner[6],
@@ -10846,22 +10792,13 @@ async def royale(bot):
                                     br_winner[7]) + "Today's stats: " + str(
                                     '{:,}'.format(int(winnertotalpoints))) + " points | " + str(
                                     wcount) + " wins | " + " " + str('{:,}'.format(int(totalcount))) + " races"
-                    if DEBUG == True:
-                        print('Debug: Chat Message Created, Not Sent')
-                    else:
-                        pass
+                    logger.debug('Debug: Chat Message Created, Not Sent')
                     if config.get_setting('announcedelay') == 'True':
-                        if DEBUG == True:
-                            print('Debug: Announcement Delay: True')
-                        else:
-                            pass
+                        logger.debug('Debug: Announcement Delay: True')
                         await send_chat_message(bot.channel, message, category="br", apply_delay=True)
                         write_overlays()
                     else:
-                        if DEBUG == True:
-                            print('Debug: Announcement Delay: False')
-                        else:
-                            pass
+                        logger.debug('Debug: Announcement Delay: False')
                         await send_chat_message(bot.channel, message, category="br")
                         write_overlays()
 
