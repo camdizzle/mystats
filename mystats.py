@@ -109,20 +109,17 @@ TRAY_MINIMIZE_TOAST_MESSAGE = (
     "The app is running in the system tray. Double-click the icon to reopen."
 )
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s"
-)
 logger = logging.getLogger("mystats")
+logger.propagate = False  # All output goes strictly to the log file, not the console
 
-# Central file handler — all log output (DEBUG and above) goes to mystats.log
+# Log errors and milestones (INFO and above) to mystats.log only
 _log_file_handler = logging.FileHandler("mystats.log", encoding="utf-8")
-_log_file_handler.setLevel(logging.DEBUG)
+_log_file_handler.setLevel(logging.INFO)
 _log_file_handler.setFormatter(
     logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 )
 logger.addHandler(_log_file_handler)
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 
 SUPPORTED_UI_LANGUAGES = {'en', 'es', 'fr', 'de', 'pt', 'au'}
 
@@ -598,6 +595,7 @@ def fetch_pixelbypixel_leaderboard(statistic_name):
         "https://pixelbypixel.studio/api/leaderboards"
         f"?offset=0&statisticName={statistic_name}&seasonNumber={season_number}"
     )
+    logger.info("API call: leaderboards (statistic=%s, season=%s)", statistic_name, season_number)
     response = requests.get(api_url, timeout=15)
     response.raise_for_status()
 
@@ -1004,6 +1002,7 @@ def format_competitive_raid_top_three(entries):
 
 
 def fetch_competitions_payload(timeout=20):
+    logger.info("API call: competitions")
     response = requests.get("https://pixelbypixel.studio/api/competitions", timeout=timeout)
     response.raise_for_status()
     return response.json()
@@ -1018,6 +1017,7 @@ def fetch_competitions_history_payload(timeout=20):
     last_error = None
     for history_url in history_urls:
         try:
+            logger.info("API call: competition history (%s)", history_url)
             response = requests.get(history_url, timeout=timeout)
             response.raise_for_status()
             return response.json()
@@ -1488,6 +1488,7 @@ def write_tilt_output_files(values):
                 fp.write(str(value))
         except Exception as e:
             logger.warning(f"Failed writing tilt output file '{filename}': {e}")
+    logger.info("Data synced: tilt output files updated")
 
 
 def get_tilt_best_floor_level_num(setting_key):
@@ -2769,6 +2770,7 @@ async def send_chat_message(channel, message, category=None, apply_delay=False):
 
     try:
         await channel.send(translate_chat_message(message))
+        logger.info("Chat message sent (category=%s)", category)
         return True
     except Exception as e:
         logger.exception(f"Failed to send chat message ({category}): {e}")
@@ -3748,6 +3750,7 @@ def refresh_access_token():
         'refresh_token': refresh_token
     }
 
+    logger.info("API call: Twitch token refresh")
     response = requests.post(token_url, data=token_data)
 
     if response.status_code == 200:
@@ -3797,6 +3800,7 @@ def open_login_url():
 def fetch_twitch_username(oauth_token):
     headers = {'Authorization': f'Bearer {oauth_token}', 'Client-Id': CLIENT_ID}
     user_info_url = "https://api.twitch.tv/helix/users"
+    logger.info("API call: Twitch user info")
     response = requests.get(user_info_url, headers=headers)
 
     if response.status_code == 200:
@@ -3883,6 +3887,7 @@ def callback():
 def verify_token(token):
     verify_url = "https://id.twitch.tv/oauth2/validate"
     headers = {"Authorization": f"OAuth {token}"}
+    logger.info("API call: Twitch token validation")
     response = requests.get(verify_url, headers=headers)
     if response.status_code == 200:
         print("\nToken is valid.")
@@ -5522,6 +5527,7 @@ def open_events_window():
             } if active_event_ids else {}
 
             # Send POST request with the data payload
+            logger.info("API call: active events for channel %s", channel)
             response = requests.post(
                 f"https://mystats.camwow.tv/api/app/get-active-events/{channel}",
                 json=data_payload  # Sending the data as JSON
@@ -9335,6 +9341,7 @@ async def tilted(bot):
                                 is_top_tiltee = normalize_tilt_player_name(username) == normalized_top_tiltee
                                 data_to_write = [run_id, current_level] + row + [str(is_top_tiltee), event_ids]
                                 writer.writerow(data_to_write)
+                        logger.info("Data synced: tilt results written to tilts results file")
                     except Exception as e:
                         logger.error("Error opening/writing to tilts_results_file", exc_info=True)
 
@@ -9707,8 +9714,6 @@ def read_latest_map_data(map_data_file):
     map_encoding = encoding_result['encoding'] or 'utf-8'
     map_text = map_data.decode(map_encoding, errors='ignore')
 
-    logger.debug('Debug: Read Map Data File')
-
     sample = '\n'.join(map_text.splitlines()[:3])
     delimiter = ','
     try:
@@ -9779,7 +9784,6 @@ async def race(bot):
         'RecordStreamer': None,
     }
     while True:
-        logger.debug('Debug: Race file check')
         try:
             current_modified_race = await asyncio.to_thread(os.path.getmtime, config.get_setting('race_file'))
         except FileNotFoundError:
@@ -9840,7 +9844,7 @@ async def race(bot):
                     else:
                         print(f"The map data file {map_data_file} does not contain enough data.")
                 else:
-                    logger.debug("Debug: Map file has not been modified; reusing cached map data.")
+                    pass
 
             except FileNotFoundError:
                 print(f"Map data file {map_data_file} not found.")
@@ -9866,7 +9870,6 @@ async def race(bot):
 
             with open(config.get_setting('race_file'), 'r', encoding=encoding, errors='ignore') as f:
                 lines = f.readlines()
-                logger.debug('Debug: Read Race File')
 
             if all(line.split(',')[6].strip() == 'true' for line in lines[1:]):
                 nowinner = True
@@ -9886,7 +9889,6 @@ async def race(bot):
             # Step 3: Comparison between race finish time and record time
             first_row_full = lines[1].replace('\x00', '').strip().split(',')
             race_finish_time = float(first_row_full[5])
-            logger.debug('Debug: Calculating World Record')
 
             if RecordTime and race_finish_time < RecordTime:
                 RecordAmount = RecordTime - race_finish_time
@@ -9912,7 +9914,6 @@ async def race(bot):
 
             # first row with WR flagged
             if config.get_setting('wr').lower() == 'yes':
-                logger.debug('Debug: World Record Detected, processing')
                 first_row = [first_row_full[0], first_row_full[1], first_row_full[2], first_row_full[4], 'Race',
                              timestamp, marbcount, first_row_full[6], 0, 0, event_ids, 1]
             else:
@@ -9931,7 +9932,6 @@ async def race(bot):
             totalpointsrace += int(first_row_full[4])
 
             # Process remaining lines
-            logger.debug('Debug: Processing Race File Rows, Cleaning Data')
             for line in lines[2:]:
                 cleaned_line = line.replace('\x00', '').strip().split(',')
                 row = [cleaned_line[0], cleaned_line[1], cleaned_line[2], cleaned_line[4], 'Race', timestamp, marbcount,
@@ -9950,7 +9950,7 @@ async def race(bot):
                 for row in racedata:
                     writer.writerow(row)
 
-            logger.debug('Debug: Write Race Data to Data File')
+            logger.info("Data synced: race results written to allraces file")
 
             race_counts = {row[1]: 0 for row in racedata}
             points_by_player = {}
@@ -9971,8 +9971,6 @@ async def race(bot):
                         continue
                     points_by_player[racer_username] = points_by_player.get(racer_username, 0) + racer_points
 
-            logger.debug('Debug: Check for 120 Race Checkmark')
-
             for player_name, count in race_counts.items():
                 if count == 120:
                     announcement_message = (
@@ -9983,7 +9981,6 @@ async def race(bot):
                         await send_chat_message(bot.channel, announcement_message, category="race")
 
             # MPL Code
-            logger.debug('Debug: Skipping MPL Code, Not MPL event')
             if config.get_setting('MPL') == 'True':
                 checkpointdata = []
                 with open(config.get_setting('checkpoint_file'), 'r', encoding='utf-8', errors='ignore') as f:
@@ -10026,14 +10023,12 @@ async def race(bot):
                     worksheet.append_row(row_to_append)
 
             # Chunk Alert Code
-            logger.debug('Debug: Checking for Chunk Alert Threshold')
             if int(first_row[3]) >= int(config.get_setting('chunk_alert_value')) and config.get_setting('chunk_alert') == 'True':
                 audio_device = config.get_setting('audio_device')
                 audio_file_path = config.get_setting('chunk_alert_sound')
 
                 if audio_file_path:
                     play_audio_file(audio_file_path, device_name=audio_device)
-                    logger.debug('Debug: Play Chunk Alert Audio')
 
             if first_row[1] != first_row[2].lower():
                 winnersname = first_row[1]
@@ -10057,8 +10052,6 @@ async def race(bot):
             if current_score > int(config.get_setting('race_hs_today')):
                 config.set_setting('race_hs_today', current_score, persistent=False)
 
-            logger.debug('Debug: Process High Score check')
-
             # Write last winners
             lastwinner1 = ""
             lastwinnerh = ""
@@ -10077,6 +10070,8 @@ async def race(bot):
             with open('LatestWinner_horizontal.txt', 'w', encoding='utf-8', errors='replace') as lwh:
                 lwh.write("Previous Winners:" + lastwinnerh)
 
+            logger.info("Data synced: race latest winner files updated")
+
             config.set_setting('totalpointstoday', t_points, persistent=False)
             config.set_setting('totalcounttoday', t_count, persistent=False)
             config.set_setting('totalpointsseason', s_t_points, persistent=False)
@@ -10092,7 +10087,6 @@ async def race(bot):
             config.set_setting('avgpointstoday', avgptstoday, persistent=False)
 
             # Add color tags for the text widget
-            logger.debug('Debug: Calculate colors for application output')
             def add_color_tag(widget, tag_name, color):
                 try:
                     widget.tag_configure(tag_name, foreground=color)
@@ -10206,7 +10200,6 @@ async def race(bot):
                 text_widget.see(tk.END)
 
             # Display in text_area
-            logger.debug('Debug: Display Winners in Application')
             display_race_winners(text_area, marbcount, namecolordata, nowinner)
 
             # Prepare messages for Twitch chat
@@ -10500,7 +10493,6 @@ async def royale(bot):
         text_area.see(tk.END)
 
     while True:
-        logger.debug('Debug: BR file check')
         try:
             current_modified_royale = await asyncio.to_thread(os.path.getmtime, config.get_setting('br_file'))
         except FileNotFoundError:
@@ -10660,8 +10652,6 @@ async def royale(bot):
 
                         if audio_file_path:
                             play_audio_file(audio_file_path, device_name=audio_device)
-                            logger.debug('Debug: Audio Chunk Alert Played')
-                            logger.debug('Points for winner ' + str(br_winner[4]))
 
                     if br_winner[1] != br_winner[2].lower():
                         winnersname = br_winner[1]
@@ -10684,7 +10674,6 @@ async def royale(bot):
 
                     if current_score > int(config.get_setting('br_hs_today')):
                         config.set_setting('br_hs_today', current_score, persistent=False)
-                    logger.debug('Debug: High Score File Updated')
                     lastwinner1 = ""
 
                     if br_winner[1] != br_winner[2].lower():
@@ -10701,7 +10690,8 @@ async def royale(bot):
 
                     with open('LatestWinner_horizontal.txt', 'w', encoding='utf-8', errors='replace') as lwh:
                         lwh.write("Previous Winner: " + lastwinner1 + lastwinner2)
-                        logger.debug('Debug: Latest Winner File Updated')
+
+                    logger.info("Data synced: BR latest winner files updated")
 
                     if t_count > 0:
                         avgptstoday = t_points / t_count
@@ -10714,7 +10704,6 @@ async def royale(bot):
                     config.set_setting('totalpointsseason', s_t_points, persistent=False)
                     config.set_setting('totalcountseason', s_t_count, persistent=False)
                     update_config_labels()
-                    logger.debug('Debug: Counts and Points Updated in UI and Config Manager')
                     winnertotalpoints = 0
                     wcount = 0
                     totalcount = 0
@@ -10744,16 +10733,9 @@ async def royale(bot):
                     wkills = br_winner[6]
                     wdam = br_winner[7]
 
-                    logger.debug(config.get_setting('chunk_alert'))
-                    logger.debug(int(config.get_setting('chunk_alert_value')))
-                    logger.debug(str(wpoints))
-                    logger.debug(str(crownwin))
-
                     if int(br_winner[4]) >= int(config.get_setting('chunk_alert_value')) and config.get_setting(
                             'chunk_alert') == 'True':
-                        logger.debug('Debug: Chunk Alert: True, Winner Points: ' + str(wpoints))
                         if crownwin:
-                            logger.debug('Debug: Chunk Alert: True, Crown Win: True')
                             if br_winner[1] != br_winner[2].lower():
                                 message = "🧃 CROWN WIN! 👑: {}({}) | {} points | {} eliminations | {} damage | ".format(
                                     br_winner[2], br_winner[1], '{:,}'.format(int(br_winner[4])), br_winner[6],
@@ -10806,13 +10788,10 @@ async def royale(bot):
                                     br_winner[7]) + "Today's stats: " + str(
                                     '{:,}'.format(int(winnertotalpoints))) + " points | " + str(
                                     wcount) + " wins | " + " " + str('{:,}'.format(int(totalcount))) + " races"
-                    logger.debug('Debug: Chat Message Created, Not Sent')
                     if config.get_setting('announcedelay') == 'True':
-                        logger.debug('Debug: Announcement Delay: True')
                         await send_chat_message(bot.channel, message, category="br", apply_delay=True)
                         write_overlays()
                     else:
-                        logger.debug('Debug: Announcement Delay: False')
                         await send_chat_message(bot.channel, message, category="br")
                         write_overlays()
 
