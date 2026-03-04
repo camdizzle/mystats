@@ -7166,7 +7166,7 @@ def ver_season_only():
                     else:
                         print(f"An update is available. Current Version: {version} | New Version: {versioncheck}")
                         show_windows_toast("MyStats Update Available", f"New version {versioncheck} is ready to install.")
-                        show_update_message(versioncheck, download_url)
+                        root.after(0, lambda v=versioncheck, u=download_url: show_update_message(v, u))
                         return season
                 else:
                     print("API call failed with status code:", response.status_code)
@@ -7186,17 +7186,30 @@ def ver_season_only():
                 break
 
         print("All retries have failed.")
-        messagebox.showerror("Error", "Unable to verify season data after multiple attempts.")
-        root.destroy()
-        sys.exit(0)
+
+        def _fatal_error():
+            messagebox.showerror("Error", "Unable to verify season data after multiple attempts.")
+            root.destroy()
+            sys.exit(0)
+
+        root.after(0, _fatal_error)
 
     def retry_popup():
-        """Show retry popup to prompt user login and retry."""
-        return messagebox.askretrycancel(
-            "Login Required",
-            "You must log in to the website to use MyStats. Click Retry to try again.",
-            parent=root
-        )
+        """Show retry popup on the main thread and return the result."""
+        result = [None]
+        event = threading.Event()
+
+        def _show():
+            result[0] = messagebox.askretrycancel(
+                "Login Required",
+                "You must log in to the website to use MyStats. Click Retry to try again.",
+                parent=root
+            )
+            event.set()
+
+        root.after(0, _show)
+        event.wait()
+        return result[0]
 
     retry_request()  # Initial API call
 
@@ -7287,7 +7300,21 @@ def startup(text_widget):
     config.set_setting('startup', 'yes', persistent=False)
     config.set_setting('data_sync', 'yes', persistent=False)
     create_results_files()
-    ver_season_only()
+
+    def _post_version_check():
+        """Run on main thread once the version-check thread completes."""
+        timestamp, timestampMDY, timestampHMS, adjusted_time = time_manager.get_adjusted_time()
+        if config.get_setting('new_season') == 'True':
+            reset_season_stats()
+        if config.get_setting('marble_day') != timestampMDY:
+            reset()
+
+    def _run_version_check():
+        ver_season_only()
+        root.after(0, _post_version_check)
+
+    threading.Thread(target=_run_version_check, daemon=True).start()
+
     refresh_tilt_lifetime_xp_from_leaderboard()
     load_additional_settings()
     write_overlays()
@@ -7301,13 +7328,6 @@ def startup(text_widget):
         hs.write(str(br_hscore_format + '\n'))
 
     timestamp, timestampMDY, timestampHMS, adjusted_time = time_manager.get_adjusted_time()
-
-    if config.get_setting('new_season') == 'True':
-        reset_season_stats()
-
-    if config.get_setting('marble_day') != timestampMDY:
-        reset()
-
     display_welcome_message(text_widget, version, config, timestamp)
 
 
