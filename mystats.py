@@ -1434,7 +1434,7 @@ def get_tilt_xp_totals_from_results_files(target_date=None):
         except FileNotFoundError:
             continue
         except Exception as e:
-            print(e)
+            logger.error("Unexpected error", exc_info=True)
 
     season_xp = int(sum(math.floor(count * get_tilt_multiplier(level)) for (_, level), count in level_survivors.items()))
     day_xp = int(sum(math.floor(count * get_tilt_multiplier(level)) for (_, level), count in level_survivors_by_day.items()))
@@ -1661,7 +1661,7 @@ def get_tilt_season_stats():
         except FileNotFoundError:
             continue
         except Exception as e:
-            print(f"Error reading tilt stats from {tilt_results}: {e}")
+            logger.error("Error reading tilt stats from %s", tilt_results, exc_info=True)
 
     return totals, user_stats
 
@@ -1716,7 +1716,7 @@ def get_user_season_stats():
         except FileNotFoundError:
             continue
         except Exception as e:
-            print(f"Error reading season stats from {allraces}: {e}")
+            logger.error("Error reading season stats from %s", allraces, exc_info=True)
 
     _, tilt_user_stats = get_tilt_season_stats()
     for username, tilt_stats in tilt_user_stats.items():
@@ -1903,7 +1903,7 @@ def get_race_dashboard_leaderboard(limit=250):
         except FileNotFoundError:
             continue
         except Exception as e:
-            print(f"Error reading race dashboard data from {allraces}: {e}")
+            logger.error("Error reading race dashboard data from %s", allraces, exc_info=True)
 
     leaderboard = []
     for row in stats_by_user.values():
@@ -3935,7 +3935,7 @@ def show_about_window():
         logo_label.image = logo_photo  # Keep a reference to prevent garbage collection
         logo_label.pack(pady=(0, 10))
     except Exception as e:
-        print(f"Error loading logo image: {e}")
+        logger.error("Error loading logo image", exc_info=True)
         # If the logo can't be loaded, display a text placeholder
         logo_label = ttk.Label(content_frame, text="MyStats", font=("Arial", 14, "bold"))
         logo_label.pack(pady=(0, 10))
@@ -4126,7 +4126,7 @@ def play_audio_file(filename, device_name=None):
         sd.wait()  # Wait until the file is done playing
 
     except Exception as e:
-        print(f"An error occurred while playing the audio file: {e}")
+        logger.error("An error occurred while playing the audio file", exc_info=True)
 
 
 def open_settings_window():
@@ -6246,7 +6246,7 @@ def process_event_data(event_id):
         except FileNotFoundError:
             print(f"File not found: {allraces}")
         except Exception as e:
-            print(f"An error occurred while processing the file {allraces}: {e}")
+            logger.error("An error occurred while processing the file %s", allraces, exc_info=True)
 
     # Process checkpoint files similarly to allraces
     for checkpoint_file in glob.glob(os.path.join(directory, "checkpoints_*.csv")):
@@ -6266,7 +6266,7 @@ def process_event_data(event_id):
         except FileNotFoundError:
             print(f"File not found: {checkpoint_file}")
         except Exception as e:
-            print(f"An error occurred while processing the file {checkpoint_file}: {e}")
+            logger.error("An error occurred while processing the file %s", checkpoint_file, exc_info=True)
 
     # Use %localappdata%/mystats/data as the save directory
     local_app_data = os.getenv('LOCALAPPDATA')
@@ -6290,7 +6290,7 @@ def process_event_data(event_id):
             for racer in event_data.values():
                 writer.writerow(racer)
     except Exception as e:
-        print(f"Error saving CSV file: {e}")
+        logger.error("Error saving CSV file", exc_info=True)
 
     # Upload event data CSV to API
     api_url = f"https://mystats.camwow.tv/api/app/upload-event-data/"
@@ -6396,7 +6396,7 @@ def create_results_files():
                 f"[{timestamp}]  - ~\\AppData\\Local\\MarblesOnStream\\Saved\\SaveGames\\LastSeasonRoyale.csv "
                 f"does not exist\n")
     except Exception as e:
-        print(f"{Fore.RED}We see no record of you hosting a Battle Royale.  Do that.{Style.RESET_ALL}")
+        logger.error("We see no record of you hosting a Battle Royale.  Do that.", exc_info=True)
 
     race_file = os.path.expanduser(r"~\AppData\Local\MarblesOnStream\Saved\SaveGames\LastSeasonRace.csv")
     config.set_setting('race_file', race_file, persistent=True)
@@ -6409,7 +6409,7 @@ def create_results_files():
                 f"[{timestamp}]  - ~\\AppData\\Local\\MarblesOnStream\\Saved\\SaveGames\\LastSeasonRace.csv "
                 f"does not exist\n")
     except Exception as e:
-        print(f"{Fore.RED}We see no record of you hosting a map race.  Do that.{Style.RESET_ALL}")
+        logger.error("We see no record of you hosting a map race.  Do that.", exc_info=True)
 
     tilt_player_file = os.path.expanduser(r"~\AppData\Local\MarblesOnStream\Saved\SaveGames\LastTiltLevelPlayers.csv")
     config.set_setting('tilt_player_file', tilt_player_file, persistent=True)
@@ -6422,7 +6422,7 @@ def create_results_files():
                 f"[{timestamp}]  - ~\\AppData\\Local\\MarblesOnStream\\Saved\\SaveGames\\LastTiltLevelPlayers.csv "
                 f"does not exist\n")
     except Exception as e:
-        print(f"{Fore.RED}No tilt file, tilt again or get tilted.{Style.RESET_ALL}")
+        logger.error("No tilt file, tilt again or get tilted.", exc_info=True)
 
     tilt_level_file = os.path.expanduser(r"~\AppData\Local\MarblesOnStream\Saved\SaveGames\LastTiltLevel.csv")
     config.set_setting('tilt_level_file', tilt_level_file, persistent=True)
@@ -6435,7 +6435,7 @@ def create_results_files():
                 f"[{timestamp}]  - ~\\AppData\\Local\\MarblesOnStream\\Saved\\SaveGames\\LastTiltLevel.csv "
                 f"does not exist\n")
     except Exception as e:
-        print(f"{Fore.RED}No tilt file, tilt again or get tilted.{Style.RESET_ALL}")
+        logger.error("No tilt file, tilt again or get tilted.", exc_info=True)
 
     checkpoint_file = os.path.expanduser(r"~\AppData\Local\MarblesOnStream\Saved\SaveGames\LastRaceNumbersHit.csv")
     config.set_setting('checkpoint_file', checkpoint_file, persistent=True)
@@ -6448,7 +6448,7 @@ def create_results_files():
                 f"[{timestamp}]  - ~\\AppData\\Local\\MarblesOnStream\\Saved\\SaveGames\\LastRaceNumbersHit.csv "
                 f"does not exist\n")
     except Exception as e:
-        print(f"{Fore.RED}We see no record.  Do something.{Style.RESET_ALL}")
+        logger.error("We see no record.  Do something.", exc_info=True)
 
     map_file = os.path.expanduser(r"~\AppData\Local\MarblesOnStream\Saved\SaveGames\LastCustomRaceMapPlayed.csv")
     config.set_setting('map_data_file', map_file, persistent=True)
@@ -6461,7 +6461,7 @@ def create_results_files():
                 f"[{timestamp}]  - ~\\AppData\\Local\\MarblesOnStream\\Saved\\SaveGames\\LastCustomRaceMapPlayed.csv "
                 f"does not exist\n")
     except Exception as e:
-        print(f"{Fore.RED}We see no record.  Do something.{Style.RESET_ALL}")
+        logger.error("We see no record.  Do something.", exc_info=True)
 
 
 def load_racer_data():
@@ -6514,8 +6514,7 @@ def load_racer_data():
         except FileNotFoundError:
             print(f"File not found: {allraces}")
         except Exception as e:
-            print(f"An error occurred while processing the file {allraces}: {e}")
-            print(e)
+            logger.error("An error occurred while processing the file %s", allraces, exc_info=True)
 
     racer_data = dict(racer_data)
 
@@ -6562,8 +6561,7 @@ def load_additional_settings():
         except FileNotFoundError:
             print(f"File not found: {allraces}")
         except Exception as e:
-            print(f"An error occurred while processing the file {allraces}: {e}")
-            print(e)
+            logger.error("An error occurred while processing the file %s", allraces, exc_info=True)
 
     config.set_setting('totalpointsseason', load_totalpointsseason, persistent=False)
     config.set_setting('totalcountseason', load_totalcountseason, persistent=False)
@@ -7059,7 +7057,7 @@ def show_update_message(versioncheck, download_url):
         image = image.resize((90, 90), Image.LANCZOS)
         photo = ImageTk.PhotoImage(image)
     except Exception as e:
-        print(f"Error loading image: {e}")
+        logger.error("Error loading image", exc_info=True)
         photo = None
 
     if photo:
@@ -7873,7 +7871,7 @@ class Bot(commands.Bot):
                 await self.send_command_response(ctx, "No season races recorded yet")
                 return
             except Exception as e:
-                print(e)
+                logger.error("Unexpected error", exc_info=True)
                 return
 
         # Filter for racers with more than 100 races
@@ -7996,7 +7994,7 @@ class Bot(commands.Bot):
                 await self.send_command_response(ctx, "No season races recorded yet")
                 return
             except Exception as e:
-                print(e)
+                logger.error("Unexpected error", exc_info=True)
                 return
 
         # Compute average points per race for different event types.
@@ -8120,7 +8118,7 @@ class Bot(commands.Bot):
             except FileNotFoundError:
                 continue
             except Exception as e:
-                print(e)
+                logger.error("Unexpected error", exc_info=True)
 
         if not current_run_id and latest_run_by_user:
             current_run_id = latest_run_by_user
@@ -8275,7 +8273,7 @@ class Bot(commands.Bot):
             except FileNotFoundError:
                 continue
             except Exception as e:
-                print(e)
+                logger.error("Unexpected error", exc_info=True)
 
         if not top_tiltee_counts:
             await send_chat_message(ctx.channel, "⚖️ No top tiltee data available yet.", category="mystats")
@@ -8319,7 +8317,7 @@ class Bot(commands.Bot):
             except FileNotFoundError:
                 continue
             except Exception as e:
-                print(e)
+                logger.error("Unexpected error", exc_info=True)
 
         if not data:
             await send_chat_message(ctx.channel, "⚖️ No tilt data available yet.", category="mystats")
@@ -8368,7 +8366,7 @@ class Bot(commands.Bot):
             except FileNotFoundError:
                 continue
             except Exception as e:
-                print(e)
+                logger.error("Unexpected error", exc_info=True)
 
         if not player_run_levels:
             await send_chat_message(ctx.channel, "⚖️ No tilt data available yet.", category="mystats")
@@ -8455,8 +8453,7 @@ class Bot(commands.Bot):
             print("File not found.")
             await self.send_command_response(ctx, self.last_command_author + ": No races have been recorded today.")
         except Exception as e:
-            pass
-            print(e)
+            logger.error("Unexpected error", exc_info=True)
 
     @commands.command(name='top10today')
     async def top10scores_command(self, ctx):
@@ -8488,8 +8485,7 @@ class Bot(commands.Bot):
             print("File not found.")
             await self.send_command_response(ctx, self.last_command_author + ": No races have been recorded today.")
         except Exception as e:
-            pass
-            print(e)
+            logger.error("Unexpected error", exc_info=True)
 
     @commands.command(name='top10races')
     async def top10races_command(self, ctx):
@@ -8509,8 +8505,7 @@ class Bot(commands.Bot):
             except FileNotFoundError:
                 print("File not found.")
             except Exception as e:
-                pass
-                print(e)
+                logger.error("Unexpected error", exc_info=True)
 
         top_racers = sorted(data.items(), key=lambda x: x[1], reverse=True)[:10]
         entries = [
@@ -8539,8 +8534,7 @@ class Bot(commands.Bot):
             except FileNotFoundError:
                 print("File not found. #609")
             except Exception as e:
-                pass
-                print(e)
+                logger.error("Unexpected error", exc_info=True)
 
         top_racers = sorted(data.items(), key=lambda x: x[1], reverse=True)[:10]
         entries = [
@@ -8569,8 +8563,7 @@ class Bot(commands.Bot):
             except FileNotFoundError:
                 print("File not found. #651")
             except Exception as e:
-                pass
-                print(e)
+                logger.error("Unexpected error", exc_info=True)
 
         top_racers = sorted(data.items(), key=lambda x: x[1], reverse=True)[:10]
         entries = [
@@ -8618,7 +8611,7 @@ class Bot(commands.Bot):
                 await self.send_command_response(ctx, "No season races recorded yet")
                 return
             except Exception as e:
-                print(e)
+                logger.error("Unexpected error", exc_info=True)
                 return
 
         if not world_record_stats:
@@ -8666,7 +8659,7 @@ class Bot(commands.Bot):
             except FileNotFoundError:
                 print("File not found. #651")
             except Exception as e:
-                print(e)
+                logger.error("Unexpected error", exc_info=True)
 
         top_racers = sorted(data.items(), key=lambda x: x[1], reverse=True)[:10]
         entries = [
@@ -8708,7 +8701,7 @@ class Bot(commands.Bot):
             await bot.start()
 
         except Exception as e:
-            print(f"Failed to reconnect: {e}")
+            logger.error("Failed to reconnect", exc_info=True)
             await asyncio.sleep(delay)
             await self.reconnect_with_new_token(new_token, retries - 1, delay * 2)
 
@@ -8858,8 +8851,7 @@ def process_season(directory, season):
         except FileNotFoundError:
             print(f"File not found: {allraces}")
         except Exception as e:
-            print(f"An error occurred while processing the file {allraces}: {e}")
-            print(e)
+            logger.error("An error occurred while processing the file %s", allraces, exc_info=True)
 
     # Use %localappdata%/mystats/data as the save directory
     local_app_data = os.getenv('LOCALAPPDATA')
@@ -9080,7 +9072,7 @@ async def tilted(bot):
             print("Tilted task was cancelled.")
             break
         except Exception as e:
-            print(f"Error checking modification time: {e}")
+            logger.error("Error checking modification time", exc_info=True)
             await asyncio.sleep(1)
             continue
 
@@ -9322,7 +9314,7 @@ async def tilted(bot):
                                 data_to_write = [run_id, current_level] + row + [str(is_top_tiltee), event_ids]
                                 writer.writerow(data_to_write)
                     except Exception as e:
-                        print(f"Error opening/writing to tilts_results_file: {e}")
+                        logger.error("Error opening/writing to tilts_results_file", exc_info=True)
 
                 narrative_messages = []
                 if is_chat_response_enabled("chat_narrative_alerts"):
@@ -9502,7 +9494,7 @@ async def tilted(bot):
             last_modified_tilt = current_modified_tilt
             last_tilt_processed_at = time.monotonic()
         except Exception as e:
-            print(f"An error occurred while processing the tilt file: {e}")
+            logger.error("An error occurred while processing the tilt file", exc_info=True)
             last_modified_tilt = current_modified_tilt
             last_tilt_processed_at = time.monotonic()
 
@@ -9655,7 +9647,7 @@ async def checkpoints(bot):
             continue
 
         except Exception as e:
-            print(f"Error in checkpoints task: {e}")
+            logger.error("Error in checkpoints task", exc_info=True)
             # Optionally log the exception or take other actions
             await asyncio.sleep(5)  # Prevent tight loop on error
 
@@ -9831,7 +9823,7 @@ async def race(bot):
             except FileNotFoundError:
                 print(f"Map data file {map_data_file} not found.")
             except Exception as e:
-                print(f"An error occurred while processing the map data file: {e}")
+                logger.error("An error occurred while processing the map data file", exc_info=True)
 
             MapName = cached_map_data['MapName']
             MapBuilder = cached_map_data['MapBuilder']
@@ -10540,12 +10532,12 @@ async def royale(bot):
 
                 except PermissionError as e:
                     attempts += 1
-                    print(f"Permission denied: {e}. Retrying in {retry_delay} seconds... (Attempt {attempts}/{max_retries})")
+                    logger.warning("Permission denied: %s. Retrying in %s seconds... (Attempt %d/%d)", e, retry_delay, attempts, max_retries)
                     time.sleep(retry_delay)  # Wait before retrying
 
                 except Exception as e:
                     attempts += 1
-                    print(f"An error occurred: {e}. Retrying in {retry_delay} seconds... (Attempt {attempts}/{max_retries})")
+                    logger.warning("An error occurred: %s. Retrying in %s seconds... (Attempt %d/%d)", e, retry_delay, attempts, max_retries)
                     time.sleep(retry_delay)
 
             # After retry attempts, handle failure if the file could not be opened
@@ -10610,7 +10602,7 @@ async def royale(bot):
                             s_t_count += 1
 
                 else:
-                    print("The file is empty or could not be processed.")
+                    logger.warning("BR file is empty or could not be processed.")
 
                 # Check if br_winner is assigned before using it
                 if br_winner is not None and len(br_winner) >= 8 and br_winner[4]:
@@ -10720,7 +10712,7 @@ async def royale(bot):
                         with open(config.get_setting('allraces_file'), 'w', encoding='utf-8', errors='ignore'):
                             pass
                     except Exception as e:
-                        print("An error occurred while processing the file:", e)
+                        logger.error("An error occurred while processing the file", exc_info=True)
 
                     if br_winner[1] != br_winner[2].lower():
                         wname = br_winner[1]
@@ -10891,7 +10883,7 @@ if __name__ == "__main__":
                 else:
                     break
             except Exception as e:
-                print(f"Bot connection failed: {e}")
+                logger.error("Bot connection failed", exc_info=True)
                 if not BOT_SHOULD_RUN:
                     break
                 print(f"Retrying Twitch connection in {reconnect_delay} seconds...")
