@@ -6,8 +6,8 @@
   --line: rgba(255, 255, 255, 0.18);
   --text-scale: 1;
   --overlay-frame-gap: 12px;
-  --overlay-frame-width: min(600px, calc(100vw - (var(--overlay-frame-gap) * 2)));
-  --overlay-frame-height: min(600px, calc(100vh - (var(--overlay-frame-gap) * 2)));
+  --overlay-frame-width: calc(100vw - (var(--overlay-frame-gap) * 2));
+  --overlay-frame-height: calc(100vh - (var(--overlay-frame-gap) * 2));
 }
 
 * { box-sizing: border-box; }
@@ -23,7 +23,6 @@ body {
 .card {
   width: var(--overlay-frame-width);
   height: var(--overlay-frame-height);
-  max-height: var(--overlay-frame-height);
   margin: var(--overlay-frame-gap);
   padding: 12px;
   border-radius: 16px;
