@@ -7269,11 +7269,12 @@ def startup(text_widget):
 
 
 # Try to recover a previously downloaded installer if a prior update launch was interrupted.
-recover_pending_update_launch(root)
+pending_update_resumed = recover_pending_update_launch(root)
 
-# Schedule the startup function to run after the window is ready
-root.after(100, lambda: startup(text_area))
-root.after(250, refresh_main_leaderboards)
+# Schedule startup only when the normal UI flow should continue.
+if not pending_update_resumed:
+    root.after(100, lambda: startup(text_area))
+    root.after(250, refresh_main_leaderboards)
 
 
 # Initialize the Bot
