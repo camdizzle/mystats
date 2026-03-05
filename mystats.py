@@ -3569,21 +3569,21 @@ def _build_unified_overlay_payload():
 @app.route('/overlay')
 def overlay_page():
     for candidate in _overlay_dir_candidates():
-        index_file = os.path.join(candidate, 'index.html')
+        overlay_file = 'tilt.html' if get_overlay_mode() == 'tilt' else 'index.html'
+        index_file = os.path.join(candidate, overlay_file)
         if os.path.isfile(index_file):
-            return send_from_directory(candidate, 'index.html')
+            return send_from_directory(candidate, overlay_file)
 
     return (f"Overlay files not found. Checked: {', '.join(_overlay_dir_candidates())}", 404)
 
 
 @app.route('/overlay/tilt')
 def overlay_tilt_page():
-    for candidate in _overlay_dir_candidates():
-        index_file = os.path.join(candidate, 'tilt.html')
-        if os.path.isfile(index_file):
-            return send_from_directory(candidate, 'tilt.html')
-
-    return (f"Tilt overlay files not found. Checked: {', '.join(_overlay_dir_candidates())}", 404)
+    return (
+        "for tilt overlay, use /overlay instead. Tilt overlay will appear after first completed level.",
+        200,
+        {'Content-Type': 'text/plain; charset=utf-8'},
+    )
 
 
 @app.route('/overlay/<path:filename>')

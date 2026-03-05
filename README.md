@@ -19,7 +19,7 @@ MyStats ships with a built-in Flask web server that serves overlays directly to 
 
 **How overlays work:**
 - MyStats reads race and tilt data from your local output files.
-- The local web server exposes UI pages (`/overlay`, `/overlay/tilt`) and JSON APIs.
+- The local web server exposes the unified UI page (`/overlay`) and JSON APIs.
 - Overlay pages poll those APIs on an interval and repaint cards/pills/leaderboards.
 - Overlay visual settings (theme, text scale, spacing, rotation speed, etc.) come from Settings → Overlay and are pushed into the page payload.
 
@@ -28,8 +28,7 @@ MyStats ships with a built-in Flask web server that serves overlays directly to 
 2. In MyStats, open **Settings → Overlay** and confirm the **Server Port** (default `5000`).
 3. In OBS, add a **Browser Source**.
 4. Use one of these URLs:
-   - Main overlay: `http://127.0.0.1:<overlay_server_port>/overlay`
-   - Tilt overlay: `http://127.0.0.1:<overlay_server_port>/overlay/tilt`
+   - Unified overlay (Race/BR/Tilt auto-switch): `http://127.0.0.1:<overlay_server_port>/overlay`
 5. If you change the server port, restart MyStats and update the OBS source URL.
 6. If you run a 2 PC setup, use `http://<your_local_ip>:<overlay_server_port>/overlay` in OBS on the streaming PC (example: `http://192.168.1.25:5000/overlay`).
 7. On the server PC (Windows), open **Windows Defender Firewall** → **Advanced Settings**, then add a new **Inbound Rule** → **Port** → **TCP** → `5000` (or your custom overlay port) → **Allow**.
