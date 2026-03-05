@@ -6978,6 +6978,10 @@ def _start_installer_and_exit(installer_path, silent_mode=True):
     try:
         logger.info("Launching installer: %s", command)
         creationflags = getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
+        # If MyStats is running inside a Windows Job object, child processes can
+        # be terminated when MyStats exits. Break away so the installer survives
+        # the app shutdown sequence.
+        creationflags |= getattr(subprocess, 'CREATE_BREAKAWAY_FROM_JOB', 0x01000000)
         proc = subprocess.Popen(
             command,
             creationflags=creationflags,
@@ -7057,6 +7061,7 @@ def recover_pending_update_launch(parent=None):
     try:
         logger.info("Recovery: launching installer %s", command)
         creationflags = getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
+        creationflags |= getattr(subprocess, 'CREATE_BREAKAWAY_FROM_JOB', 0x01000000)
         proc = subprocess.Popen(
             command,
             creationflags=creationflags,
