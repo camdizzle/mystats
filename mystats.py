@@ -6939,10 +6939,12 @@ def _schedule_installer_bootstrap(installer_path, command_args, version_label, p
         raise RuntimeError("Windows bootstrap scheduling is only available on win32")
 
     task_name = f"MyStatsUpdate_{uuid.uuid4().hex}"
+    escaped_args = ', '.join("'" + str(arg).replace("'", "''") + "'" for arg in command_args)
+
     ps_script = f"""
 $ErrorActionPreference = 'Stop'
 $installerPath = {json.dumps(installer_path)}
-$installerArgs = {json.dumps(command_args)}
+$installerArgs = @({escaped_args})
 $versionLabel = {json.dumps(version_label or 'latest')}
 $parentPid = {int(parent_pid)}
 $taskName = {json.dumps(task_name)}
