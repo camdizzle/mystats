@@ -6960,9 +6960,12 @@ def _start_installer_and_exit(installer_path, silent_mode=True):
     file_size = os.path.getsize(installer_path)
     logger.info("Installer validated: %s (%d bytes)", installer_path, file_size)
 
-    # Always use /VERYSILENT — the custom splash window provides visual
-    # feedback.  /NORESTART prevents automatic reboots.
-    command = [installer_path, "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"]
+    # /VERYSILENT  — no Inno Setup UI; the custom splash provides feedback.
+    # /CLOSEAPPLICATIONS — lets Inno Setup close MyStats so it can replace
+    #   locked files.  Without this the installer silently fails.
+    # /NORESTART — prevents automatic reboots after install.
+    command = [installer_path, "/VERYSILENT", "/SUPPRESSMSGBOXES",
+               "/CLOSEAPPLICATIONS", "/NORESTART"]
 
     version_label = str(config.get_setting('pending_update_version_label') or '').strip()
 
@@ -7002,10 +7005,12 @@ def _start_installer_and_exit(installer_path, silent_mode=True):
         # Launch the custom splash window (separate process, survives MyStats exit).
         _launch_update_splash(version_label or 'latest', proc.pid)
 
-        # Give the splash a moment to appear, then close MyStats so the
-        # installer can replace our files.
-        logger.info("Closing MyStats so installer can proceed.")
-        root.after(500, force_exit_application)
+        # The installer's /CLOSEAPPLICATIONS flag is the primary mechanism
+        # that closes MyStats — it waits until it needs to write files, then
+        # sends WM_CLOSE.  As a safety net, force-close after 15 seconds in
+        # case /CLOSEAPPLICATIONS can't find our window.
+        logger.info("Installer running; /CLOSEAPPLICATIONS will close MyStats when ready.")
+        root.after(15000, force_exit_application)
 
     except Exception as exc:
         logger.error("Failed to launch installer: %s", exc, exc_info=True)
@@ -7043,7 +7048,8 @@ def recover_pending_update_launch(parent=None):
         config.set_setting('pending_update_version_label', '', persistent=True)
         return False
 
-    command = [installer_path, "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"]
+    command = [installer_path, "/VERYSILENT", "/SUPPRESSMSGBOXES",
+               "/CLOSEAPPLICATIONS", "/NORESTART"]
 
     try:
         logger.info("Recovery: launching installer %s", command)
@@ -7061,7 +7067,7 @@ def recover_pending_update_launch(parent=None):
         _launch_update_splash(version_label or 'latest', proc.pid)
 
         if parent is not None and parent.winfo_exists():
-            parent.after(500, force_exit_application)
+            parent.after(15000, force_exit_application)
         return True
     except Exception as exc:
         logger.warning("Pending update installer launch failed: %s", exc)
