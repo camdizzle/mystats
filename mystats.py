@@ -6938,14 +6938,81 @@ $window.ShowDialog() | Out-Null
 def _launch_installer_process(installer_path, command_args):
     """Launch installer in a way that survives MyStats process shutdown."""
     if sys.platform == "win32":
-        params = " ".join(command_args)
-        # Use ShellExecute so Windows shell brokers process creation instead of
-        # making the installer a direct child of MyStats. This avoids cases
-        # where child processes are torn down when MyStats exits.
-        result = ctypes.windll.shell32.ShellExecuteW(None, "open", installer_path, params, None, 0)
-        if result <= 32:
-            raise RuntimeError(f"ShellExecuteW failed with code {result}")
-        logger.info("Installer launched via ShellExecuteW (result=%s)", result)
+        params = subprocess.list2cmdline(command_args)
+
+        class SHELLEXECUTEINFOW(ctypes.Structure):
+            _fields_ = [
+                ("cbSize", ctypes.c_ulong),
+                ("fMask", ctypes.c_ulong),
+                ("hwnd", ctypes.c_void_p),
+                ("lpVerb", ctypes.c_wchar_p),
+                ("lpFile", ctypes.c_wchar_p),
+                ("lpParameters", ctypes.c_wchar_p),
+                ("lpDirectory", ctypes.c_wchar_p),
+                ("nShow", ctypes.c_int),
+                ("hInstApp", ctypes.c_void_p),
+                ("lpIDList", ctypes.c_void_p),
+                ("lpClass", ctypes.c_wchar_p),
+                ("hkeyClass", ctypes.c_void_p),
+                ("dwHotKey", ctypes.c_ulong),
+                ("hIconOrMonitor", ctypes.c_void_p),
+                ("hProcess", ctypes.c_void_p),
+            ]
+
+        sei = SHELLEXECUTEINFOW()
+        sei.cbSize = ctypes.sizeof(SHELLEXECUTEINFOW)
+        sei.fMask = 0x00000040  # SEE_MASK_NOCLOSEPROCESS
+        sei.hwnd = None
+        sei.lpVerb = "open"
+        sei.lpFile = installer_path
+        sei.lpParameters = params
+        sei.lpDirectory = None
+        sei.nShow = 0
+
+        shell_execute_ex = ctypes.windll.shell32.ShellExecuteExW
+        shell_execute_ex.argtypes = [ctypes.POINTER(SHELLEXECUTEINFOW)]
+        shell_execute_ex.restype = ctypes.c_int
+
+        if not shell_execute_ex(ctypes.byref(sei)):
+            error_code = ctypes.windll.kernel32.GetLastError()
+            raise RuntimeError(f"ShellExecuteExW failed with error {error_code}")
+
+        process_handle = sei.hProcess
+        process_id = ctypes.windll.kernel32.GetProcessId(process_handle)
+
+        if process_id:
+            logger.info("Installer launched via ShellExecuteExW (pid=%s)", process_id)
+
+            class _InstallerProcRef:
+                def __init__(self, pid, handle):
+                    self.pid = pid
+                    self._handle = handle
+
+                def poll(self):
+                    if not self._handle:
+                        return 0
+
+                    WAIT_OBJECT_0 = 0
+                    WAIT_TIMEOUT = 0x00000102
+                    wait_status = ctypes.windll.kernel32.WaitForSingleObject(self._handle, 0)
+                    if wait_status == WAIT_TIMEOUT:
+                        return None
+                    if wait_status != WAIT_OBJECT_0:
+                        return None
+
+                    exit_code = ctypes.c_ulong()
+                    if ctypes.windll.kernel32.GetExitCodeProcess(self._handle, ctypes.byref(exit_code)):
+                        ctypes.windll.kernel32.CloseHandle(self._handle)
+                        self._handle = None
+                        return int(exit_code.value)
+                    return None
+
+            return _InstallerProcRef(process_id, process_handle)
+
+        # If process ID was unavailable, keep legacy behavior and continue without PID tracking.
+        logger.info("Installer launched via ShellExecuteExW (process id unavailable)")
+        if process_handle:
+            ctypes.windll.kernel32.CloseHandle(process_handle)
         return None
 
     creationflags = getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
