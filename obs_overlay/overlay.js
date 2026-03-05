@@ -102,6 +102,18 @@ const defaultSettings = {
   showMedals: true,
   compactRows: false,
   horizontalLayout: false,
+  horizontalFeedSeason: true,
+  horizontalFeedToday: true,
+  horizontalFeedRacesSeason: true,
+  horizontalFeedBrsSeason: true,
+  horizontalFeedRacesToday: true,
+  horizontalFeedBrsToday: true,
+  horizontalFeedPreviousRace: true,
+  horizontalFeedEvents: true,
+  horizontalFeedTiltCurrent: true,
+  horizontalFeedTiltToday: true,
+  horizontalFeedTiltSeason: true,
+  horizontalFeedTiltLastRun: true,
 };
 
 const themes = {
@@ -623,6 +635,10 @@ function renderCombinedRows(views) {
     const isRecordRaceView = String(view?.id || '').toLowerCase() === 'previous' && view?.is_record_race;
 
     const rowMarkup = rows.map((r, rowIndex) => {
+      if (r?.is_ticker_event) {
+        const eventType = String(r?.event_type || 'event').replace(/[_-]+/g, ' ').toUpperCase();
+        return `<li class="leaderboard-row leaderboard-row--event"><span class="row-rank">EVENT</span><span>${escapeHtml(r.name || '')}</span><span>${escapeHtml(eventType)}</span></li>`;
+      }
       const emote = settings.showMedals ? getPlacementEmote(r.placement) : '';
       const decoratedName = emote ? `${emote} ${r.name}` : r.name;
       const podiumClass = rowIndex < 3 ? ` leaderboard-row--podium-${rowIndex + 1}` : '';
@@ -685,6 +701,44 @@ function renderCombinedRows(views) {
   setTimeout(ensureLeaderboardAutoScroll, 0);
 }
 
+function filterViewsForHorizontalFeed(views = [], overlayEvents = []) {
+  const enabledById = {
+    season: settings.horizontalFeedSeason,
+    today: settings.horizontalFeedToday,
+    'races-season': settings.horizontalFeedRacesSeason,
+    'brs-season': settings.horizontalFeedBrsSeason,
+    'races-today': settings.horizontalFeedRacesToday,
+    'brs-today': settings.horizontalFeedBrsToday,
+    previous: settings.horizontalFeedPreviousRace,
+    'tilt-current': settings.horizontalFeedTiltCurrent,
+    'tilt-today': settings.horizontalFeedTiltToday,
+    'tilt-season': settings.horizontalFeedTiltSeason,
+    'tilt-last-run': settings.horizontalFeedTiltLastRun,
+  };
+
+  const selectedViews = (Array.isArray(views) ? views : []).filter((view) => {
+    const viewId = String(view?.id || '');
+    if (!(viewId in enabledById)) return true;
+    return Boolean(enabledById[viewId]);
+  });
+
+  if (settings.horizontalFeedEvents && Array.isArray(overlayEvents) && overlayEvents.length) {
+    selectedViews.push({
+      id: 'overlay-events',
+      title: 'Ticker Events',
+      rows: overlayEvents.slice(-20).map((eventItem, index) => ({
+        placement: index + 1,
+        name: eventItem?.message || '',
+        points: 0,
+        is_ticker_event: true,
+        event_type: eventItem?.type || 'event',
+      })),
+    });
+  }
+
+  return selectedViews;
+}
+
 function ensureLeaderboardAutoScroll() {
   if (top3IsShowing) return;
   if (!leaderboard) return;
@@ -724,6 +778,18 @@ function applyServerSettings(raw = {}) {
     showMedals: String(raw.show_medals).toLowerCase() !== 'false',
     compactRows: String(raw.compact_rows).toLowerCase() === 'true',
     horizontalLayout: String(raw.horizontal_layout).toLowerCase() === 'true',
+    horizontalFeedSeason: String(raw.horizontal_feed_season).toLowerCase() !== 'false',
+    horizontalFeedToday: String(raw.horizontal_feed_today).toLowerCase() !== 'false',
+    horizontalFeedRacesSeason: String(raw.horizontal_feed_races_season).toLowerCase() !== 'false',
+    horizontalFeedBrsSeason: String(raw.horizontal_feed_brs_season).toLowerCase() !== 'false',
+    horizontalFeedRacesToday: String(raw.horizontal_feed_races_today).toLowerCase() !== 'false',
+    horizontalFeedBrsToday: String(raw.horizontal_feed_brs_today).toLowerCase() !== 'false',
+    horizontalFeedPreviousRace: String(raw.horizontal_feed_previous_race).toLowerCase() !== 'false',
+    horizontalFeedEvents: String(raw.horizontal_feed_events).toLowerCase() !== 'false',
+    horizontalFeedTiltCurrent: String(raw.horizontal_feed_tilt_current).toLowerCase() !== 'false',
+    horizontalFeedTiltToday: String(raw.horizontal_feed_tilt_today).toLowerCase() !== 'false',
+    horizontalFeedTiltSeason: String(raw.horizontal_feed_tilt_season).toLowerCase() !== 'false',
+    horizontalFeedTiltLastRun: String(raw.horizontal_feed_tilt_last_run).toLowerCase() !== 'false',
   };
 
   const rotationChanged = next.rotationSeconds !== settings.rotationSeconds;
@@ -746,7 +812,7 @@ function syncViews(views = []) {
   }
 
   const renderableViews = getRenderableViews(currentViews);
-  const nextRenderKey = `${settings.showMedals}::${settings.horizontalLayout}::${getViewsRenderKey(renderableViews)}`;
+  const nextRenderKey = `${settings.showMedals}::${settings.horizontalLayout}::${settings.horizontalFeedSeason}::${settings.horizontalFeedToday}::${settings.horizontalFeedRacesSeason}::${settings.horizontalFeedBrsSeason}::${settings.horizontalFeedRacesToday}::${settings.horizontalFeedBrsToday}::${settings.horizontalFeedPreviousRace}::${settings.horizontalFeedEvents}::${settings.horizontalFeedTiltCurrent}::${settings.horizontalFeedTiltToday}::${settings.horizontalFeedTiltSeason}::${settings.horizontalFeedTiltLastRun}::${getViewsRenderKey(renderableViews)}`;
 
   if (nextRenderKey === lastRenderedViewsKey) {
     updateBoardTitleFromScroll();
@@ -772,6 +838,66 @@ function normalizeRaceType(value) {
   return '';
 }
 
+
+function buildHorizontalTiltViews(tiltPayload = {}) {
+  const views = [];
+  const currentRun = tiltPayload?.current_run || {};
+  const currentRows = Array.isArray(currentRun?.standings) ? currentRun.standings : [];
+  if (currentRows.length) {
+    views.push({
+      id: 'tilt-current',
+      title: `Tilt Current Run • L${Number(currentRun?.level || 0)}`,
+      rows: currentRows.slice(0, 10).map((row, index) => ({
+        placement: index + 1,
+        name: row?.name || 'Unknown',
+        points: Number(row?.points || 0),
+      })),
+    });
+  }
+
+  const todayRows = Array.isArray(tiltPayload?.today_standings) ? tiltPayload.today_standings : [];
+  if (todayRows.length) {
+    views.push({
+      id: 'tilt-today',
+      title: 'Tilt Top 10 Today',
+      rows: todayRows.slice(0, 10).map((row, index) => ({
+        placement: index + 1,
+        name: row?.name || 'Unknown',
+        points: Number(row?.points || 0),
+      })),
+    });
+  }
+
+  const seasonRows = Array.isArray(tiltPayload?.season_standings) ? tiltPayload.season_standings : [];
+  if (seasonRows.length) {
+    views.push({
+      id: 'tilt-season',
+      title: 'Tilt Top 10 Season',
+      rows: seasonRows.slice(0, 10).map((row, index) => ({
+        placement: index + 1,
+        name: row?.name || 'Unknown',
+        points: Number(row?.points || 0),
+      })),
+    });
+  }
+
+  const lastRun = tiltPayload?.last_run || {};
+  const lastRunRows = Array.isArray(lastRun?.standings) ? lastRun.standings : [];
+  if (lastRunRows.length) {
+    views.push({
+      id: 'tilt-last-run',
+      title: `Tilt Last Run${lastRun?.run_id ? ` • ${String(lastRun.run_id).slice(0, 6)}` : ''}`,
+      rows: lastRunRows.slice(0, 10).map((row, index) => ({
+        placement: index + 1,
+        name: row?.name || 'Unknown',
+        points: Number(row?.points || 0),
+      })),
+    });
+  }
+
+  return views;
+}
+
 function selectViewsForMode(views = [], mode = '') {
   if (!mode) return Array.isArray(views) ? views : [];
 
@@ -790,16 +916,37 @@ async function refresh() {
     const r = await fetch('/api/overlay', { cache: 'no-store' });
     const payload = await r.json();
     const overlayMode = normalizeOverlayMode(payload?.active_mode);
-    if (overlayMode === 'tilt') {
+    const racePayload = payload?.top3 || payload;
+
+    currentLanguage = (racePayload?.settings?.language || 'en').toLowerCase();
+    applyServerSettings(racePayload.settings || {});
+
+    if (overlayMode === 'tilt' && !settings.horizontalLayout) {
       window.location.replace('/overlay');
       return;
     }
 
-    const p = payload?.top3 || payload;
+    if (overlayMode === 'tilt' && settings.horizontalLayout) {
+      const tiltPayload = payload?.tilt || {};
+      $('overlay-title').textContent = t(tiltPayload?.title || 'MyStats Tilt Run Tracker');
+      updateHeaderStats({
+        avg_points_today: tiltPayload?.current_run?.run_points || 0,
+        unique_racers_today: Array.isArray(tiltPayload?.current_run?.standings) ? tiltPayload.current_run.standings.length : 0,
+        total_races_today: tiltPayload?.current_run?.level || 0,
+        avg_points_season: tiltPayload?.current_run?.best_run_xp_today || 0,
+        unique_racers_season: Array.isArray(tiltPayload?.season_standings) ? tiltPayload.season_standings.length : 0,
+        total_races_season: tiltPayload?.current_run?.total_xp_today || 0,
+      });
 
-    currentLanguage = (p?.settings?.language || 'en').toLowerCase();
+      const overlayEvents = Array.isArray(racePayload?.overlay_events) ? racePayload.overlay_events : [];
+      const tiltViews = buildHorizontalTiltViews(tiltPayload);
+      const viewsToRender = filterViewsForHorizontalFeed(tiltViews, overlayEvents);
+      syncViews(viewsToRender);
+      return;
+    }
+
+    const p = racePayload;
     $('overlay-title').textContent = t(p.title || 'MyStats Live Results');
-    applyServerSettings(p.settings || {});
     updateHeaderStats(p.header_stats || {});
     const shouldShowPreviousRace = Array.isArray(p.top10_previous_race)
       && p.top10_previous_race.length;
@@ -821,10 +968,14 @@ async function refresh() {
       currentResultsMode = raceType;
     }
 
-    const filteredViews = selectViewsForMode(normalizedViews, currentResultsMode);
-    syncViews(filteredViews.length ? filteredViews : normalizedViews);
-
     const overlayEvents = Array.isArray(p.overlay_events) ? p.overlay_events : [];
+    const filteredViews = selectViewsForMode(normalizedViews, currentResultsMode);
+    const modeViews = filteredViews.length ? filteredViews : normalizedViews;
+    const viewsToRender = settings.horizontalLayout
+      ? filterViewsForHorizontalFeed(modeViews, overlayEvents)
+      : modeViews;
+    syncViews(viewsToRender);
+
     if (!hasHydratedOverlayEvents) {
       hasHydratedOverlayEvents = true;
       const maxHydratedEventId = overlayEvents.reduce((maxId, eventItem) => {
