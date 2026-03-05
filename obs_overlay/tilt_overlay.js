@@ -421,9 +421,8 @@ function buildTop10Rows(rows = [], emptyMessage = 'No standings yet.') {
   if (!listRows.length) return `<li class="standings-empty">${escapeHtml(emptyMessage)}</li>`;
 
   return listRows.map((row, idx) => {
-    const deaths = Number(row?.deaths ?? row?.death_count ?? row?.total_deaths ?? 0);
     const podiumClass = idx < 3 ? ` standings-row--podium-${idx + 1}` : '';
-    return `<li class="standings-row${podiumClass}"><span>${idx + 1}</span><span>${escapeHtml(row?.name || 'Unknown')}</span><span>${fmt(row?.points || 0)} pts · ☠ ${fmt(deaths)}</span></li>`;
+    return `<li class="standings-row${podiumClass}"><span>${idx + 1}</span><span>${escapeHtml(row?.name || 'Unknown')}</span><span>${fmt(row?.points || 0)} pts</span></li>`;
   }).join('');
 }
 
@@ -432,9 +431,8 @@ function buildCurrentStandingsRows(rows = []) {
   if (!standings.length) return `<li class="standings-empty">${t('No active run standings yet.')}</li>`;
 
   return standings.map((row, i) => {
-    const deaths = Number(row.deaths ?? row.death_count ?? row.total_deaths ?? row.run_deaths ?? 0);
     const podiumClass = i < 3 ? ` standings-row--podium-${i + 1}` : '';
-    return `<li class="standings-row${podiumClass}"><span>${i + 1}</span><span>${escapeHtml(row?.name || 'Unknown')}</span><span>${fmt(row?.points || 0)} pts · ☠ ${fmt(deaths)}</span></li>`;
+    return `<li class="standings-row${podiumClass}"><span>${i + 1}</span><span>${escapeHtml(row?.name || 'Unknown')}</span><span>${fmt(row?.points || 0)} pts</span></li>`;
   }).join('');
 }
 
