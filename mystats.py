@@ -6938,6 +6938,29 @@ $window.ShowDialog() | Out-Null
 def _launch_installer_process(installer_path, command_args):
     """Launch installer in a way that survives MyStats process shutdown."""
     if sys.platform == "win32":
+        # Prefer CreateProcess via subprocess first so we can request breakaway
+        # from the parent job object (common when running from packaged apps).
+        # Without breakaway, Windows can terminate child processes when MyStats
+        # exits, which can kill the updater right after launch.
+        try:
+            creationflags = 0
+            creationflags |= getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
+            creationflags |= getattr(subprocess, 'DETACHED_PROCESS', 0x00000008)
+            creationflags |= getattr(subprocess, 'CREATE_BREAKAWAY_FROM_JOB', 0x01000000)
+
+            proc = subprocess.Popen(
+                [installer_path, *command_args],
+                creationflags=creationflags,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                close_fds=True,
+            )
+            logger.info("Installer launched via CreateProcess (pid=%s)", proc.pid)
+            return proc
+        except Exception as popen_exc:
+            logger.warning("CreateProcess installer launch failed, falling back to ShellExecuteExW: %s", popen_exc)
+
         params = subprocess.list2cmdline(command_args)
 
         class SHELLEXECUTEINFOW(ctypes.Structure):
