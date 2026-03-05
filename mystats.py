@@ -6863,90 +6863,194 @@ def _create_update_progress_dialog(version_label):
     return progress_window, progress_var, percent_var, status_var
 
 
+def _launch_update_splash(version_label, installer_pid):
+    """Launch a standalone PowerShell splash window that monitors the installer.
+
+    The splash runs as a separate process so it survives MyStats shutting down.
+    It shows a branded indeterminate progress bar and closes automatically when
+    the installer process (identified by *installer_pid*) exits.
+    """
+    ps_script = r'''
+Add-Type -AssemblyName PresentationFramework
+Add-Type -AssemblyName PresentationCore
+
+[xml]$xaml = @"
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        Title="MyStats Update" Height="180" Width="420"
+        WindowStartupLocation="CenterScreen" ResizeMode="NoResize"
+        WindowStyle="SingleBorderWindow" Topmost="True"
+        Background="#1a1a2e">
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="16"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="12"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <TextBlock Grid.Row="0" Text="MYSTATS_VERSION_PLACEHOLDER"
+                   Foreground="#00d4ff" FontSize="18" FontWeight="Bold"
+                   HorizontalAlignment="Center"/>
+        <ProgressBar Grid.Row="2" Height="22" IsIndeterminate="True"
+                     Foreground="#00d4ff" Background="#2a2a4a"/>
+        <TextBlock Grid.Row="4" Text="Please wait while the update installs..."
+                   Foreground="#aaaacc" FontSize="12"
+                   HorizontalAlignment="Center"/>
+    </Grid>
+</Window>
+"@
+
+$reader = (New-Object System.Xml.XmlNodeReader $xaml)
+$window = [Windows.Markup.XamlReader]::Load($reader)
+
+$installerPid = INSTALLER_PID_PLACEHOLDER
+$timer = New-Object System.Windows.Threading.DispatcherTimer
+$timer.Interval = [TimeSpan]::FromSeconds(2)
+$timer.Add_Tick({
+    try {
+        $proc = Get-Process -Id $installerPid -ErrorAction Stop
+    } catch {
+        $timer.Stop()
+        $window.Close()
+    }
+})
+$timer.Start()
+$window.ShowDialog() | Out-Null
+'''.replace('MYSTATS_VERSION_PLACEHOLDER', f'Updating MyStats to {version_label} ...').replace(
+        'INSTALLER_PID_PLACEHOLDER', str(installer_pid))
+
+    try:
+        subprocess.Popen(
+            ['powershell', '-NoProfile', '-WindowStyle', 'Hidden',
+             '-ExecutionPolicy', 'Bypass', '-Command', ps_script],
+            creationflags=getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0),
+        )
+        logger.info("Update splash launched for installer PID %s", installer_pid)
+    except Exception as exc:
+        logger.warning("Could not launch update splash: %s", exc)
+
+
 def _start_installer_and_exit(installer_path, silent_mode=True):
     if not installer_path or not os.path.exists(installer_path):
+        logger.error("Installer not found on disk: %s", installer_path)
         messagebox.showerror("Update Failed", "Downloaded installer was not found on disk.")
         return
 
-    args = []
-    if silent_mode:
-        args.extend(["/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS"])
+    # Validate the file is actually a PE executable (MZ header).
+    try:
+        with open(installer_path, 'rb') as f:
+            header = f.read(2)
+        if header != b'MZ':
+            logger.error("Downloaded file is not a valid executable (header: %r)", header)
+            messagebox.showerror(
+                "Update Failed",
+                "The downloaded update file is not a valid installer.\n"
+                "Please try again or download manually from the website."
+            )
+            try:
+                os.remove(installer_path)
+            except OSError:
+                pass
+            return
+    except OSError as exc:
+        logger.error("Could not read installer file for validation: %s", exc)
+        messagebox.showerror("Update Failed", f"Could not read installer file: {exc}")
+        return
 
-    command = [installer_path, *args]
+    file_size = os.path.getsize(installer_path)
+    logger.info("Installer validated: %s (%d bytes)", installer_path, file_size)
+
+    # Always use /VERYSILENT — the custom splash window provides visual
+    # feedback.  /NORESTART prevents automatic reboots.
+    command = [installer_path, "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"]
+
+    version_label = str(config.get_setting('pending_update_version_label') or '').strip()
 
     # Save recovery settings BEFORE launch so if the app crashes mid-launch,
     # recovery can retry on next startup.
     config.set_setting('pending_update_installer_path', installer_path, persistent=True)
-    config.set_setting('pending_update_silent_mode', 'True' if silent_mode else 'False', persistent=True)
-    config.set_setting('pending_update_version_label', str(config.get_setting('update_later_version') or ''), persistent=True)
+    config.set_setting('pending_update_silent_mode', 'True', persistent=True)
+    config.set_setting('pending_update_version_label', version_label, persistent=True)
 
     try:
-        if os.name == 'nt':
-            detached_flags = 0
-            detached_flags |= getattr(subprocess, 'DETACHED_PROCESS', 0)
-            detached_flags |= getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
-            subprocess.Popen(
-                command,
-                shell=False,
-                close_fds=True,
-                creationflags=detached_flags
-            )
-        else:
-            subprocess.Popen(command, shell=False, close_fds=True)
+        logger.info("Launching installer: %s", command)
+        creationflags = getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
+        proc = subprocess.Popen(command, creationflags=creationflags)
+        logger.info("Installer process started, PID=%s", proc.pid)
 
-        # Installer launched successfully — clear recovery settings so the
-        # recovery function does NOT re-launch the installer on the next
-        # startup (which was causing the double-close bug).
+        # Verify the process is actually running (not immediately dead).
+        import time as _time
+        _time.sleep(1)
+        exit_code = proc.poll()
+        if exit_code is not None:
+            logger.error("Installer exited immediately with code %s", exit_code)
+            messagebox.showerror(
+                "Update Failed",
+                f"The installer exited immediately (code {exit_code}).\n"
+                "It may have been blocked by antivirus software.\n"
+                "Please try downloading and running the installer manually."
+            )
+            config.set_setting('pending_update_installer_path', '', persistent=True)
+            config.set_setting('pending_update_version_label', '', persistent=True)
+            return
+
+        # Installer is running — clear recovery settings.
         config.set_setting('pending_update_installer_path', '', persistent=True)
         config.set_setting('pending_update_silent_mode', 'True', persistent=True)
         config.set_setting('pending_update_version_label', '', persistent=True)
 
-        # Do NOT call force_exit_application() here.  The installer was
-        # launched with /CLOSEAPPLICATIONS, so it will close MyStats when
-        # it is ready to install.  This guarantees the installer is fully
-        # running before MyStats shuts down, preventing the race condition
-        # where MyStats exits before the installer can start.
-    except Exception as primary_exc:
-        try:
-            subprocess.Popen(command, shell=False, close_fds=True)
+        # Launch the custom splash window (separate process, survives MyStats exit).
+        _launch_update_splash(version_label or 'latest', proc.pid)
 
-            # Clear recovery settings on fallback success too.
-            config.set_setting('pending_update_installer_path', '', persistent=True)
-            config.set_setting('pending_update_silent_mode', 'True', persistent=True)
-            config.set_setting('pending_update_version_label', '', persistent=True)
-        except Exception as fallback_exc:
-            messagebox.showerror(
-                "Update Failed",
-                "Could not start installer. "
-                f"Primary launcher error: {primary_exc} | Fallback error: {fallback_exc}"
-            )
+        # Give the splash a moment to appear, then close MyStats so the
+        # installer can replace our files.
+        logger.info("Closing MyStats so installer can proceed.")
+        root.after(500, force_exit_application)
+
+    except Exception as exc:
+        logger.error("Failed to launch installer: %s", exc, exc_info=True)
+        messagebox.showerror(
+            "Update Failed",
+            f"Could not start installer: {exc}\n"
+            "Please try downloading and running the installer manually."
+        )
 
 
 def recover_pending_update_launch(parent=None):
     installer_path = str(config.get_setting('pending_update_installer_path') or '').strip()
-    silent_mode_raw = str(config.get_setting('pending_update_silent_mode') or 'True').strip().lower()
-    silent_mode = silent_mode_raw == 'true'
     version_label = str(config.get_setting('pending_update_version_label') or '').strip()
 
     if not installer_path:
         return False
 
     if not os.path.exists(installer_path):
+        logger.info("Recovery: installer file gone, clearing settings.")
         config.set_setting('pending_update_installer_path', '', persistent=True)
         config.set_setting('pending_update_silent_mode', 'True', persistent=True)
         config.set_setting('pending_update_version_label', '', persistent=True)
         return False
 
-    command = [installer_path]
-    if silent_mode:
-        command.extend(["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS"])
+    # Validate PE header.
+    try:
+        with open(installer_path, 'rb') as f:
+            if f.read(2) != b'MZ':
+                logger.error("Recovery: installer file is not a valid PE executable.")
+                config.set_setting('pending_update_installer_path', '', persistent=True)
+                config.set_setting('pending_update_version_label', '', persistent=True)
+                return False
+    except OSError:
+        config.set_setting('pending_update_installer_path', '', persistent=True)
+        config.set_setting('pending_update_version_label', '', persistent=True)
+        return False
+
+    command = [installer_path, "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"]
 
     try:
-        creationflags = 0
-        if sys.platform == "win32":
-            creationflags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        logger.info("Recovery: launching installer %s", command)
+        creationflags = getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
+        proc = subprocess.Popen(command, creationflags=creationflags)
+        logger.info("Recovery: installer PID=%s", proc.pid)
 
-        subprocess.Popen(command, shell=False, creationflags=creationflags)
         config.set_setting('pending_update_installer_path', '', persistent=True)
         config.set_setting('pending_update_silent_mode', 'True', persistent=True)
         config.set_setting('pending_update_version_label', '', persistent=True)
@@ -6958,7 +7062,7 @@ def recover_pending_update_launch(parent=None):
         # and allow it to coordinate any shutdown it requires.
         return True
     except Exception as exc:
-        logger.warning(f"Pending update installer launch failed: {exc}")
+        logger.warning("Pending update installer launch failed: %s", exc)
         if parent is not None and parent.winfo_exists():
             parent.after(0, lambda: messagebox.showwarning(
                 "Update Resume Failed",
@@ -6974,6 +7078,7 @@ def download_and_install_update(download_url, version_label, silent_mode=True):
         messagebox.showerror("Update Failed", "No download URL was provided by the update service.")
         return
 
+    logger.info("Starting update download from %s", download_url)
     toast_on_progress = is_minimized_to_tray()
     show_windows_toast("MyStats Update", f"Downloading MyStats {version_label} update...")
 
@@ -7001,7 +7106,18 @@ def download_and_install_update(download_url, version_label, silent_mode=True):
         try:
             response = requests.get(download_url, stream=True, timeout=60)
             response.raise_for_status()
+
+            # Check content-type to catch accidental HTML page downloads.
+            content_type = response.headers.get('content-type', '')
+            if 'text/html' in content_type:
+                logger.error("Download URL returned HTML instead of a binary: %s", content_type)
+                raise RuntimeError(
+                    "The update server returned a web page instead of an installer file. "
+                    "Please try again later or download manually."
+                )
+
             total_bytes = int(response.headers.get('content-length') or 0)
+            logger.info("Download started: %d bytes expected", total_bytes)
             downloaded = 0
 
             with tempfile.NamedTemporaryFile(delete=False, suffix='.exe', prefix='mystats_update_') as tmp_file:
@@ -7013,13 +7129,15 @@ def download_and_install_update(download_url, version_label, silent_mode=True):
                     downloaded += len(chunk)
                     root.after(0, lambda d=downloaded, t=total_bytes: update_progress(d, t))
 
+            logger.info("Download complete: %s (%d bytes)", installer_path, downloaded)
             root.after(0, lambda: progress_var.set(100))
             root.after(0, lambda: percent_var.set("100%"))
             root.after(0, lambda: status_var.set("Download complete. Launching installer..."))
             root.after(0, lambda: show_windows_toast("MyStats Update", "Download complete. Launching installer..."))
             root.after(350, lambda: progress_window.destroy() if progress_window.winfo_exists() else None)
-            root.after(500, lambda: _start_installer_and_exit(installer_path, silent_mode=silent_mode))
+            root.after(500, lambda: _start_installer_and_exit(installer_path))
         except Exception as exc:
+            logger.error("Update download/install failed: %s", exc, exc_info=True)
             if installer_path and os.path.exists(installer_path):
                 try:
                     os.remove(installer_path)
@@ -7113,7 +7231,7 @@ def show_update_message(versioncheck, download_url):
         update_now_requested['value'] = True
         config.set_setting('pending_update_version_label', str(versioncheck), persistent=True)
         popup.destroy()
-        download_and_install_update(download_url, versioncheck, silent_mode=True)
+        download_and_install_update(download_url, versioncheck)
 
     ttk.Button(
         button_frame,
