@@ -6933,6 +6933,33 @@ $window.ShowDialog() | Out-Null
         logger.warning("Could not launch update splash: %s", exc)
 
 
+
+
+def _launch_installer_process(installer_path, command_args):
+    """Launch installer in a way that survives MyStats process shutdown."""
+    if sys.platform == "win32":
+        params = " ".join(command_args)
+        # Use ShellExecute so Windows shell brokers process creation instead of
+        # making the installer a direct child of MyStats. This avoids cases
+        # where child processes are torn down when MyStats exits.
+        result = ctypes.windll.shell32.ShellExecuteW(None, "open", installer_path, params, None, 0)
+        if result <= 32:
+            raise RuntimeError(f"ShellExecuteW failed with code {result}")
+        logger.info("Installer launched via ShellExecuteW (result=%s)", result)
+        return None
+
+    creationflags = getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
+    creationflags |= getattr(subprocess, 'CREATE_BREAKAWAY_FROM_JOB', 0x01000000)
+    proc = subprocess.Popen(
+        [installer_path, *command_args],
+        creationflags=creationflags,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    logger.info("Installer process started, PID=%s", proc.pid)
+    return proc
+
 def _start_installer_and_exit(installer_path, silent_mode=True):
     if not installer_path or not os.path.exists(installer_path):
         logger.error("Installer not found on disk: %s", installer_path)
@@ -6963,9 +6990,9 @@ def _start_installer_and_exit(installer_path, silent_mode=True):
     file_size = os.path.getsize(installer_path)
     logger.info("Installer validated: %s (%d bytes)", installer_path, file_size)
 
-    # Always use /VERYSILENT — the custom splash window provides visual
-    # feedback.  /NORESTART prevents automatic reboots.
-    command = [installer_path, "/VERYSILENT", "/CLOSEAPPLICATIONS", "/SUPPRESSMSGBOXES", "/NORESTART"]
+    # Always use /VERYSILENT. /NORESTART prevents automatic reboots.
+    command_args = ["/VERYSILENT", "/CLOSEAPPLICATIONS", "/SUPPRESSMSGBOXES", "/NORESTART"]
+    command = [installer_path, *command_args]
 
     version_label = str(config.get_setting('pending_update_version_label') or '').strip()
 
@@ -6977,31 +7004,25 @@ def _start_installer_and_exit(installer_path, silent_mode=True):
 
     try:
         logger.info("Launching installer: %s", command)
-        creationflags = getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
-        proc = subprocess.Popen(
-            command,
-            creationflags=creationflags,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        logger.info("Installer process started, PID=%s", proc.pid)
+        proc = _launch_installer_process(installer_path, command_args)
 
-        # Verify the process is actually running (not immediately dead).
-        import time as _time
-        _time.sleep(1)
-        exit_code = proc.poll()
-        if exit_code is not None:
-            logger.error("Installer exited immediately with code %s", exit_code)
-            messagebox.showerror(
-                "Update Failed",
-                f"The installer exited immediately (code {exit_code}).\n"
-                "It may have been blocked by antivirus software.\n"
-                "Please try downloading and running the installer manually."
-            )
-            config.set_setting('pending_update_installer_path', '', persistent=True)
-            config.set_setting('pending_update_version_label', '', persistent=True)
-            return
+        # Verify direct child launches are still alive (when we have a process
+        # handle). ShellExecute launches do not provide a child PID here.
+        if proc is not None:
+            import time as _time
+            _time.sleep(1)
+            exit_code = proc.poll()
+            if exit_code is not None:
+                logger.error("Installer exited immediately with code %s", exit_code)
+                messagebox.showerror(
+                    "Update Failed",
+                    f"The installer exited immediately (code {exit_code}).\n"
+                    "It may have been blocked by antivirus software.\n"
+                    "Please try downloading and running the installer manually."
+                )
+                config.set_setting('pending_update_installer_path', '', persistent=True)
+                config.set_setting('pending_update_version_label', '', persistent=True)
+                return
 
         # Installer is running — clear recovery settings.
         config.set_setting('pending_update_installer_path', '', persistent=True)
@@ -7009,7 +7030,9 @@ def _start_installer_and_exit(installer_path, silent_mode=True):
         config.set_setting('pending_update_version_label', '', persistent=True)
 
         # Launch the custom splash window (separate process, survives MyStats exit).
-        _launch_update_splash(version_label or 'latest', proc.pid)
+        
+        if proc is not None:
+            _launch_update_splash(version_label or 'latest', proc.pid)
 
         # Give the splash a moment to appear, then close MyStats so the
         # installer can replace our files.
@@ -7052,19 +7075,14 @@ def recover_pending_update_launch(parent=None):
         config.set_setting('pending_update_version_label', '', persistent=True)
         return False
 
-    command = [installer_path, "/VERYSILENT", "/CLOSEAPPLICATIONS", "/SUPPRESSMSGBOXES", "/NORESTART"]
+    command_args = ["/VERYSILENT", "/CLOSEAPPLICATIONS", "/SUPPRESSMSGBOXES", "/NORESTART"]
+    command = [installer_path, *command_args]
 
     try:
         logger.info("Recovery: launching installer %s", command)
-        creationflags = getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
-        proc = subprocess.Popen(
-            command,
-            creationflags=creationflags,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        logger.info("Recovery: installer PID=%s", proc.pid)
+        proc = _launch_installer_process(installer_path, command_args)
+        if proc is not None:
+            logger.info("Recovery: installer PID=%s", proc.pid)
 
         config.set_setting('pending_update_installer_path', '', persistent=True)
         config.set_setting('pending_update_silent_mode', 'True', persistent=True)
