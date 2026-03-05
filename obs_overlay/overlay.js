@@ -791,7 +791,7 @@ async function refresh() {
     const payload = await r.json();
     const overlayMode = normalizeOverlayMode(payload?.active_mode);
     if (overlayMode === 'tilt') {
-      window.location.replace('/overlay/tilt');
+      window.location.replace('/overlay');
       return;
     }
 

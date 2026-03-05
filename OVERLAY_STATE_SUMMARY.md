@@ -1,170 +1,102 @@
-# Overlay State Review (Current Repository Snapshot)
+# Overlay Quick Summary (User Digest)
 
-## 1) Overlay surfaces and routes
+## What overlays are available?
 
-- The Flask server runs on `0.0.0.0` using `overlay_server_port` from `settings.txt` (default `5000`).
-- OBS/Browser routes:
-  - Main overlay page: `/overlay`
-  - Tilt overlay page: `/overlay/tilt`
-  - Overlay static assets: `/overlay/<path:filename>`
-- Overlay APIs:
-  - `/api/overlay/settings` (settings payload)
-  - `/api/overlay/top3` (race/BR leaderboard payload)
-  - `/api/overlay/tilt` (tilt payload)
-  - `/api/overlay` (unified payload with active mode + race + tilt blocks)
-- Overlay files are resolved from packaged (`_MEIPASS`) and local `obs_overlay` candidates.
+MyStats currently has **one primary overlay URL**:
 
-## 2) Main results overlay (race/BR) architecture
+- **`/overlay`** → single smart overlay endpoint for:
+  - race overlay view
+  - BR overlay view
+  - tilt overlay view
 
-### Markup and presentation layers
-- `obs_overlay/index.html` contains:
-  - title
-  - six rotating header pills (today vs season KPIs)
-  - leaderboard shell
-  - splash screen
-  - world record overlay
-  - event overlay
-- `obs_overlay/overlay.js` drives:
-  - polling `/api/overlay`
-  - mode-aware view selection (race vs BR)
-  - timed top-3 and event queue presentation
-  - world-record celebration timing
-  - auto-scroll and horizontal layout behavior
-  - translation/language rendering
-- `obs_overlay/styles.css` defines:
-  - theme variables and text scaling
-  - card/pill/leaderboard styling
-  - splash animation keyframes
-  - top-3 card mode visuals
-  - dedicated event and world-record overlay styles
-  - compact rows + responsive breakpoints
-  - horizontal ticker layout styles
+The app automatically mode-switches based on live activity (`race`, `br`, `tilt`).
 
-### Data model exposed to the main overlay
-- `_build_overlay_top3_payload()` provides:
-  - multi-view leaderboards (`season`, `today`, race-only, BR-only, optional previous race)
-  - `recent_race_top3` details (`race_key`, `race_type`, record indicators)
-  - `header_stats` (avg points, unique racers, total races, today and season)
-  - `settings`
-  - `overlay_events` (rolling event log)
+Legacy path behavior:
 
-## 3) Tilt overlay architecture
+- **`/overlay/tilt`** now shows a message only:
+  - `for tilt overlay, use /overlay instead. Tilt overlay will appear after first completed level.`
 
-### Markup and presentation layers
-- `obs_overlay/tilt.html` contains:
-  - tracker card with status pills and standings feed
-  - last run summary section
-  - tilt splash screen
-  - level-complete recap overlay
-  - run-complete recap overlay
-- `obs_overlay/tilt_overlay.js` drives:
-  - polling unified `/api/overlay`
-  - automatic redirect to `/overlay` when mode is not tilt
-  - theme + text scaling + scroll tuning
-  - standings rendering (season, today, current/last run)
-  - recap state machine (level then run recap gating)
-  - run completion event-id tracking to prevent stale recap replay
-  - snapshot caching in localStorage for startup resilience
-- `obs_overlay/tilt_styles.css` defines:
-  - full tracker visuals
-  - standings typography/layout
-  - level/run recap overlay visual systems
-  - overlay pills/metrics/hero blocks
-  - splash visuals and recap/tracker visibility modes
+---
 
-### Data model exposed to tilt overlay
-- `_build_tilt_overlay_payload()` includes:
-  - `current_run`, `last_run`
-  - `level_completion`, `run_completion`
-  - `run_completion_event_id`
-  - `season_standings`, `today_standings`
-  - `settings` (with tilt theme override)
-  - `suppress_initial_recaps` safeguard
+## How do I access overlays in OBS?
 
-## 4) Configuration setup for overlays
+1. Start MyStats.
+2. Open **Settings → Overlay** and confirm **Server Port** (default `5000`).
+3. In OBS add a Browser Source with:
+   - `http://127.0.0.1:<port>/overlay`
+4. Keep this single source in your scene.
+5. MyStats will switch the rendered overlay mode automatically:
+   - Race/BR data → main overlay cards
+   - Tilt run context → tilt tracker/recap overlay
 
-### Settings persisted by desktop app
-Results overlay:
-- `overlay_rotation_seconds`
-- `overlay_refresh_seconds`
-- `overlay_server_port`
-- `overlay_theme`
-- `overlay_card_opacity`
-- `overlay_text_scale`
-- `overlay_show_medals`
-- `overlay_compact_rows`
-- `overlay_horizontal_layout`
+---
 
-Tilt overlay specific:
-- `tilt_lifetime_base_xp`
-- `tilt_season_best_level`
-- `tilt_personal_best_level`
-- `tilt_overlay_theme`
-- `tilt_scroll_step_px`
-- `tilt_scroll_interval_ms`
-- `tilt_scroll_pause_ms`
+## What is contained in the overlay?
 
-### Default values (current)
-- rotation `10s`, refresh `3s`, port `5000`
-- theme `midnight`, opacity `84`, text scale `100`
-- medals on, compact rows off, horizontal off
-- tilt theme `midnight`
-- tilt scroll step `1px`, tick `40ms`, edge pause `900ms`
+### Race/BR mode (`/overlay` rendering `index.html`)
+- Title + rotating today/season stat pills
+- Multi-view top 10 boards (season/today/race-only/br-only)
+- Previous race top-3 presentation
+- World-record callout panel
+- Event popup panel (raid/cycle/quest/player-alert events)
+- Optional horizontal ticker layout mode
 
-### Runtime mode switching
-- Overlay mode is driven by active data stream:
-  - Tilt monitor sets mode `tilt`
-  - Race monitor sets mode `race`
-  - BR monitor sets mode `br`
-- If a tilt run is active (`tilt_current_run_id`), mode resolves to tilt.
+### Tilt mode (`/overlay` rendering `tilt.html`)
+- Live run tracker pills (top tiltee, level, elapsed)
+- Combined standings feed:
+  - season top 10
+  - today top 10
+  - current/last run standings
+  - run stat rows
+- Level-complete recap overlay
+- Run-complete recap overlay
+- Tilt splash timing + recap gating logic to avoid stale replay
 
-## 5) Styling system summary (all overlays)
+---
 
-- Both overlays use CSS custom properties populated by JS from server settings:
-  - text color/accent variables
-  - panel alpha from `card_opacity`
-  - global `--text-scale`
-- Shared theme family: `midnight`, `ocean`, `sunset`, `forest`, `mono`, `violethearts`.
-- Main overlay has two layout modes:
-  - standard card layout
-  - ultra-wide horizontal ticker layout (optimized for 1080x100 style scenes)
-- Tilt overlay styling emphasizes:
-  - large scrollable standings cards
-  - dedicated celebratory recap overlays (level/run)
-  - explicit recap-vs-tracker state visibility controls
+## How do I change overlay settings?
 
-## 6) Event-related overlay behavior and changes summary
+All overlay settings are changed in the desktop app at:
 
-### Current event pipeline behavior
-- Event source:
-  - runtime code calls `enqueue_overlay_event(type, message)`
-- Event storage:
-  - in-memory/transient config JSON list, capped to last 40 events
-  - monotonically increasing `overlay_event_counter` ids
-- Event delivery:
-  - race/BR payload exposes `overlay_events`
-  - `overlay.js` hydrates once, then only enqueues events with new ids
-- Event presentation:
-  - queued event overlays are shown one at a time (`eventOverlayDurationMs`)
-  - event overlays and top-3 overlays are sequenced to avoid collision
-  - event overlays are disabled in horizontal layout mode
+- **Settings → Overlay**
 
-### Event types currently pushed into overlay queue
-- Competitive raid events:
-  - `raid_queue_open`
-  - `raid_cancelled`
-  - `raid_live_started`
-  - `raid_summary`
-- Performance/progression events:
-  - `player_alert`
-  - `cycle_completed`
-  - `quest_completed`
+### Main overlay settings
+- Stats rotation speed
+- Data refresh interval
+- Server port
+- Theme
+- Card opacity
+- Text scale
+- Medal visibility
+- Compact row spacing
+- Horizontal ticker layout
 
-### Tilt recap event gating changes (current state)
-- Tilt run recap uses `run_completion_event_id` with baseline memory to prevent stale recap flash/repeat on load.
-- A pending run-completion event is preserved while level recap is active and displayed afterward.
-- Recap overlays are force-hidden at startup before first payload hydration.
+### Tilt-specific settings
+- Tilt theme
+- Starting lifetime XP
+- Season best level baseline
+- Personal best level baseline
+- Scroll step (px)
+- Scroll tick interval (ms)
+- Edge pause (ms)
 
-### Documented higher-level overlay change trend
-- Release notes describe a shift to a built-in Flask-served overlay system with stronger state/timing reliability, enhanced horizontal support, and recap stability.
-- Post-major PR summary highlights ongoing improvements to splash sequencing, race-end transitions, readability, and stale/duplicate recap suppression.
+Defaults (current):
+- port `5000`
+- refresh `3s`
+- rotation `10s`
+- theme `midnight`
+- opacity `84`
+- text scale `100`
+
+---
+
+## Single-API / single-endpoint architecture status
+
+Already in place:
+
+- Unified data API: **`/api/overlay`**
+  - includes active mode + race payload + tilt payload
+- Unified presentation URL: **`/overlay`**
+  - now chooses rendered UI based on active mode server-side
+
+This gives one stable OBS URL while preserving race/BR/tilt mode switching.
