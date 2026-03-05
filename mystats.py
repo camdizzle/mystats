@@ -6924,6 +6924,9 @@ $window.ShowDialog() | Out-Null
             ['powershell', '-NoProfile', '-WindowStyle', 'Hidden',
              '-ExecutionPolicy', 'Bypass', '-Command', ps_script],
             creationflags=getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
         logger.info("Update splash launched for installer PID %s", installer_pid)
     except Exception as exc:
@@ -6962,7 +6965,7 @@ def _start_installer_and_exit(installer_path, silent_mode=True):
 
     # Always use /VERYSILENT — the custom splash window provides visual
     # feedback.  /NORESTART prevents automatic reboots.
-    command = [installer_path, "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"]
+    command = [installer_path, "/VERYSILENT", "/CLOSEAPPLICATIONS", "/SUPPRESSMSGBOXES", "/NORESTART"]
 
     version_label = str(config.get_setting('pending_update_version_label') or '').strip()
 
@@ -6975,7 +6978,13 @@ def _start_installer_and_exit(installer_path, silent_mode=True):
     try:
         logger.info("Launching installer: %s", command)
         creationflags = getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
-        proc = subprocess.Popen(command, creationflags=creationflags)
+        proc = subprocess.Popen(
+            command,
+            creationflags=creationflags,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
         logger.info("Installer process started, PID=%s", proc.pid)
 
         # Verify the process is actually running (not immediately dead).
@@ -7043,12 +7052,18 @@ def recover_pending_update_launch(parent=None):
         config.set_setting('pending_update_version_label', '', persistent=True)
         return False
 
-    command = [installer_path, "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"]
+    command = [installer_path, "/VERYSILENT", "/CLOSEAPPLICATIONS", "/SUPPRESSMSGBOXES", "/NORESTART"]
 
     try:
         logger.info("Recovery: launching installer %s", command)
         creationflags = getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
-        proc = subprocess.Popen(command, creationflags=creationflags)
+        proc = subprocess.Popen(
+            command,
+            creationflags=creationflags,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
         logger.info("Recovery: installer PID=%s", proc.pid)
 
         config.set_setting('pending_update_installer_path', '', persistent=True)
