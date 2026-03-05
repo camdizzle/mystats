@@ -6954,8 +6954,8 @@ def recover_pending_update_launch(parent=None):
         label_suffix = f" {version_label}" if version_label else ""
         show_windows_toast("MyStats Update", f"Resuming installer launch{label_suffix}.")
 
-        if parent is not None and parent.winfo_exists():
-            parent.after(150, force_exit_application)
+        # Do not force-close MyStats here. We only relaunch the pending installer
+        # and allow it to coordinate any shutdown it requires.
         return True
     except Exception as exc:
         logger.warning(f"Pending update installer launch failed: {exc}")
