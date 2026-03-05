@@ -6923,6 +6923,9 @@ $window.ShowDialog() | Out-Null
         subprocess.Popen(
             ['powershell', '-NoProfile', '-WindowStyle', 'Hidden',
              '-ExecutionPolicy', 'Bypass', '-Command', ps_script],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
             creationflags=getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0),
         )
         logger.info("Update splash launched for installer PID %s", installer_pid)
@@ -6978,7 +6981,13 @@ def _start_installer_and_exit(installer_path, silent_mode=True):
     try:
         logger.info("Launching installer: %s", command)
         creationflags = getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
-        proc = subprocess.Popen(command, creationflags=creationflags)
+        proc = subprocess.Popen(
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=creationflags,
+        )
         logger.info("Installer process started, PID=%s", proc.pid)
 
         # Verify the process is actually running (not immediately dead).
@@ -7054,7 +7063,13 @@ def recover_pending_update_launch(parent=None):
     try:
         logger.info("Recovery: launching installer %s", command)
         creationflags = getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
-        proc = subprocess.Popen(command, creationflags=creationflags)
+        proc = subprocess.Popen(
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=creationflags,
+        )
         logger.info("Recovery: installer PID=%s", proc.pid)
 
         config.set_setting('pending_update_installer_path', '', persistent=True)
