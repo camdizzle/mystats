@@ -6920,10 +6920,13 @@ $window.ShowDialog() | Out-Null
         'INSTALLER_PID_PLACEHOLDER', str(installer_pid))
 
     try:
+        # CREATE_BREAKAWAY_FROM_JOB so the splash survives PyInstaller's
+        # job-object cleanup when MyStats exits.
+        splash_flags = getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0) | 0x01000000
         subprocess.Popen(
             ['powershell', '-NoProfile', '-WindowStyle', 'Hidden',
              '-ExecutionPolicy', 'Bypass', '-Command', ps_script],
-            creationflags=getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0),
+            creationflags=splash_flags,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -6978,6 +6981,10 @@ def _start_installer_and_exit(installer_path, silent_mode=True):
     try:
         logger.info("Launching installer: %s", command)
         creationflags = getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
+        # CREATE_BREAKAWAY_FROM_JOB (0x01000000) allows the child process to
+        # escape the Job Object that PyInstaller's bootloader creates.  Without
+        # this the OS kills the installer when MyStats exits.
+        creationflags |= 0x01000000
         proc = subprocess.Popen(
             command,
             creationflags=creationflags,
@@ -7057,6 +7064,7 @@ def recover_pending_update_launch(parent=None):
     try:
         logger.info("Recovery: launching installer %s", command)
         creationflags = getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
+        creationflags |= 0x01000000  # CREATE_BREAKAWAY_FROM_JOB
         proc = subprocess.Popen(
             command,
             creationflags=creationflags,
