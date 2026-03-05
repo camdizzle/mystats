@@ -6933,6 +6933,102 @@ $window.ShowDialog() | Out-Null
         logger.warning("Could not launch update splash: %s", exc)
 
 
+def _schedule_installer_bootstrap(installer_path, command_args, version_label, parent_pid):
+    """Schedule a one-shot Windows task that launches installer + splash outside MyStats job."""
+    if sys.platform != "win32":
+        raise RuntimeError("Windows bootstrap scheduling is only available on win32")
+
+    task_name = f"MyStatsUpdate_{uuid.uuid4().hex}"
+    ps_script = f"""
+$ErrorActionPreference = 'Stop'
+$installerPath = {json.dumps(installer_path)}
+$installerArgs = {json.dumps(command_args)}
+$versionLabel = {json.dumps(version_label or 'latest')}
+$parentPid = {int(parent_pid)}
+$taskName = {json.dumps(task_name)}
+
+try {{
+    while (Get-Process -Id $parentPid -ErrorAction SilentlyContinue) {{
+        Start-Sleep -Milliseconds 500
+    }}
+
+    $installer = Start-Process -FilePath $installerPath -ArgumentList $installerArgs -PassThru -WindowStyle Hidden
+
+    Add-Type -AssemblyName PresentationFramework
+    Add-Type -AssemblyName PresentationCore
+
+    [xml]$xaml = @"
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        Title="MyStats Update" Height="180" Width="420"
+        WindowStartupLocation="CenterScreen" ResizeMode="NoResize"
+        WindowStyle="SingleBorderWindow" Topmost="True"
+        Background="#1a1a2e">
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="16"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="12"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <TextBlock Grid.Row="0" Text="Updating MyStats to $($versionLabel) ..."
+                   Foreground="#00d4ff" FontSize="18" FontWeight="Bold"
+                   HorizontalAlignment="Center"/>
+        <ProgressBar Grid.Row="2" Height="22" IsIndeterminate="True"
+                     Foreground="#00d4ff" Background="#2a2a4a"/>
+        <TextBlock Grid.Row="4" Text="Please wait while the update installs..."
+                   Foreground="#aaaacc" FontSize="12"
+                   HorizontalAlignment="Center"/>
+    </Grid>
+</Window>
+"@
+
+    $reader = New-Object System.Xml.XmlNodeReader $xaml
+    $window = [Windows.Markup.XamlReader]::Load($reader)
+    $timer = New-Object System.Windows.Threading.DispatcherTimer
+    $timer.Interval = [TimeSpan]::FromSeconds(1)
+    $timer.Add_Tick({{
+        if (-not (Get-Process -Id $installer.Id -ErrorAction SilentlyContinue)) {{
+            $timer.Stop()
+            $window.Close()
+        }}
+    }})
+    $timer.Start()
+    $window.ShowDialog() | Out-Null
+}} finally {{
+    schtasks /Delete /TN $taskName /F | Out-Null
+}}
+""".strip()
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.ps1', prefix='mystats_update_bootstrap_', mode='w', encoding='utf-8') as script_file:
+        script_file.write(ps_script)
+        script_path = script_file.name
+
+    run_time = (datetime.now() + timedelta(minutes=1)).strftime("%H:%M")
+    task_command = f'powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{script_path}"'
+
+    try:
+        subprocess.run(
+            ['schtasks', '/Create', '/F', '/SC', 'ONCE', '/ST', run_time, '/TN', task_name, '/TR', task_command],
+            check=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        subprocess.run(
+            ['schtasks', '/Run', '/TN', task_name],
+            check=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        logger.info("Installer bootstrap scheduled with task %s", task_name)
+    except Exception:
+        try:
+            os.remove(script_path)
+        except OSError:
+            pass
+        raise
 
 
 def _launch_installer_process(installer_path, command_args):
@@ -7094,6 +7190,28 @@ def _start_installer_and_exit(installer_path, silent_mode=True):
 
     try:
         logger.info("Launching installer: %s", command)
+
+        if sys.platform == "win32":
+            # Fresh approach for PyInstaller builds: schedule a Windows Task that
+            # starts after this process exits, so the installer is not tied to our
+            # process tree or job object.
+            _schedule_installer_bootstrap(
+                installer_path,
+                command_args,
+                version_label,
+                os.getpid(),
+            )
+
+            # Task creation succeeded — clear recovery settings and exit so
+            # bootstrap can detect parent shutdown and launch installer.
+            config.set_setting('pending_update_installer_path', '', persistent=True)
+            config.set_setting('pending_update_silent_mode', 'True', persistent=True)
+            config.set_setting('pending_update_version_label', '', persistent=True)
+
+            logger.info("Closing MyStats so scheduled installer bootstrap can proceed.")
+            root.after(500, force_exit_application)
+            return
+
         proc = _launch_installer_process(installer_path, command_args)
 
         # Verify direct child launches are still alive (when we have a process
@@ -7120,7 +7238,6 @@ def _start_installer_and_exit(installer_path, silent_mode=True):
         config.set_setting('pending_update_version_label', '', persistent=True)
 
         # Launch the custom splash window (separate process, survives MyStats exit).
-        
         if proc is not None:
             _launch_update_splash(version_label or 'latest', proc.pid)
 
@@ -7170,9 +7287,19 @@ def recover_pending_update_launch(parent=None):
 
     try:
         logger.info("Recovery: launching installer %s", command)
-        proc = _launch_installer_process(installer_path, command_args)
-        if proc is not None:
-            logger.info("Recovery: installer PID=%s", proc.pid)
+
+        if sys.platform == "win32":
+            _schedule_installer_bootstrap(
+                installer_path,
+                command_args,
+                version_label,
+                os.getpid(),
+            )
+            logger.info("Recovery: scheduled installer bootstrap task")
+        else:
+            proc = _launch_installer_process(installer_path, command_args)
+            if proc is not None:
+                logger.info("Recovery: installer PID=%s", proc.pid)
 
         config.set_setting('pending_update_installer_path', '', persistent=True)
         config.set_setting('pending_update_silent_mode', 'True', persistent=True)
