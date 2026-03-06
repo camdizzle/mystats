@@ -2670,6 +2670,35 @@ def get_mycycle_leaderboard(limit=200, session_id=None):
     return session, leaderboard[:limit]
 
 
+def get_next_mycycle_candidates(limit=10, session_id=None):
+    session, leaderboard = get_mycycle_leaderboard(limit=5000, session_id=session_id)
+    candidates = []
+
+    for row in leaderboard:
+        missing_places = list(row.get('missing_places', []))
+        if not missing_places:
+            continue
+
+        candidates.append({
+            'display_name': row.get('display_name') or row.get('username') or 'Unknown',
+            'next_cycle_number': int(row.get('cycles_completed', 0) or 0) + 1,
+            'missing_positions': missing_places,
+            'missing_count': len(missing_places),
+            'current_cycle_races': int(row.get('current_cycle_races', 0) or 0),
+            'progress_hits': int(row.get('progress_hits', 0) or 0),
+        })
+
+    candidates.sort(
+        key=lambda row: (
+            row['missing_count'],
+            -row['current_cycle_races'],
+            -row['progress_hits'],
+            row['display_name'].lower(),
+        )
+    )
+    return session, candidates[:max(1, limit)]
+
+
 def get_mycycle_cycle_stats(session_query=None):
     with MYCYCLE_LOCK:
         data = load_mycycle_data()
@@ -9106,6 +9135,31 @@ class Bot(commands.Bot):
             message += f" | Missing: {', '.join(missing)}"
 
         await self.send_command_response(ctx, message)
+
+
+    @commands.command(name='nextcycle')
+    async def nextcycle_command(self, ctx):
+        if not is_chat_response_enabled('mycycle_enabled'):
+            return
+
+        session, candidates = get_next_mycycle_candidates(limit=10)
+        session_name = (session or {}).get('name', 'Unknown')
+
+        if not candidates:
+            await self.send_command_response(ctx, f"🔁 NextCycle [{session_name}] | No upcoming cycles found yet.")
+            return
+
+        entries = []
+        for row in candidates:
+            missing_positions = ','.join(str(pos) for pos in row.get('missing_positions', []))
+            entries.append(
+                f"{format_user_tag(row['display_name'])} | C{row['next_cycle_number']} | Missing: {missing_positions}"
+            )
+
+        await self.send_command_response(
+            ctx,
+            f"🔁 NextCycle [{session_name}] Top {len(entries)}: " + " || ".join(entries)
+        )
 
     @commands.command(name='cyclestats')
     async def cyclestats_command(self, ctx, session_name: str = None):
