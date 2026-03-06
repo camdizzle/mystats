@@ -4777,23 +4777,25 @@ def open_settings_window():
 
     tilt_fields_frame = ttk.Frame(tilt_overlay_frame, style="App.TFrame")
     tilt_fields_frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=(8, 8))
+    for col in range(3):
+        tilt_fields_frame.grid_columnconfigure(col, weight=1)
 
     ttk.Label(tilt_fields_frame, text="Starting Lifetime XP", style="Small.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 2))
     tilt_lifetime_base_entry = ttk.Entry(tilt_fields_frame, width=12, justify='center')
-    tilt_lifetime_base_entry.grid(row=1, column=0, sticky="w", pady=(0, 6))
+    tilt_lifetime_base_entry.grid(row=1, column=0, sticky="w", pady=(0, 6), padx=(0, 12))
     tilt_lifetime_base_entry.insert(0, config.get_setting("tilt_lifetime_base_xp") or "0")
 
-    ttk.Label(tilt_fields_frame, text="Season Best Level", style="Small.TLabel").grid(row=2, column=0, sticky="w", pady=(0, 2))
+    ttk.Label(tilt_fields_frame, text="Season Best Level", style="Small.TLabel").grid(row=0, column=1, sticky="w", pady=(0, 2))
     tilt_season_best_entry = ttk.Entry(tilt_fields_frame, width=12, justify='center')
-    tilt_season_best_entry.grid(row=3, column=0, sticky="w", pady=(0, 6))
+    tilt_season_best_entry.grid(row=1, column=1, sticky="w", pady=(0, 6), padx=(0, 12))
     tilt_season_best_entry.insert(0, config.get_setting("tilt_season_best_level") or "1")
 
-    ttk.Label(tilt_fields_frame, text="Personal Best Level", style="Small.TLabel").grid(row=4, column=0, sticky="w", pady=(0, 2))
+    ttk.Label(tilt_fields_frame, text="Personal Best Level", style="Small.TLabel").grid(row=0, column=2, sticky="w", pady=(0, 2))
     tilt_personal_best_entry = ttk.Entry(tilt_fields_frame, width=12, justify='center')
-    tilt_personal_best_entry.grid(row=5, column=0, sticky="w", pady=(0, 6))
+    tilt_personal_best_entry.grid(row=1, column=2, sticky="w", pady=(0, 6))
     tilt_personal_best_entry.insert(0, config.get_setting("tilt_personal_best_level") or "1")
 
-    ttk.Label(tilt_fields_frame, text="Tilt Theme", style="Small.TLabel").grid(row=6, column=0, sticky="w", pady=(0, 2))
+    ttk.Label(tilt_fields_frame, text="Tilt Theme", style="Small.TLabel").grid(row=2, column=0, sticky="w", pady=(0, 2))
     tilt_overlay_theme_var = tk.StringVar(value=(config.get_setting("tilt_overlay_theme") or config.get_setting("overlay_theme") or "midnight"))
     ttk.Combobox(
         tilt_fields_frame,
@@ -4801,21 +4803,21 @@ def open_settings_window():
         values=["midnight", "ocean", "sunset", "forest", "mono", "violethearts"],
         width=18,
         state="readonly"
-    ).grid(row=7, column=0, sticky="w", pady=(0, 6))
+    ).grid(row=3, column=0, sticky="w", pady=(0, 6), padx=(0, 12))
 
-    ttk.Label(tilt_fields_frame, text="Scroll Step (px)", style="Small.TLabel").grid(row=8, column=0, sticky="w", pady=(0, 2))
+    ttk.Label(tilt_fields_frame, text="Scroll Step (px)", style="Small.TLabel").grid(row=2, column=1, sticky="w", pady=(0, 2))
     tilt_scroll_step_entry = ttk.Entry(tilt_fields_frame, width=12, justify='center')
-    tilt_scroll_step_entry.grid(row=9, column=0, sticky="w", pady=(0, 6))
+    tilt_scroll_step_entry.grid(row=3, column=1, sticky="w", pady=(0, 6), padx=(0, 12))
     tilt_scroll_step_entry.insert(0, config.get_setting("tilt_scroll_step_px") or "1")
 
-    ttk.Label(tilt_fields_frame, text="Scroll Tick (ms)", style="Small.TLabel").grid(row=10, column=0, sticky="w", pady=(0, 2))
+    ttk.Label(tilt_fields_frame, text="Scroll Tick (ms)", style="Small.TLabel").grid(row=2, column=2, sticky="w", pady=(0, 2))
     tilt_scroll_interval_entry = ttk.Entry(tilt_fields_frame, width=12, justify='center')
-    tilt_scroll_interval_entry.grid(row=11, column=0, sticky="w", pady=(0, 6))
+    tilt_scroll_interval_entry.grid(row=3, column=2, sticky="w", pady=(0, 6))
     tilt_scroll_interval_entry.insert(0, config.get_setting("tilt_scroll_interval_ms") or "40")
 
-    ttk.Label(tilt_fields_frame, text="Edge Pause (ms)", style="Small.TLabel").grid(row=12, column=0, sticky="w", pady=(0, 2))
+    ttk.Label(tilt_fields_frame, text="Edge Pause (ms)", style="Small.TLabel").grid(row=4, column=0, sticky="w", pady=(0, 2))
     tilt_scroll_pause_entry = ttk.Entry(tilt_fields_frame, width=12, justify='center')
-    tilt_scroll_pause_entry.grid(row=13, column=0, sticky="w", pady=(0, 8))
+    tilt_scroll_pause_entry.grid(row=5, column=0, sticky="w", pady=(0, 8), padx=(0, 12))
     tilt_scroll_pause_entry.insert(0, config.get_setting("tilt_scroll_pause_ms") or "900")
 
     ttk.Label(
@@ -4824,7 +4826,7 @@ def open_settings_window():
         style="Small.TLabel",
         wraplength=420,
         justify="left"
-    ).grid(row=14, column=0, sticky="w")
+    ).grid(row=6, column=0, columnspan=3, sticky="w")
 
     ttk.Label(
         overlay_tab,
