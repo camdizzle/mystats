@@ -966,9 +966,9 @@ function renderRaceTrends(data) {
 
   const summaryHost = el('trends-summary');
   const chartHost = el('trend-charts');
-  if (!summaryHost || !chartHost) return;
+  if (!chartHost) return;
 
-  summaryHost.innerHTML = [
+  if (summaryHost) summaryHost.innerHTML = [
     { label: 'Avg Unique Racers / Day', value: fmt(summary.avg_racers_per_day || 0) },
     { label: 'Avg Races / Day', value: fmt(summary.avg_races_per_day || 0) },
     { label: 'Avg PPR / Day', value: fmt(summary.avg_ppr_per_day || 0) },
@@ -988,34 +988,6 @@ function renderRaceTrends(data) {
     renderSimpleLineChart('Current Season Daily PPR', latestDays, 'ppr', 'date', (v) => Number(v || 0).toFixed(2)),
     renderSimpleLineChart('Current Season Daily BR Count', latestDays, 'br_count', 'date'),
   ];
-
-  const busiest = summary?.busiest_day;
-  const highestVolume = summary?.highest_volume_day;
-  const bestPpr = summary?.best_ppr_day;
-  const firstSeason = seasonSeries[0] || null;
-  const latestSeason = seasonSeries[seasonSeries.length - 1] || null;
-  const seasonUniqueDelta = (firstSeason && latestSeason)
-    ? Number(latestSeason.unique_racers || 0) - Number(firstSeason.unique_racers || 0)
-    : 0;
-  const seasonRaceDelta = (firstSeason && latestSeason)
-    ? Number(latestSeason.total_races || 0) - Number(firstSeason.total_races || 0)
-    : 0;
-
-  const totalSeasonRaces = latestDays.reduce((sum, row) => sum + Number(row.total_races || 0), 0);
-  const totalSeasonBr = latestDays.reduce((sum, row) => sum + Number(row.br_count || 0), 0);
-  const totalSeasonRaceOnly = latestDays.reduce((sum, row) => sum + Number(row.race_count || 0), 0);
-  const activeDaysOver200 = latestDays.filter((row) => Number(row.total_races || 0) >= 200).length;
-
-  charts.push(`<section class="analytics-group trend-highlights-full"><h3 class="analytics-group__title">Key Race/BR Trend Highlights</h3><div class="analytics-grid">
-    <div class="analytics-stat"><div class="analytics-stat__label">Busiest Unique Racer Day</div><div class="analytics-stat__compare"><span><strong>Date:</strong> ${escapeHtml(busiest?.date || '—')}</span><span><strong>Unique Racers:</strong> ${escapeHtml(fmt(busiest?.unique_racers || 0))}</span></div></div>
-    <div class="analytics-stat"><div class="analytics-stat__label">Highest Volume Day</div><div class="analytics-stat__compare"><span><strong>Date:</strong> ${escapeHtml(highestVolume?.date || '—')}</span><span><strong>Total Races:</strong> ${escapeHtml(fmt(highestVolume?.total_races || 0))}</span></div></div>
-    <div class="analytics-stat"><div class="analytics-stat__label">Best Daily PPR</div><div class="analytics-stat__compare"><span><strong>Date:</strong> ${escapeHtml(bestPpr?.date || '—')}</span><span><strong>PPR:</strong> ${escapeHtml((Number(bestPpr?.ppr || 0)).toFixed(2))}</span></div></div>
-    <div class="analytics-stat"><div class="analytics-stat__label">Season Unique Racer Change</div><div class="analytics-stat__compare"><span><strong>First to Latest:</strong> ${escapeHtml(fmt(seasonUniqueDelta))}</span><span><strong>Latest Season:</strong> ${escapeHtml(latestSeason?.season_label || '—')}</span></div></div>
-    <div class="analytics-stat"><div class="analytics-stat__label">Season Total Race Change</div><div class="analytics-stat__compare"><span><strong>First to Latest:</strong> ${escapeHtml(fmt(seasonRaceDelta))}</span><span><strong>Latest Season:</strong> ${escapeHtml(latestSeason?.season_label || '—')}</span></div></div>
-    <div class="analytics-stat"><div class="analytics-stat__label">Current Window Total Races</div><div class="analytics-stat__compare"><span><strong>Total:</strong> ${escapeHtml(fmt(totalSeasonRaces))}</span><span><strong>Days Counted:</strong> ${escapeHtml(fmt(latestDays.length))}</span></div></div>
-    <div class="analytics-stat"><div class="analytics-stat__label">Current Window Race Mix</div><div class="analytics-stat__compare"><span><strong>Race:</strong> ${escapeHtml(fmt(totalSeasonRaceOnly))}</span><span><strong>BR:</strong> ${escapeHtml(fmt(totalSeasonBr))}</span></div></div>
-    <div class="analytics-stat"><div class="analytics-stat__label">High Activity Days (200+)</div><div class="analytics-stat__compare"><span><strong>Count:</strong> ${escapeHtml(fmt(activeDaysOver200))}</span><span><strong>Out of:</strong> ${escapeHtml(fmt(latestDays.length))}</span></div></div>
-  </div></section>`);
 
   chartHost.classList.add('trend-grid');
   chartHost.innerHTML = charts.join('');
