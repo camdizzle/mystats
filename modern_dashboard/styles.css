@@ -52,15 +52,6 @@ body {
 .kpi-label { color: #9bb1d6; font-size: .74rem; text-transform: uppercase; letter-spacing: .08em; }
 .kpi-value { font-weight: 700; color: #8be8ae; font-size: .92rem; }
 
-#trends-summary {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-
-@media (max-width: 1200px) {
-  #trends-summary {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
 .legend { display: grid; gap: 6px; font-size: .79rem; color: #c5d4f0; }
 .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 7px; }
 .dot--hit { background: #3ddc8f; }
@@ -192,6 +183,7 @@ body {
   gap: 6px;
   margin-bottom: 10px;
 }
+
 .mini-filter-btn {
   border-radius: 999px;
   border: 1px solid rgba(127,216,255,.3);
