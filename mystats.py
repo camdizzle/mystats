@@ -2158,6 +2158,19 @@ def open_rivalries_window(parent_window):
 MYCYCLE_FILE_NAME = "mycycle_data.json"
 MYCYCLE_SESSION_PREFIX = "season_"
 MYCYCLE_LOCK = threading.Lock()
+MYCYCLE_SCHEMA_VERSION = 2
+MYCYCLE_HISTORY_MAX = 50
+MYCYCLE_SAVE_RETRIES = 3
+MYCYCLE_SAVE_RETRY_DELAY_S = 0.15
+
+_dashboard_main_cache = {'value': None, 'created_at': 0.0}
+_dashboard_main_cache_ttl_s = 5.0
+_mycycle_aggregate_cache = {}
+
+
+def _invalidate_dashboard_cache():
+    _dashboard_main_cache['value'] = None
+    _dashboard_main_cache['created_at'] = 0.0
 
 
 def _mycycle_file_path():
@@ -2167,6 +2180,57 @@ def _mycycle_file_path():
 
 def _empty_placement_counts(min_place, max_place):
     return {str(i): 0 for i in range(min_place, max_place + 1)}
+
+
+def _normalize_mycycle_username(value):
+    return (value or '').strip().lower().lstrip('@')
+
+
+def _mycycle_leaderboard_sort_key(row):
+    cycles = int(row.get('cycles_completed', 0) or 0)
+    progress_hits = int(row.get('progress_hits', 0) or 0)
+    total_races = int(row.get('total_races', 0) or 0)
+    current_cycle_races = int(row.get('current_cycle_races', 0) or 0)
+    avg = (total_races / max(1, cycles)) if cycles else float('inf')
+    return (-cycles, -progress_hits, avg, current_cycle_races, total_races)
+
+
+def _mycycle_now_iso(value=None):
+    timestamp = value or get_internal_adjusted_time()
+    return timestamp.replace(microsecond=0).isoformat()
+
+
+def _mycycle_now_iso_utc():
+    try:
+        _, _, _, adjusted_time = time_manager.get_adjusted_time()
+        if adjusted_time is not None:
+            return _mycycle_now_iso(adjusted_time)
+    except Exception:
+        logger.error("Falling back to system time for MyCycle timestamp generation.", exc_info=True)
+    return _mycycle_now_iso(get_internal_adjusted_time())
+
+
+def _parse_mycycle_timestamp(value):
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+
+    text = str(value).strip()
+    if not text:
+        return None
+
+    for fmt in ('%Y-%m-%d %H:%M:%S',):
+        try:
+            return datetime.strptime(text, fmt)
+        except (TypeError, ValueError):
+            continue
+
+    try:
+        normalized = text.replace('Z', '+00:00')
+        return datetime.fromisoformat(normalized)
+    except (TypeError, ValueError):
+        return None
 
 
 def get_mycycle_settings():
@@ -2188,13 +2252,69 @@ def load_mycycle_data():
     try:
         with open(path, 'r', encoding='utf-8') as f:
             data = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        data = {'version': 1, 'sessions': {}}
+    except FileNotFoundError:
+        data = {'version': MYCYCLE_SCHEMA_VERSION, 'sessions': {}}
+    except json.JSONDecodeError:
+        try:
+            backup_path = f"{path}.corrupt.{int(time.time())}.bak"
+            os.replace(path, backup_path)
+            logger.error("MyCycle data was corrupted and has been moved to backup: %s", backup_path)
+        except Exception:
+            logger.error("MyCycle data was corrupted and could not be backed up.", exc_info=True)
+        data = {'version': MYCYCLE_SCHEMA_VERSION, 'sessions': {}}
 
     if not isinstance(data, dict):
-        data = {'version': 1, 'sessions': {}}
-    data.setdefault('version', 1)
+        data = {'version': MYCYCLE_SCHEMA_VERSION, 'sessions': {}}
+    changed = False
+    if data.get('version') != MYCYCLE_SCHEMA_VERSION:
+        changed = True
+    data.setdefault('version', MYCYCLE_SCHEMA_VERSION)
     data.setdefault('sessions', {})
+
+    sessions = data.get('sessions', {}) if isinstance(data.get('sessions', {}), dict) else {}
+    data['sessions'] = sessions
+    for sid, session in list(sessions.items()):
+        if not isinstance(session, dict):
+            sessions[sid] = {'id': sid, 'name': str(sid), 'active': True, 'is_default': False, 'stats': {}}
+            session = sessions[sid]
+            changed = True
+
+        session.setdefault('id', sid)
+        session.setdefault('name', str(sid))
+        session.setdefault('active', True)
+        session.setdefault('is_default', False)
+        if 'stats' not in session and isinstance(session.get('users'), dict):
+            session['stats'] = session.get('users', {})
+            changed = True
+        stats = session.setdefault('stats', {})
+        if not isinstance(stats, dict):
+            session['stats'] = {}
+            stats = session['stats']
+            changed = True
+
+        normalized = {}
+        for username, record in list(stats.items()):
+            uname = _normalize_mycycle_username(username)
+            if not uname:
+                changed = True
+                continue
+            if not isinstance(record, dict):
+                record = {}
+                changed = True
+            record.setdefault('display_name', uname)
+            record.setdefault('history', [])
+            if 'cycle_history' in record and not record.get('history'):
+                record['history'] = record.get('cycle_history')
+                changed = True
+            normalized[uname] = record
+            if uname != username:
+                changed = True
+        if normalized != stats:
+            session['stats'] = normalized
+            changed = True
+
+    data['version'] = MYCYCLE_SCHEMA_VERSION
+    data['_changed'] = changed
     return data
 
 
@@ -2202,16 +2322,26 @@ def save_mycycle_data(data):
     path = _mycycle_file_path()
     os.makedirs(os.path.dirname(path), exist_ok=True)
     temp_file = f"{path}.tmp"
+    payload = dict(data or {})
+    payload.pop('_changed', None)
     with open(temp_file, 'w', encoding='utf-8') as f:
-        json.dump(data, f, indent=2)
-    os.replace(temp_file, path)
+        json.dump(payload, f, indent=2)
+    for attempt in range(MYCYCLE_SAVE_RETRIES):
+        try:
+            os.replace(temp_file, path)
+            return
+        except OSError:
+            if attempt >= MYCYCLE_SAVE_RETRIES - 1:
+                raise
+            time.sleep(MYCYCLE_SAVE_RETRY_DELAY_S)
 
 
 def ensure_default_mycycle_session(data):
     season = str(config.get_setting('season') or 'unknown')
     session_id = f"{MYCYCLE_SESSION_PREFIX}{season}"
-    now_text = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    now_text = _mycycle_now_iso_utc()
     sessions = data.setdefault('sessions', {})
+    changed = False
     if session_id not in sessions:
         sessions[session_id] = {
             'id': session_id,
@@ -2223,27 +2353,27 @@ def ensure_default_mycycle_session(data):
             'created_by': 'system',
             'stats': {},
         }
+        changed = True
 
     primary_session_id = config.get_setting('mycycle_primary_session_id')
     if (not primary_session_id or
             (str(primary_session_id).startswith(MYCYCLE_SESSION_PREFIX) and primary_session_id != session_id)):
         config.set_setting('mycycle_primary_session_id', session_id, persistent=True)
-    return session_id
+    return session_id, changed
 
 
 def get_mycycle_sessions(include_inactive=True):
     with MYCYCLE_LOCK:
         data = load_mycycle_data()
-        default_id = ensure_default_mycycle_session(data)
-        save_mycycle_data(data)
+        migrated = bool(data.pop('_changed', False))
+        default_id, changed = ensure_default_mycycle_session(data)
+        if changed or migrated:
+            save_mycycle_data(data)
     sessions = list(data.get('sessions', {}).values())
 
     def _session_sort_key(session):
         created_at = session.get('created_at') or ""
-        try:
-            created_dt = datetime.strptime(created_at, '%Y-%m-%d %H:%M:%S')
-        except (TypeError, ValueError):
-            created_dt = datetime.min
+        created_dt = _parse_mycycle_timestamp(created_at) or datetime.min
         return created_dt
 
     sessions.sort(key=_session_sort_key, reverse=True)
@@ -2271,8 +2401,9 @@ def _get_mycycle_home_session_ids():
 def create_mycycle_session(session_name, created_by='streamer'):
     with MYCYCLE_LOCK:
         data = load_mycycle_data()
-        ensure_default_mycycle_session(data)
-        now_text = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        _ = data.pop('_changed', False)
+        _, _ = ensure_default_mycycle_session(data)
+        now_text = _mycycle_now_iso_utc()
         season = str(config.get_setting('season') or 'unknown')
         session_id = f"custom_{uuid.uuid4().hex[:8]}"
         data['sessions'][session_id] = {
@@ -2286,12 +2417,14 @@ def create_mycycle_session(session_name, created_by='streamer'):
             'stats': {},
         }
         save_mycycle_data(data)
+        _invalidate_dashboard_cache()
     return session_id
 
 
 def delete_mycycle_session(session_id):
     with MYCYCLE_LOCK:
         data = load_mycycle_data()
+        _ = data.pop('_changed', False)
         target = data.get('sessions', {}).get(session_id)
         if not target:
             return False, "Session not found."
@@ -2302,10 +2435,11 @@ def delete_mycycle_session(session_id):
 
         primary_session_id = config.get_setting('mycycle_primary_session_id')
         if primary_session_id == session_id:
-            fallback_id = ensure_default_mycycle_session(data)
+            fallback_id, _ = ensure_default_mycycle_session(data)
             config.set_setting('mycycle_primary_session_id', fallback_id, persistent=True)
 
         save_mycycle_data(data)
+        _invalidate_dashboard_cache()
     return True, "Deleted"
 
 
@@ -2313,12 +2447,13 @@ def _resolve_session_id(data):
     primary_id = config.get_setting('mycycle_primary_session_id')
     sessions = data.get('sessions', {})
     if primary_id and primary_id in sessions:
-        return primary_id
-    return ensure_default_mycycle_session(data)
+        return primary_id, False
+    fallback_id, changed = ensure_default_mycycle_session(data)
+    return fallback_id, changed
 
 
 def _resolve_user_in_session(session_stats, username):
-    lookup = (username or '').strip().lower().lstrip('@')
+    lookup = _normalize_mycycle_username(username)
     if not lookup:
         return None
     if lookup in session_stats:
@@ -2339,11 +2474,16 @@ def _ensure_user_cycle_record(session, username, display_name, min_place, max_pl
             'current_hits': [],
             'cycles_completed': 0,
             'total_races': 0,
+            'race_races': 0,
+            'br_races': 0,
             'current_cycle_races': 0,
+            'current_cycle_race_races': 0,
+            'current_cycle_br_races': 0,
             'last_cycle_races': 0,
             'fastest_cycle_races': 0,
             'slowest_cycle_races': 0,
             'last_cycle_completed_at': None,
+            'history': [],
         }
         stats[username] = user_record
 
@@ -2353,11 +2493,16 @@ def _ensure_user_cycle_record(session, username, display_name, min_place, max_pl
     user_record.setdefault('current_hits', [])
     user_record.setdefault('cycles_completed', 0)
     user_record.setdefault('total_races', 0)
+    user_record.setdefault('race_races', 0)
+    user_record.setdefault('br_races', 0)
     user_record.setdefault('current_cycle_races', 0)
+    user_record.setdefault('current_cycle_race_races', 0)
+    user_record.setdefault('current_cycle_br_races', 0)
     user_record.setdefault('last_cycle_races', 0)
     user_record.setdefault('fastest_cycle_races', 0)
     user_record.setdefault('slowest_cycle_races', 0)
     user_record.setdefault('last_cycle_completed_at', None)
+    user_record.setdefault('history', [])
 
     if display_name:
         user_record['display_name'] = display_name
@@ -2372,12 +2517,16 @@ def update_mycycle_with_race_rows(racedata):
     completion_events = []
     with MYCYCLE_LOCK:
         data = load_mycycle_data()
-        ensure_default_mycycle_session(data)
-        session_id = _resolve_session_id(data)
+        migrated = bool(data.pop('_changed', False))
+        _, changed = ensure_default_mycycle_session(data)
+        changed = changed or migrated
+        session_id, resolved_changed = _resolve_session_id(data)
+        changed = changed or resolved_changed
         session = data.get('sessions', {}).get(session_id)
 
         if session is None or not session.get('active', True):
-            save_mycycle_data(data)
+            if changed:
+                save_mycycle_data(data)
             return completion_events
 
         for row in racedata:
@@ -2387,7 +2536,7 @@ def update_mycycle_with_race_rows(racedata):
             if race_type != 'Race' and not (settings['include_br'] and race_type == 'BR'):
                 continue
 
-            username = (row[1] or '').strip().lower()
+            username = _normalize_mycycle_username(row[1] if len(row) > 1 else '')
             if not username:
                 continue
 
@@ -2401,6 +2550,12 @@ def update_mycycle_with_race_rows(racedata):
 
             user_record['total_races'] += 1
             user_record['current_cycle_races'] += 1
+            if race_type == 'BR':
+                user_record['br_races'] += 1
+                user_record['current_cycle_br_races'] += 1
+            else:
+                user_record['race_races'] += 1
+                user_record['current_cycle_race_races'] += 1
 
             if placement < settings['min_place'] or placement > settings['max_place']:
                 continue
@@ -2422,7 +2577,16 @@ def update_mycycle_with_race_rows(racedata):
                     user_record['fastest_cycle_races'] = completed_in_races
                 if slowest <= 0 or completed_in_races > slowest:
                     user_record['slowest_cycle_races'] = completed_in_races
-                user_record['last_cycle_completed_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                user_record['last_cycle_completed_at'] = _mycycle_now_iso_utc()
+                history = user_record.get('history') if isinstance(user_record.get('history'), list) else []
+                history.append({
+                    'completed_at': user_record['last_cycle_completed_at'],
+                    'races_used': completed_in_races,
+                    'race_races': int(user_record.get('current_cycle_race_races', 0) or 0),
+                    'br_races': int(user_record.get('current_cycle_br_races', 0) or 0),
+                    'session_id': session.get('id'),
+                })
+                user_record['history'] = history[-MYCYCLE_HISTORY_MAX:]
                 completion_events.append({
                     'session_name': session.get('name', 'Unknown Session'),
                     'username': username,
@@ -2432,16 +2596,25 @@ def update_mycycle_with_race_rows(racedata):
                 })
                 user_record['current_hits'] = []
                 user_record['current_cycle_races'] = 0
+                user_record['current_cycle_race_races'] = 0
+                user_record['current_cycle_br_races'] = 0
 
         save_mycycle_data(data)
+        _invalidate_dashboard_cache()
     return completion_events
 
 
 def get_mycycle_progress(username=None, session_id=None):
     with MYCYCLE_LOCK:
         data = load_mycycle_data()
-        resolved_session_id = session_id if session_id in data.get('sessions', {}) else _resolve_session_id(data)
-        save_mycycle_data(data)
+        migrated = bool(data.pop('_changed', False))
+        changed = False
+        if session_id in data.get('sessions', {}):
+            resolved_session_id = session_id
+        else:
+            resolved_session_id, changed = _resolve_session_id(data)
+        if changed or migrated:
+            save_mycycle_data(data)
 
     session = data['sessions'].get(resolved_session_id, {})
     stats = session.get('stats', {})
@@ -2469,6 +2642,8 @@ def get_mycycle_leaderboard(limit=200, session_id=None):
         marks_top, marks_bottom = _format_mycycle_placement_marks(hits, placement_range)
         progress_total = settings['max_place'] - settings['min_place'] + 1
         progress_hits = len(hits)
+        completed_at = row.get('last_cycle_completed_at')
+        completed_dt = _parse_mycycle_timestamp(completed_at)
         leaderboard.append({
             'username': username,
             'display_name': row.get('display_name') or username,
@@ -2481,18 +2656,27 @@ def get_mycycle_leaderboard(limit=200, session_id=None):
             'placement_hits': sorted(hits),
             'missing_places': missing_places,
             'current_cycle_races': int(row.get('current_cycle_races', 0)),
+            'current_cycle_race_races': int(row.get('current_cycle_race_races', 0)),
+            'current_cycle_br_races': int(row.get('current_cycle_br_races', 0)),
             'last_cycle_races': int(row.get('last_cycle_races', 0)),
-            'last_cycle_completed_at': row.get('last_cycle_completed_at'),
+            'total_races': int(row.get('total_races', 0)),
+            'race_races': int(row.get('race_races', 0)),
+            'br_races': int(row.get('br_races', 0)),
+            'last_cycle_completed_at': completed_at,
+            'last_cycle_completed_at_iso': completed_dt.isoformat() if completed_dt else None,
+            'last_cycle_completed_at_epoch': int(completed_dt.timestamp()) if completed_dt else None,
         })
-    leaderboard.sort(key=lambda r: (-r['cycles_completed'], -r['progress_hits'], r['current_cycle_races']))
+    leaderboard.sort(key=_mycycle_leaderboard_sort_key)
     return session, leaderboard[:limit]
 
 
 def get_mycycle_cycle_stats(session_query=None):
     with MYCYCLE_LOCK:
         data = load_mycycle_data()
-        default_id = ensure_default_mycycle_session(data)
-        save_mycycle_data(data)
+        migrated = bool(data.pop('_changed', False))
+        default_id, changed = ensure_default_mycycle_session(data)
+        if changed or migrated:
+            save_mycycle_data(data)
 
     sessions = data.get('sessions', {})
     selected_session_ids = []
@@ -3104,11 +3288,12 @@ def _parse_overlay_timestamp(value):
 
 def _overlay_now_for_timestamp(race_time):
     """Return a comparable now() for naive or timezone-aware timestamps."""
+    internal_now = get_internal_adjusted_time()
     if race_time is None:
-        return datetime.now()
+        return internal_now
     if race_time.tzinfo is None:
-        return datetime.now()
-    return datetime.now(race_time.tzinfo)
+        return internal_now.replace(tzinfo=None)
+    return internal_now.astimezone(race_time.tzinfo)
 
 
 def _overlay_display_name(*candidates):
@@ -3171,7 +3356,7 @@ def _overlay_event_log():
 
 
 def enqueue_overlay_event(event_type, message):
-    now_iso = datetime.now().isoformat(timespec='seconds')
+    now_iso = get_internal_now_iso(timespec='seconds')
     next_id = _safe_int(config.get_setting('overlay_event_counter') or 0) + 1
     config.set_setting('overlay_event_counter', str(next_id), persistent=False)
 
@@ -3307,7 +3492,7 @@ def _overlay_recent_race_payload(race_file):
             is_recent = False
     elif os.path.isfile(race_file):
         try:
-            is_recent = (datetime.now() - datetime.fromtimestamp(os.path.getmtime(race_file))).total_seconds() <= 600
+            is_recent = (_overlay_now_for_timestamp(None) - datetime.fromtimestamp(os.path.getmtime(race_file))).total_seconds() <= 600
         except Exception:
             is_recent = False
 
@@ -3371,7 +3556,7 @@ def _build_overlay_top3_payload():
         })
 
     return {
-        'updated_at': datetime.now().isoformat(timespec='seconds'),
+        'updated_at': get_internal_now_iso(timespec='seconds'),
         'title': 'MyStats Live Results',
         'views': views,
         'recent_race_top3': {
@@ -3417,7 +3602,7 @@ def _build_tilt_overlay_payload():
         if not directory:
             return []
 
-        todays_file = os.path.join(directory, f"tilts_{datetime.now().strftime('%Y-%m-%d')}.csv")
+        todays_file = os.path.join(directory, f"tilts_{get_internal_adjusted_time().strftime('%Y-%m-%d')}.csv")
         if not os.path.isfile(todays_file):
             return []
 
@@ -3555,7 +3740,7 @@ def _build_tilt_overlay_payload():
     settings_payload['theme'] = settings_payload.get('tilt_theme') or settings_payload.get('theme') or 'midnight'
 
     payload = {
-        'updated_at': datetime.now().isoformat(timespec='seconds'),
+        'updated_at': get_internal_now_iso(timespec='seconds'),
         'title': 'MyStats Tilt Run Tracker',
         'settings': settings_payload,
         'current_run': current_summary,
@@ -3590,7 +3775,7 @@ def _build_unified_overlay_payload():
             active_mode = 'post-race'
 
     return {
-        'updated_at': datetime.now().isoformat(timespec='seconds'),
+        'updated_at': get_internal_now_iso(timespec='seconds'),
         'active_mode': active_mode,
         'top3': top3_payload,
         'tilt': _build_tilt_overlay_payload(),
@@ -3653,6 +3838,11 @@ def overlay_unified_payload():
 
 
 def _build_main_dashboard_payload():
+    now_ts = time.time()
+    cached = _dashboard_main_cache.get('value')
+    if cached is not None and (now_ts - float(_dashboard_main_cache.get('created_at', 0.0))) <= _dashboard_main_cache_ttl_s:
+        return cached
+
     mycycle_session_ids, _ = _get_mycycle_home_session_ids()
     active_session_id = mycycle_session_ids[0] if mycycle_session_ids else None
     mycycle_session, mycycle_rows = get_mycycle_leaderboard(limit=250, session_id=active_session_id)
@@ -3663,8 +3853,8 @@ def _build_main_dashboard_payload():
     analytics_payload = _build_dashboard_analytics_payload(mycycle_rows, tilt_totals, tilt_users)
     race_trends_payload = _build_dashboard_race_trends_payload()
 
-    return {
-        'updated_at': datetime.now().isoformat(timespec='seconds'),
+    payload = {
+        'updated_at': get_internal_now_iso(timespec='seconds'),
         'season_quests': {
             'rows': season_quest_rows,
             'targets': season_quest_targets,
@@ -3689,6 +3879,9 @@ def _build_main_dashboard_payload():
         'analytics': analytics_payload,
         'race_trends': race_trends_payload,
     }
+    _dashboard_main_cache['value'] = payload
+    _dashboard_main_cache['created_at'] = now_ts
+    return payload
 
 
 def _collect_results_season_directories(current_dir):
@@ -3852,6 +4045,19 @@ def _aggregate_tilt_from_directories(directories):
 
 
 def _aggregate_mycycle_from_directories(directories):
+    cache_key_parts = []
+    for directory in directories:
+        cycle_file = os.path.join(directory, MYCYCLE_FILE_NAME)
+        try:
+            mtime = os.path.getmtime(cycle_file)
+        except OSError:
+            mtime = None
+        cache_key_parts.append((os.path.abspath(directory), mtime))
+    cache_key = tuple(cache_key_parts)
+    cached = _mycycle_aggregate_cache.get(cache_key)
+    if cached is not None:
+        return copy.deepcopy(cached)
+
     totals = {'tracked_racers': 0, 'cycles_completed': 0, 'near_complete': 0, 'current_cycle_races': 0}
 
     for directory in directories:
@@ -3865,7 +4071,9 @@ def _aggregate_mycycle_from_directories(directories):
             merged_users = {}
             if isinstance(sessions, dict):
                 for session in sessions.values():
-                    users = session.get('users') if isinstance(session, dict) else {}
+                    users = {}
+                    if isinstance(session, dict):
+                        users = session.get('stats') or session.get('users') or {}
                     if not isinstance(users, dict):
                         continue
                     for username, row in users.items():
@@ -3883,6 +4091,8 @@ def _aggregate_mycycle_from_directories(directories):
         except Exception:
             continue
 
+    _mycycle_aggregate_cache.clear()
+    _mycycle_aggregate_cache[cache_key] = copy.deepcopy(totals)
     return totals
 
 
@@ -4104,7 +4314,38 @@ def dashboard_assets(filename):
 
 @app.route('/api/dashboard/main')
 def dashboard_main_payload():
-    return jsonify(_build_main_dashboard_payload())
+    payload = _build_main_dashboard_payload()
+
+    q = (request.args.get('mycycle_query') or '').strip().lower()
+    try:
+        page = max(1, int(request.args.get('mycycle_page', 1)))
+    except (TypeError, ValueError):
+        page = 1
+    try:
+        page_size = min(250, max(10, int(request.args.get('mycycle_page_size', 120))))
+    except (TypeError, ValueError):
+        page_size = 120
+
+    if q or page > 1 or page_size != 120:
+        payload = copy.deepcopy(payload)
+        rows = list(payload.get('mycycle', {}).get('rows') or [])
+        if q:
+            rows = [
+                row for row in rows
+                if q in str(row.get('display_name') or '').lower() or q in str(row.get('username') or '').lower()
+            ]
+        start = (page - 1) * page_size
+        end = start + page_size
+        payload['mycycle']['rows'] = rows[start:end]
+        payload['mycycle']['pagination'] = {
+            'page': page,
+            'page_size': page_size,
+            'total': len(rows),
+            'total_pages': max(1, math.ceil(len(rows) / page_size)) if rows else 1,
+            'query': q,
+        }
+
+    return jsonify(payload)
 
 
 # Path to the token file
@@ -6313,7 +6554,7 @@ def open_events_window():
         def build_date_picker(parent, row_index, label_text):
             ttk.Label(parent, text=label_text).grid(row=row_index, column=0, sticky="w", pady=(0, 4))
 
-            value = tk.StringVar(value=datetime.now().strftime('%Y-%m-%d'))
+            value = tk.StringVar(value=get_internal_adjusted_time().strftime('%Y-%m-%d'))
             field_frame = ttk.Frame(parent, style="App.TFrame")
             field_frame.grid(row=row_index + 1, column=0, sticky="w", pady=(0, 10))
 
@@ -6757,6 +6998,25 @@ class TimeManager:
 time_manager = TimeManager()
 
 
+def get_internal_adjusted_time():
+    """Return MyStats internal clock datetime aligned to Marble Day boundaries."""
+    try:
+        _, _, _, adjusted_time = time_manager.get_adjusted_time()
+        if adjusted_time is not None:
+            return adjusted_time
+    except Exception:
+        logger.error("Failed to read internal time manager clock.", exc_info=True)
+    eastern = pytz.timezone('America/New_York')
+    return datetime.now(eastern) + timedelta(hours=-12)
+
+
+def get_internal_now_iso(timespec='seconds'):
+    now_value = get_internal_adjusted_time()
+    if timespec == 'seconds':
+        now_value = now_value.replace(microsecond=0)
+    return now_value.isoformat(timespec=timespec)
+
+
 def data_sync():
     config.set_setting('data_sync', 'yes', persistent=False)
 
@@ -7146,8 +7406,10 @@ def load_additional_settings():
 
     with MYCYCLE_LOCK:
         cycle_data = load_mycycle_data()
-        ensure_default_mycycle_session(cycle_data)
-        save_mycycle_data(cycle_data)
+        migrated = bool(cycle_data.pop('_changed', False))
+        _, changed = ensure_default_mycycle_session(cycle_data)
+        if changed or migrated:
+            save_mycycle_data(cycle_data)
 
     load_race_hs_season = 0
     load_race_hs_today = 0
@@ -7618,7 +7880,7 @@ try {{
         script_file.write(ps_script)
         script_path = script_file.name
 
-    run_time = (datetime.now() + timedelta(minutes=1)).strftime("%H:%M")
+    run_time = (get_internal_adjusted_time() + timedelta(minutes=1)).strftime("%H:%M")
     task_command = f'powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{script_path}"'
 
     try:
@@ -8770,12 +9032,55 @@ class Bot(commands.Bot):
         )
 
     @commands.command(name='mycycle')
-    async def mycycle_command(self, ctx, username: str = None):
+    async def mycycle_command(self, ctx, *args):
         if not is_chat_response_enabled('mycycle_enabled'):
             return
 
-        target_name = username or ctx.author.name
-        session, stats, target_user = get_mycycle_progress(target_name)
+        target_name = None
+        session_query = None
+        tokens = [str(arg).strip() for arg in args if str(arg).strip()]
+        idx = 0
+        while idx < len(tokens):
+            token = tokens[idx]
+            lowered = token.lower()
+            if lowered in ('--session', '-s'):
+                if idx + 1 < len(tokens):
+                    session_query = tokens[idx + 1]
+                    idx += 2
+                    continue
+                idx += 1
+                continue
+            if lowered.startswith('--session='):
+                session_query = token.split('=', 1)[1].strip()
+                idx += 1
+                continue
+            if lowered.startswith('session:'):
+                session_query = token.split(':', 1)[1].strip()
+                idx += 1
+                continue
+            if target_name is None:
+                target_name = token
+            idx += 1
+
+        target_name = target_name or ctx.author.name
+        requested_session_id = None
+        session_query_failed = False
+        if session_query:
+            sessions, _ = get_mycycle_sessions(include_inactive=True)
+            query = session_query.strip().lower()
+            for item in sessions:
+                sid = str(item.get('id', '')).strip()
+                sname = str(item.get('name', '')).strip().lower()
+                if sid.lower() == query or sname == query:
+                    requested_session_id = sid
+                    break
+            session_query_failed = not requested_session_id
+
+        if session_query and session_query_failed:
+            await self.send_command_response(ctx, f"Unknown MyCycle session '{session_query}'.")
+            return
+
+        session, stats, target_user = get_mycycle_progress(target_name, session_id=requested_session_id)
         settings = get_mycycle_settings()
 
         if not target_user or target_user not in stats:
@@ -10153,7 +10458,7 @@ async def tilted(bot):
 
             if current_level == 1 and run_id is None:
                 run_id = base64.urlsafe_b64encode(uuid.uuid4().bytes).rstrip(b'=').decode('utf-8')
-                set_tilt_runtime_setting('tilt_run_started_at', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+                set_tilt_runtime_setting('tilt_run_started_at', get_internal_adjusted_time().strftime('%Y-%m-%d %H:%M:%S'))
                 set_tilt_runtime_setting('tilt_run_ledger', '{}')
                 set_tilt_runtime_setting('tilt_run_deaths_ledger', '{}')
                 set_tilt_runtime_setting('tilt_top_tiltee_ledger', '{}')
@@ -10399,7 +10704,7 @@ async def tilted(bot):
                 death_rate = round(((deaths_this_level / total_active) * 100), 1) if total_active else 0
                 survival_rate = round(((survivor_count / total_active) * 100), 1) if total_active else 0
                 completion_summary = {
-                    'completed_at': datetime.now().isoformat(timespec='seconds'),
+                    'completed_at': get_internal_now_iso(timespec='seconds'),
                     'level': current_level,
                     'top_tiltee': top_tiltee,
                     'top_tiltee_count': top_tiltee_run_count,
@@ -10477,7 +10782,7 @@ async def tilted(bot):
                 last_run_summary = {
                     'run_id': run_id,
                     'run_short_id': run_id[:6] if run_id else '',
-                    'ended_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    'ended_at': get_internal_adjusted_time().strftime('%Y-%m-%d %H:%M:%S'),
                     'ended_level': current_level,
                     'elapsed_time': elapsed_time,
                     'total_time': format_tilt_duration(run_total_seconds),

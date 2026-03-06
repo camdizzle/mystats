@@ -5,6 +5,9 @@ let raceDashboardFilter = 'both';
 let tiltSortBy = 'tilt_points';
 let tiltSortOrder = 'desc';
 let rivalsGuideCollapsed = false;
+let mycyclePage = 1;
+let mycyclePageSize = 120;
+let mycycleQuery = '';
 
 const I18N = {
   en: {},
@@ -168,8 +171,13 @@ function renderCycleHighlights(rows = []) {
   }, null);
 
   const newestCycler = rows
-    .filter((row) => row.last_cycle_completed_at)
-    .sort((a, b) => String(b.last_cycle_completed_at).localeCompare(String(a.last_cycle_completed_at)))[0] || null;
+    .filter((row) => row.last_cycle_completed_at_iso || row.last_cycle_completed_at)
+    .sort((a, b) => {
+      const left = Number(a.last_cycle_completed_at_epoch || 0);
+      const right = Number(b.last_cycle_completed_at_epoch || 0);
+      if (left !== right) return right - left;
+      return String(b.last_cycle_completed_at || '').localeCompare(String(a.last_cycle_completed_at || ''));
+    })[0] || null;
 
   const topName = topCycler?.display_name || topCycler?.username || '—';
   const topCycles = Number(topCycler?.cycles_completed || 0);
@@ -187,6 +195,7 @@ function renderMyCycleRows(data) {
   if (!rowsHost) return;
 
   const rows = Array.isArray(data?.mycycle?.rows) ? data.mycycle.rows : [];
+  const pageInfo = data?.mycycle?.pagination || null;
   const settings = data?.mycycle?.settings || {};
   const minPlace = Number(settings.min_place || 1);
   const maxPlace = Number(settings.max_place || 10);
@@ -199,12 +208,22 @@ function renderMyCycleRows(data) {
   renderKpis(rows);
   renderCycleHighlights(rows);
 
+  const pager = pageInfo ? `
+    <div class="subline" style="margin-bottom:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      <input id="mycycle-search" type="text" placeholder="Filter racer" value="${escapeHtml(mycycleQuery)}" style="padding:6px 8px;border-radius:6px;border:1px solid #3d4b63;background:#0f1724;color:#e8eef8;" />
+      <button id="mycycle-search-btn" type="button">Apply</button>
+      <button id="mycycle-prev" type="button" ${pageInfo.page <= 1 ? 'disabled' : ''}>Prev</button>
+      <button id="mycycle-next" type="button" ${pageInfo.page >= pageInfo.total_pages ? 'disabled' : ''}>Next</button>
+      <span>${escapeHtml(`Page ${pageInfo.page}/${pageInfo.total_pages} • ${pageInfo.total} racers`)}</span>
+    </div>
+  ` : '';
+
   if (!rows.length) {
-    rowsHost.innerHTML = `<div class="empty">${escapeHtml(t('No MyCycle race data yet.'))}</div>`;
+    rowsHost.innerHTML = `${pager}<div class="empty">${escapeHtml(t('No MyCycle race data yet.'))}</div>`;
     return;
   }
 
-  rowsHost.innerHTML = rows.slice(0, 120).map((row, idx) => {
+  rowsHost.innerHTML = pager + rows.map((row, idx) => {
     const hits = new Set(Array.isArray(row.placement_hits) ? row.placement_hits.map((x) => Number(x)) : []);
     const chips = placementRange.map((place) => {
       const hit = hits.has(place);
@@ -219,7 +238,7 @@ function renderMyCycleRows(data) {
     return `
       <div class="row">
         <div class="row-head">
-          <span class="rank">#${idx + 1}</span>
+          <span class="rank">#${idx + 1 + ((pageInfo?.page || 1) - 1) * (pageInfo?.page_size || rows.length)}</span>
           <span class="name">${escapeHtml(row.display_name || row.username || '-')}</span>
           <span class="stat">${escapeHtml(`${fmt(row.cycles_completed)} cycles`)}</span>
         </div>
@@ -229,6 +248,30 @@ function renderMyCycleRows(data) {
       </div>
     `;
   }).join('');
+
+  const searchInput = el('mycycle-search');
+  const searchBtn = el('mycycle-search-btn');
+  const prevBtn = el('mycycle-prev');
+  const nextBtn = el('mycycle-next');
+  if (searchBtn && searchInput) {
+    searchBtn.onclick = () => {
+      mycycleQuery = String(searchInput.value || '').trim();
+      mycyclePage = 1;
+      refresh();
+    };
+  }
+  if (prevBtn) {
+    prevBtn.onclick = () => {
+      mycyclePage = Math.max(1, mycyclePage - 1);
+      refresh();
+    };
+  }
+  if (nextBtn && pageInfo) {
+    nextBtn.onclick = () => {
+      mycyclePage = Math.min(pageInfo.total_pages || mycyclePage, mycyclePage + 1);
+      refresh();
+    };
+  }
 }
 
 function renderSeasonKpis(rows = []) {
@@ -1047,7 +1090,12 @@ function wireViewTabs() {
 
 async function refresh() {
   try {
-    const resp = await fetch('/api/dashboard/main', { cache: 'no-store' });
+    const params = new URLSearchParams({
+      mycycle_page: String(mycyclePage),
+      mycycle_page_size: String(mycyclePageSize),
+    });
+    if (mycycleQuery) params.set('mycycle_query', mycycleQuery);
+    const resp = await fetch(`/api/dashboard/main?${params.toString()}`, { cache: 'no-store' });
     const data = await resp.json();
     currentLanguage = data?.settings?.language || currentLanguage || 'en';
     el('updated-at').textContent = data.updated_at ? `${t('Updated')} ${data.updated_at}` : t('Updated now');
