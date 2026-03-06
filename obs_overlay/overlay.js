@@ -146,15 +146,22 @@ let overlayEventActive = false;
 let overlayEventTimeout = null;
 let queuedRaceTop3 = null;
 let overlayEventQueue = [];
+let narrativeEventQueue = [];
 let lastOverlayEventId = 0;
 let hasHydratedOverlayEvents = false;
 let currentResultsMode = '';
+let currentSceneMode = 'pre-game';
+let lastSceneMode = '';
+let lastSplashAtMs = 0;
+let cycleCountSinceSplash = 0;
 const splashAnimationDurationMs = 9000;
 const splashPostAnimationHoldMs = 1000;
 const splashDurationMs = splashAnimationDurationMs + splashPostAnimationHoldMs;
 const recordOverlayDurationMs = 5000;
 const top3ShowDurationMs = 10000;
 const eventOverlayDurationMs = 6500;
+const minCyclesBetweenSplash = 5;
+const minMsBetweenSplashes = 90000;
 
 const recordOverlay = $('record-overlay');
 const recordOverlayMessage = $('record-overlay-message');
@@ -209,9 +216,64 @@ function showEventOverlay(eventPayload = {}) {
   overlayEventActive = true;
 }
 
+function resolveSceneMode(payload = {}, overlayMode = '') {
+  if (overlayMode === 'tilt') return 'tilt';
+
+  const recentRace = payload?.recent_race_top3 || {};
+  const raceRows = Array.isArray(recentRace?.rows) ? recentRace.rows : [];
+  const raceType = normalizeRaceType(recentRace?.race_type);
+  const isRecentRace = Boolean(recentRace?.race_timestamp || recentRace?.race_key);
+
+  if (!raceRows.length) return 'pre-game';
+  if (isRecentRace && raceType === 'br') return 'br';
+  if (isRecentRace && raceType === 'race') return 'race';
+  return 'post-race';
+}
+
+function shouldShowSplashInterstitial() {
+  if (settings.horizontalLayout) return false;
+  if (overlayEventQueue.length || narrativeEventQueue.length || queuedRaceTop3) return false;
+  if (cycleCountSinceSplash < minCyclesBetweenSplash) return false;
+  return (Date.now() - lastSplashAtMs) >= minMsBetweenSplashes;
+}
+
+function maybeShowCycleInterstitial() {
+  if (settings.horizontalLayout) {
+    leaderboardScrollPauseUntil = Date.now() + 800;
+    return;
+  }
+
+  cycleCountSinceSplash += 1;
+  processOverlayPresentationQueue();
+
+  if (top3IsShowing || overlayEventActive) return;
+
+  if (shouldShowSplashInterstitial()) {
+    lastSplashAtMs = Date.now();
+    cycleCountSinceSplash = 0;
+    showSplashView();
+    return;
+  }
+
+  leaderboardScrollPauseUntil = Date.now() + 900;
+}
+
 function processOverlayPresentationQueue() {
   if (settings.horizontalLayout) return;
   if (top3IsShowing || overlayEventActive) return;
+
+  if (narrativeEventQueue.length) {
+    const nextNarrative = narrativeEventQueue.shift();
+    showEventOverlay(nextNarrative);
+    if (overlayEventTimeout) clearTimeout(overlayEventTimeout);
+    overlayEventTimeout = setTimeout(() => {
+      hideEventOverlay();
+      showLeaderboardView();
+      ensureLeaderboardAutoScroll();
+      processOverlayPresentationQueue();
+    }, eventOverlayDurationMs);
+    return;
+  }
 
   if (overlayEventQueue.length) {
     const nextEvent = overlayEventQueue.shift();
@@ -233,12 +295,23 @@ function processOverlayPresentationQueue() {
   }
 }
 
+function queueNarrativeEvent(eventPayload = {}) {
+  if (settings.horizontalLayout) return;
+  const message = String(eventPayload?.message || '').trim();
+  if (!message) return;
+
+  narrativeEventQueue.push({
+    id: Number(eventPayload?.id || 0),
+    type: String(eventPayload?.type || 'narrative').trim() || 'narrative',
+    message,
+  });
+}
+
 function queueOverlayEvent(eventPayload = {}) {
   if (settings.horizontalLayout) return;
   const message = String(eventPayload?.message || '').trim();
   if (!message) return;
   overlayEventQueue.push(eventPayload);
-  processOverlayPresentationQueue();
 }
 
 function queueTop3Overlay(top3View = {}) {
@@ -385,6 +458,7 @@ function showSplashView(force = false) {
   cycleRestartTimer = setTimeout(() => {
     lastRenderedViewsKey = '';
     renderCombinedRows(currentViews);
+    processOverlayPresentationQueue();
   }, splashDurationMs);
 }
 
@@ -487,6 +561,8 @@ function startLeaderboardAutoScroll() {
     leaderboard.scrollTop = 0;
     leaderboard.scrollLeft = 0;
 
+    maybeShowCycleInterstitial();
+
     leaderboardScrollRetryTimer = setTimeout(() => {
       startLeaderboardAutoScroll();
     }, 600);
@@ -528,7 +604,7 @@ function startLeaderboardAutoScroll() {
       leaderboard.scrollTop = currentMax;
 
       if (hasReachedEndOfStackedViews()) {
-        showSplashView();
+        maybeShowCycleInterstitial();
       } else {
         leaderboardScrollPauseUntil = Date.now() + 800;
       }
@@ -827,7 +903,7 @@ function syncViews(views = []) {
 
 function normalizeOverlayMode(value) {
   const mode = String(value || '').trim().toLowerCase();
-  if (mode === 'tilt' || mode === 'race' || mode === 'br') return mode;
+  if (mode === 'tilt' || mode === 'race' || mode === 'br' || mode === 'pre-game' || mode === 'post-race') return mode;
   return '';
 }
 
@@ -917,6 +993,17 @@ async function refresh() {
     const payload = await r.json();
     const overlayMode = normalizeOverlayMode(payload?.active_mode);
     const racePayload = payload?.top3 || payload;
+    const resolvedSceneMode = resolveSceneMode(racePayload, overlayMode);
+    currentSceneMode = overlayMode === 'tilt' ? 'tilt' : resolvedSceneMode;
+
+    if (currentSceneMode !== lastSceneMode) {
+      const prettyScene = String(currentSceneMode || 'race').replace(/[-_]+/g, ' ');
+      queueNarrativeEvent({
+        type: 'scene mode',
+        message: `Scene mode: ${prettyScene.toUpperCase()}`,
+      });
+      lastSceneMode = currentSceneMode;
+    }
 
     currentLanguage = (racePayload?.settings?.language || 'en').toLowerCase();
     applyServerSettings(racePayload.settings || {});
@@ -1002,6 +1089,16 @@ async function refresh() {
 
     if (raceKey && raceKey !== lastRaceKey) {
       lastRaceKey = raceKey;
+      const firstPlace = Array.isArray(p?.recent_race_top3?.rows)
+        ? p.recent_race_top3.rows.find((row) => Number(row?.placement) === 1)
+        : null;
+      if (firstPlace?.name) {
+        const raceKind = normalizeRaceType(p?.recent_race_top3?.race_type);
+        queueNarrativeEvent({
+          type: raceKind === 'br' ? 'br winner' : 'race winner',
+          message: `${firstPlace.name} won with ${fmt(firstPlace.points)} points`,
+        });
+      }
       queueTop3Overlay(p.recent_race_top3);
     }
   } catch (error) {
