@@ -3054,6 +3054,18 @@ def _build_overlay_settings_payload():
         'show_medals': str(config.get_setting('overlay_show_medals') or 'True'),
         'compact_rows': str(config.get_setting('overlay_compact_rows') or 'False'),
         'horizontal_layout': str(config.get_setting('overlay_horizontal_layout') or 'False'),
+        'horizontal_feed_season': str(config.get_setting('overlay_horizontal_feed_season') or 'True'),
+        'horizontal_feed_today': str(config.get_setting('overlay_horizontal_feed_today') or 'True'),
+        'horizontal_feed_races_season': str(config.get_setting('overlay_horizontal_feed_races_season') or 'True'),
+        'horizontal_feed_brs_season': str(config.get_setting('overlay_horizontal_feed_brs_season') or 'True'),
+        'horizontal_feed_races_today': str(config.get_setting('overlay_horizontal_feed_races_today') or 'True'),
+        'horizontal_feed_brs_today': str(config.get_setting('overlay_horizontal_feed_brs_today') or 'True'),
+        'horizontal_feed_previous_race': str(config.get_setting('overlay_horizontal_feed_previous_race') or 'True'),
+        'horizontal_feed_events': str(config.get_setting('overlay_horizontal_feed_events') or 'True'),
+        'horizontal_feed_tilt_current': str(config.get_setting('overlay_horizontal_feed_tilt_current') or 'True'),
+        'horizontal_feed_tilt_today': str(config.get_setting('overlay_horizontal_feed_tilt_today') or 'True'),
+        'horizontal_feed_tilt_season': str(config.get_setting('overlay_horizontal_feed_tilt_season') or 'True'),
+        'horizontal_feed_tilt_last_run': str(config.get_setting('overlay_horizontal_feed_tilt_last_run') or 'True'),
         'tilt_theme': (config.get_setting('tilt_overlay_theme') or config.get_setting('overlay_theme') or 'midnight').strip().lower(),
         'tilt_scroll_step_px': _safe_int(config.get_setting('tilt_scroll_step_px') or 1) or 1,
         'tilt_scroll_interval_ms': _safe_int(config.get_setting('tilt_scroll_interval_ms') or 40) or 40,
@@ -3568,8 +3580,10 @@ def _build_unified_overlay_payload():
 
 @app.route('/overlay')
 def overlay_page():
+    horizontal_layout_enabled = str(config.get_setting('overlay_horizontal_layout') or 'False') == 'True'
+    overlay_file = 'index.html' if horizontal_layout_enabled else ('tilt.html' if get_overlay_mode() == 'tilt' else 'index.html')
+
     for candidate in _overlay_dir_candidates():
-        overlay_file = 'tilt.html' if get_overlay_mode() == 'tilt' else 'index.html'
         index_file = os.path.join(candidate, overlay_file)
         if os.path.isfile(index_file):
             return send_from_directory(candidate, overlay_file)
@@ -4665,6 +4679,40 @@ def open_settings_window():
     ttk.Checkbutton(core_overlay_frame, text="Compact row spacing", variable=overlay_compact_rows_var).grid(row=2, column=0, sticky="w", padx=10, pady=(0, 2))
     ttk.Checkbutton(core_overlay_frame, text="Horizontal ticker layout (1080x100)", variable=overlay_horizontal_layout_var).grid(row=3, column=0, sticky="w", padx=10, pady=(0, 8))
 
+    horizontal_feed_frame = ttk.LabelFrame(core_overlay_frame, text="Horizontal Overlay Settings", style="Card.TLabelframe")
+    horizontal_feed_frame.grid(row=4, column=0, sticky="ew", padx=10, pady=(0, 8))
+    horizontal_feed_frame.grid_columnconfigure(0, weight=1)
+
+    overlay_horizontal_feed_season_var = tk.BooleanVar(value=str(config.get_setting("overlay_horizontal_feed_season") or "True") == "True")
+    overlay_horizontal_feed_today_var = tk.BooleanVar(value=str(config.get_setting("overlay_horizontal_feed_today") or "True") == "True")
+    overlay_horizontal_feed_races_season_var = tk.BooleanVar(value=str(config.get_setting("overlay_horizontal_feed_races_season") or "True") == "True")
+    overlay_horizontal_feed_brs_season_var = tk.BooleanVar(value=str(config.get_setting("overlay_horizontal_feed_brs_season") or "True") == "True")
+    overlay_horizontal_feed_races_today_var = tk.BooleanVar(value=str(config.get_setting("overlay_horizontal_feed_races_today") or "True") == "True")
+    overlay_horizontal_feed_brs_today_var = tk.BooleanVar(value=str(config.get_setting("overlay_horizontal_feed_brs_today") or "True") == "True")
+    overlay_horizontal_feed_previous_race_var = tk.BooleanVar(value=str(config.get_setting("overlay_horizontal_feed_previous_race") or "True") == "True")
+    overlay_horizontal_feed_events_var = tk.BooleanVar(value=str(config.get_setting("overlay_horizontal_feed_events") or "True") == "True")
+
+    ttk.Checkbutton(horizontal_feed_frame, text="Top 10 Season", variable=overlay_horizontal_feed_season_var).grid(row=0, column=0, sticky="w", padx=10, pady=(6, 2))
+    ttk.Checkbutton(horizontal_feed_frame, text="Top 10 Today", variable=overlay_horizontal_feed_today_var).grid(row=1, column=0, sticky="w", padx=10, pady=(0, 2))
+    ttk.Checkbutton(horizontal_feed_frame, text="Top 10 Races (Season)", variable=overlay_horizontal_feed_races_season_var).grid(row=2, column=0, sticky="w", padx=10, pady=(0, 2))
+    ttk.Checkbutton(horizontal_feed_frame, text="Top 10 BRs (Season)", variable=overlay_horizontal_feed_brs_season_var).grid(row=3, column=0, sticky="w", padx=10, pady=(0, 2))
+    ttk.Checkbutton(horizontal_feed_frame, text="Top 10 Races (Today)", variable=overlay_horizontal_feed_races_today_var).grid(row=4, column=0, sticky="w", padx=10, pady=(0, 2))
+    ttk.Checkbutton(horizontal_feed_frame, text="Top 10 BRs (Today)", variable=overlay_horizontal_feed_brs_today_var).grid(row=5, column=0, sticky="w", padx=10, pady=(0, 2))
+    ttk.Checkbutton(horizontal_feed_frame, text="Top 10 Previous Race", variable=overlay_horizontal_feed_previous_race_var).grid(row=6, column=0, sticky="w", padx=10, pady=(0, 2))
+    ttk.Checkbutton(horizontal_feed_frame, text="Ticker Events", variable=overlay_horizontal_feed_events_var).grid(row=7, column=0, sticky="w", padx=10, pady=(0, 6))
+
+    overlay_horizontal_feed_tilt_current_var = tk.BooleanVar(value=str(config.get_setting("overlay_horizontal_feed_tilt_current") or "True") == "True")
+    overlay_horizontal_feed_tilt_today_var = tk.BooleanVar(value=str(config.get_setting("overlay_horizontal_feed_tilt_today") or "True") == "True")
+    overlay_horizontal_feed_tilt_season_var = tk.BooleanVar(value=str(config.get_setting("overlay_horizontal_feed_tilt_season") or "True") == "True")
+    overlay_horizontal_feed_tilt_last_run_var = tk.BooleanVar(value=str(config.get_setting("overlay_horizontal_feed_tilt_last_run") or "True") == "True")
+
+    ttk.Separator(horizontal_feed_frame).grid(row=8, column=0, sticky="ew", padx=10, pady=(0, 4))
+    ttk.Label(horizontal_feed_frame, text="Tilt ticker feed", style="Small.TLabel").grid(row=9, column=0, sticky="w", padx=10, pady=(0, 2))
+    ttk.Checkbutton(horizontal_feed_frame, text="Tilt Current Run", variable=overlay_horizontal_feed_tilt_current_var).grid(row=10, column=0, sticky="w", padx=10, pady=(0, 2))
+    ttk.Checkbutton(horizontal_feed_frame, text="Tilt Today Standings", variable=overlay_horizontal_feed_tilt_today_var).grid(row=11, column=0, sticky="w", padx=10, pady=(0, 2))
+    ttk.Checkbutton(horizontal_feed_frame, text="Tilt Season Standings", variable=overlay_horizontal_feed_tilt_season_var).grid(row=12, column=0, sticky="w", padx=10, pady=(0, 2))
+    ttk.Checkbutton(horizontal_feed_frame, text="Tilt Last Run", variable=overlay_horizontal_feed_tilt_last_run_var).grid(row=13, column=0, sticky="w", padx=10, pady=(0, 8))
+
     tilt_overlay_frame = ttk.LabelFrame(overlay_tab, text="Tilt Overlay", style="Card.TLabelframe")
     tilt_overlay_frame.grid(row=1, column=1, sticky="nsew", padx=(8, 0), pady=(0, 0))
 
@@ -4790,6 +4838,18 @@ def open_settings_window():
         overlay_show_medals_var.set(True)
         overlay_compact_rows_var.set(False)
         overlay_horizontal_layout_var.set(False)
+        overlay_horizontal_feed_season_var.set(True)
+        overlay_horizontal_feed_today_var.set(True)
+        overlay_horizontal_feed_races_season_var.set(True)
+        overlay_horizontal_feed_brs_season_var.set(True)
+        overlay_horizontal_feed_races_today_var.set(True)
+        overlay_horizontal_feed_brs_today_var.set(True)
+        overlay_horizontal_feed_previous_race_var.set(True)
+        overlay_horizontal_feed_events_var.set(True)
+        overlay_horizontal_feed_tilt_current_var.set(True)
+        overlay_horizontal_feed_tilt_today_var.set(True)
+        overlay_horizontal_feed_tilt_season_var.set(True)
+        overlay_horizontal_feed_tilt_last_run_var.set(True)
         tilt_lifetime_base_entry.delete(0, tk.END)
         tilt_lifetime_base_entry.insert(0, "0")
         tilt_season_best_entry.delete(0, tk.END)
@@ -4872,6 +4932,18 @@ def open_settings_window():
         config.set_setting("overlay_show_medals", str(overlay_show_medals_var.get()), persistent=True)
         config.set_setting("overlay_compact_rows", str(overlay_compact_rows_var.get()), persistent=True)
         config.set_setting("overlay_horizontal_layout", str(overlay_horizontal_layout_var.get()), persistent=True)
+        config.set_setting("overlay_horizontal_feed_season", str(overlay_horizontal_feed_season_var.get()), persistent=True)
+        config.set_setting("overlay_horizontal_feed_today", str(overlay_horizontal_feed_today_var.get()), persistent=True)
+        config.set_setting("overlay_horizontal_feed_races_season", str(overlay_horizontal_feed_races_season_var.get()), persistent=True)
+        config.set_setting("overlay_horizontal_feed_brs_season", str(overlay_horizontal_feed_brs_season_var.get()), persistent=True)
+        config.set_setting("overlay_horizontal_feed_races_today", str(overlay_horizontal_feed_races_today_var.get()), persistent=True)
+        config.set_setting("overlay_horizontal_feed_brs_today", str(overlay_horizontal_feed_brs_today_var.get()), persistent=True)
+        config.set_setting("overlay_horizontal_feed_previous_race", str(overlay_horizontal_feed_previous_race_var.get()), persistent=True)
+        config.set_setting("overlay_horizontal_feed_events", str(overlay_horizontal_feed_events_var.get()), persistent=True)
+        config.set_setting("overlay_horizontal_feed_tilt_current", str(overlay_horizontal_feed_tilt_current_var.get()), persistent=True)
+        config.set_setting("overlay_horizontal_feed_tilt_today", str(overlay_horizontal_feed_tilt_today_var.get()), persistent=True)
+        config.set_setting("overlay_horizontal_feed_tilt_season", str(overlay_horizontal_feed_tilt_season_var.get()), persistent=True)
+        config.set_setting("overlay_horizontal_feed_tilt_last_run", str(overlay_horizontal_feed_tilt_last_run_var.get()), persistent=True)
         config.set_setting("tilt_lifetime_base_xp", tilt_lifetime_base_entry.get(), persistent=True)
         config.set_setting("tilt_season_best_level", tilt_season_best_entry.get(), persistent=True)
         config.set_setting("tilt_personal_best_level", tilt_personal_best_entry.get(), persistent=True)
@@ -5923,7 +5995,12 @@ class ConfigManager:
                                 'mycycle_cyclestats_rotation_index',
                                 'overlay_rotation_seconds', 'overlay_refresh_seconds', 'overlay_theme',
                                 'overlay_card_opacity', 'overlay_text_scale', 'overlay_show_medals',
-                                'overlay_compact_rows', 'overlay_horizontal_layout', 'overlay_server_port', 'tilt_lifetime_base_xp',
+                                'overlay_compact_rows', 'overlay_horizontal_layout', 'overlay_horizontal_feed_season', 'overlay_horizontal_feed_today',
+                                'overlay_horizontal_feed_races_season', 'overlay_horizontal_feed_brs_season', 'overlay_horizontal_feed_races_today',
+                                'overlay_horizontal_feed_brs_today', 'overlay_horizontal_feed_previous_race', 'overlay_horizontal_feed_events',
+                                'overlay_horizontal_feed_tilt_current', 'overlay_horizontal_feed_tilt_today',
+                                'overlay_horizontal_feed_tilt_season', 'overlay_horizontal_feed_tilt_last_run',
+                                'overlay_server_port', 'tilt_lifetime_base_xp',
                                 'tilt_season_best_level', 'tilt_personal_best_level', 'tilt_overlay_theme', 'tilt_scroll_step_px', 'tilt_scroll_interval_ms',
                                 'tilt_scroll_pause_ms', 'tiltsurvivors_min_levels', 'tiltdeath_min_levels',
                                 'update_later_clicks', 'update_later_version', 'pending_update_installer_path',
@@ -5998,6 +6075,18 @@ class ConfigManager:
             'overlay_show_medals': 'True',
             'overlay_compact_rows': 'False',
             'overlay_horizontal_layout': 'False',
+            'overlay_horizontal_feed_season': 'True',
+            'overlay_horizontal_feed_today': 'True',
+            'overlay_horizontal_feed_races_season': 'True',
+            'overlay_horizontal_feed_brs_season': 'True',
+            'overlay_horizontal_feed_races_today': 'True',
+            'overlay_horizontal_feed_brs_today': 'True',
+            'overlay_horizontal_feed_previous_race': 'True',
+            'overlay_horizontal_feed_events': 'True',
+            'overlay_horizontal_feed_tilt_current': 'True',
+            'overlay_horizontal_feed_tilt_today': 'True',
+            'overlay_horizontal_feed_tilt_season': 'True',
+            'overlay_horizontal_feed_tilt_last_run': 'True',
             'tilt_lifetime_base_xp': '0',
             'tilt_season_best_level': '1',
             'tilt_personal_best_level': '1',
