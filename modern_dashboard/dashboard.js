@@ -744,6 +744,113 @@ function renderRaceDashboardRows(data) {
   }).join('');
 }
 
+
+function analyticsStat(label, value) {
+  return `<div class="analytics-stat"><div class="analytics-stat__label">${escapeHtml(label)}</div><div class="analytics-stat__value">${escapeHtml(String(value))}</div></div>`;
+}
+
+function renderAnalyticsRows(data) {
+  const host = el('analytics-groups');
+  if (!host) return;
+
+  const mycycleRows = Array.isArray(data?.mycycle?.rows) ? data.mycycle.rows : [];
+  const seasonRows = Array.isArray(data?.season_quests?.rows) ? data.season_quests.rows : [];
+  const rivalsRows = Array.isArray(data?.rivals?.rivals) ? data.rivals.rivals : [];
+  const racesRows = Array.isArray(data?.races) ? data.races : [];
+  const tiltTotals = data?.tilt?.totals || {};
+
+  const mycycleCycles = mycycleRows.reduce((sum, row) => sum + Number(row.cycles_completed || 0), 0);
+  const mycycleNear = mycycleRows.filter((row) => Number(row.progress_total || 0) - Number(row.progress_hits || 0) <= 2).length;
+  const mycycleRaces = mycycleRows.reduce((sum, row) => sum + Number(row.current_cycle_races || 0), 0);
+
+  const seasonComplete = seasonRows.filter((row) => Number(row.completed || 0) > 0).length;
+  const seasonRaceProgress = seasonRows.reduce((sum, row) => sum + Number(row.races || 0), 0);
+  const seasonPointProgress = seasonRows.reduce((sum, row) => sum + Number(row.points || 0), 0);
+
+  const rivalsAvgGap = rivalsRows.length
+    ? (rivalsRows.reduce((sum, row) => sum + Number(row.point_gap || 0), 0) / rivalsRows.length)
+    : 0;
+  const closestRival = rivalsRows.reduce((best, row) => {
+    if (!best) return row;
+    return Number(row.point_gap || Number.MAX_SAFE_INTEGER) < Number(best.point_gap || Number.MAX_SAFE_INTEGER)
+      ? row
+      : best;
+  }, null);
+
+  const racePointsTotal = racesRows.reduce((sum, row) => sum + Number(row.race_points || 0), 0);
+  const brPointsTotal = racesRows.reduce((sum, row) => sum + Number(row.br_points || 0), 0);
+  const raceEventsTotal = racesRows.reduce((sum, row) => sum + Number(row.race_count || 0), 0);
+  const brEventsTotal = racesRows.reduce((sum, row) => sum + Number(row.br_count || 0), 0);
+  const raceHighScorePeak = racesRows.reduce((best, row) => Math.max(best, Number(row.race_high_score || 0), Number(row.br_high_score || 0)), 0);
+
+  const groups = [
+    {
+      title: 'MyCycle Analytics',
+      stats: [
+        ['Tracked Racers', fmt(mycycleRows.length)],
+        ['Total Cycles Completed', fmt(mycycleCycles)],
+        ['Near-Complete Racers', fmt(mycycleNear)],
+        ['Current Cycle Races', fmt(mycycleRaces)],
+      ],
+    },
+    {
+      title: 'Season Quest Analytics',
+      stats: [
+        ['Tracked Quest Players', fmt(seasonRows.length)],
+        ['Any Quest Completed', fmt(seasonComplete)],
+        ['Total Season Races Logged', fmt(seasonRaceProgress)],
+        ['Total Season Points Logged', fmt(seasonPointProgress)],
+      ],
+    },
+    {
+      title: 'Tilt Analytics',
+      stats: [
+        ['Tilt Participants', fmt(data?.tilt?.participants || 0)],
+        ['Total Tilt Points', fmt(tiltTotals.points || 0)],
+        ['Tilt Levels', fmt(tiltTotals.levels || 0)],
+        ['Top Tiltee Finishes', fmt(tiltTotals.top_tiltee || 0)],
+        ['Deaths Today', fmt(data?.tilt?.deaths_today || 0)],
+      ],
+    },
+    {
+      title: 'Rivals Analytics',
+      stats: [
+        ['Active Rivalries', fmt(rivalsRows.length)],
+        ['Average Gap', fmt(Math.round(rivalsAvgGap))],
+        ['Closest Rival Pair', closestRival ? `${closestRival.display_a} vs ${closestRival.display_b}` : '—'],
+        ['Closest Gap', closestRival ? fmt(closestRival.point_gap || 0) : '—'],
+      ],
+    },
+    {
+      title: 'Race + BR Analytics',
+      stats: [
+        ['Tracked Racers', fmt(racesRows.length)],
+        ['Race Points Total', fmt(racePointsTotal)],
+        ['BR Points Total', fmt(brPointsTotal)],
+        ['Race Events', fmt(raceEventsTotal)],
+        ['BR Events', fmt(brEventsTotal)],
+        ['Peak High Score', fmt(raceHighScorePeak)],
+      ],
+    },
+    {
+      title: 'System Snapshot',
+      stats: [
+        ['Last Updated', data?.updated_at || '—'],
+        ['Language', data?.settings?.language || 'en'],
+        ['Rivals Min Races', fmt(data?.settings?.rivals?.min_races || 0)],
+        ['Rivals Max Point Gap', fmt(data?.settings?.rivals?.max_point_gap || 0)],
+      ],
+    },
+  ];
+
+  el('analytics-range-pill').textContent = `Groups ${groups.length} • Metrics ${groups.reduce((sum, group) => sum + group.stats.length, 0)}`;
+
+  host.innerHTML = groups.map((group) => {
+    const statsMarkup = group.stats.map(([label, value]) => analyticsStat(label, value)).join('');
+    return `<section class="analytics-group"><h3 class="analytics-group__title">${escapeHtml(group.title)}</h3><div class="analytics-grid">${statsMarkup}</div></section>`;
+  }).join('');
+}
+
 function wireRaceFilterButtons() {
   document.querySelectorAll('.mini-filter-btn[data-race-filter]').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -779,7 +886,7 @@ function wireTiltSortControls() {
 
 function getRequestedViewFromLocation() {
   const hashView = String(window.location.hash || '').replace('#', '').trim();
-  const validViews = new Set(['mycycle', 'season-quests', 'tilt', 'rivals', 'races']);
+  const validViews = new Set(['mycycle', 'season-quests', 'tilt', 'rivals', 'races', 'analytics']);
   if (validViews.has(hashView)) return hashView;
 
   const viewFromQuery = new URLSearchParams(window.location.search).get('view');
@@ -819,6 +926,7 @@ async function refresh() {
     renderTiltRows(data);
     renderRivalsRows(data);
     renderRaceDashboardRows(data);
+    renderAnalyticsRows(data);
   } catch (error) {
     console.error('dashboard refresh failed', error);
     const node = el('mycycle');

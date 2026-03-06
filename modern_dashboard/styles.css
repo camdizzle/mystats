@@ -240,3 +240,64 @@ body {
 .rivals-onboarding--collapsed .rivals-onboarding__context {
   display: none;
 }
+
+.analytics-shell {
+  display: block;
+}
+
+.analytics-panel {
+  border: 1px solid rgba(127,216,255,.25);
+  border-radius: 12px;
+  background: rgba(10, 20, 45, .6);
+  padding: 10px;
+}
+
+.analytics-groups {
+  margin-top: 8px;
+  display: grid;
+  gap: 10px;
+  max-height: calc(78vh - 44px);
+  overflow: auto;
+}
+
+.analytics-group {
+  border: 1px solid rgba(127,216,255,.25);
+  border-radius: 10px;
+  padding: 9px;
+  background: rgba(18, 30, 56, .66);
+}
+
+.analytics-group__title {
+  margin: 0 0 7px;
+  color: #9fd6ff;
+  font-size: .8rem;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+
+.analytics-grid {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+.analytics-stat {
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 8px;
+  background: rgba(255,255,255,.04);
+  padding: 7px;
+}
+
+.analytics-stat__label {
+  color: #9bb1d6;
+  font-size: .67rem;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+
+.analytics-stat__value {
+  margin-top: 3px;
+  color: #d9e8ff;
+  font-weight: 700;
+  font-size: .9rem;
+}
