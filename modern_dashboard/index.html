@@ -21,6 +21,8 @@
       <button class="dashboard-nav-btn" data-view="tilt" type="button">Tilt Dashboard</button>
       <button class="dashboard-nav-btn" data-view="rivals" type="button">Rivals</button>
       <button class="dashboard-nav-btn" data-view="races" type="button">Race Dashboard</button>
+      <button class="dashboard-nav-btn" data-view="analytics" type="button">Analytics</button>
+      <button class="dashboard-nav-btn" data-view="trends" type="button">Race/BR Trends</button>
     </section>
 
     <section class="mycycle-shell" data-panel="mycycle">
@@ -137,6 +139,27 @@
       </article>
     </section>
 
+    <section class="analytics-shell is-hidden" data-panel="analytics">
+      <article class="analytics-panel">
+        <div class="panel-title-row">
+          <h2>Analytics Command Center</h2>
+          <span id="analytics-range-pill" class="range-pill">All calculators</span>
+        </div>
+        <div id="analytics-groups" class="analytics-groups"></div>
+      </article>
+    </section>
+
+
+    <section class="trends-shell is-hidden" data-panel="trends">
+      <article class="analytics-panel">
+        <div class="panel-title-row">
+          <h2>Race/BR Trend Charts</h2>
+          <span id="trends-range-pill" class="range-pill">Trend analytics</span>
+        </div>
+        <div id="trends-summary" class="kpis"></div>
+        <div id="trend-charts" class="analytics-groups"></div>
+      </article>
+    </section>
 
   </main>
   <script src="/dashboard/dashboard.js"></script>
