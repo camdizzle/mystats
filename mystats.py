@@ -2957,7 +2957,7 @@ def _safe_int(value):
 
 def normalize_overlay_mode(value):
     mode = str(value or '').strip().lower()
-    if mode in ('race', 'br', 'tilt'):
+    if mode in ('pre-game', 'race', 'br', 'tilt', 'post-race'):
         return mode
     return 'race'
 
@@ -3380,6 +3380,7 @@ def _build_overlay_top3_payload():
             'race_key': recent_race['race_key'],
             'race_type': recent_race['race_type'],
             'race_timestamp': recent_race['race_timestamp'],
+            'is_recent': recent_race['is_recent'],
             'is_record_race': recent_race['is_record_race'],
             'record_holder_name': recent_race['record_holder_name'],
             'record_delta_seconds': recent_race['record_delta_seconds'],
@@ -3570,10 +3571,28 @@ def _build_tilt_overlay_payload():
 
 
 def _build_unified_overlay_payload():
+    top3_payload = _build_overlay_top3_payload()
+    active_mode = get_overlay_mode()
+
+    if active_mode != 'tilt':
+        recent_race = top3_payload.get('recent_race_top3') or {}
+        has_rows = bool(recent_race.get('rows'))
+        race_type = str(recent_race.get('race_type') or '').strip().lower()
+        is_recent = bool(recent_race.get('is_recent'))
+
+        if not has_rows:
+            active_mode = 'pre-game'
+        elif is_recent and race_type in ('br', 'battle royale', 'royale'):
+            active_mode = 'br'
+        elif is_recent:
+            active_mode = 'race'
+        else:
+            active_mode = 'post-race'
+
     return {
         'updated_at': datetime.now().isoformat(timespec='seconds'),
-        'active_mode': get_overlay_mode(),
-        'top3': _build_overlay_top3_payload(),
+        'active_mode': active_mode,
+        'top3': top3_payload,
         'tilt': _build_tilt_overlay_payload(),
     }
 
