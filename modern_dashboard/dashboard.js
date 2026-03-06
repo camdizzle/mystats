@@ -745,111 +745,119 @@ function renderRaceDashboardRows(data) {
 }
 
 
-function analyticsStat(label, value) {
-  return `<div class="analytics-stat"><div class="analytics-stat__label">${escapeHtml(label)}</div><div class="analytics-stat__value">${escapeHtml(String(value))}</div></div>`;
-}
-
 function renderAnalyticsRows(data) {
   const host = el('analytics-groups');
   if (!host) return;
 
-  const mycycleRows = Array.isArray(data?.mycycle?.rows) ? data.mycycle.rows : [];
-  const seasonRows = Array.isArray(data?.season_quests?.rows) ? data.season_quests.rows : [];
-  const rivalsRows = Array.isArray(data?.rivals?.rivals) ? data.rivals.rivals : [];
-  const racesRows = Array.isArray(data?.races) ? data.races : [];
-  const tiltTotals = data?.tilt?.totals || {};
+  const analytics = data?.analytics || {};
+  const groups = analytics?.groups || {};
+  const seasonLabel = analytics?.season_label || 'Season';
+  const allSeasonsLabel = analytics?.all_seasons_label || 'All Seasons';
+  const hasPriorSeasons = Boolean(analytics?.has_prior_seasons);
 
-  const mycycleCycles = mycycleRows.reduce((sum, row) => sum + Number(row.cycles_completed || 0), 0);
-  const mycycleNear = mycycleRows.filter((row) => Number(row.progress_total || 0) - Number(row.progress_hits || 0) <= 2).length;
-  const mycycleRaces = mycycleRows.reduce((sum, row) => sum + Number(row.current_cycle_races || 0), 0);
+  const groupOrder = ['race_br_combined', 'tilt', 'race_only', 'br_only', 'mycycle'];
+  const metricMap = {
+    race_br_combined: [
+      ['Events', 'events'],
+      ['Points', 'points'],
+      ['Wins', 'wins'],
+      ['Win Rate %', 'win_rate'],
+      ['Unique Racers', 'unique_racers'],
+      ['High Score', 'high_score'],
+      ['PPR', 'ppr'],
+      ['Top PPR Racer', 'top_ppr_name'],
+      ['Top PPR', 'top_ppr'],
+      ['Top PPR Events', 'top_ppr_events'],
+    ],
+    tilt: [
+      ['Participants', 'participants'],
+      ['Tilt Points', 'points'],
+      ['Tilt Levels', 'levels'],
+      ['Top Tiltee Finishes', 'top_tiltee'],
+      ['Deaths', 'deaths'],
+      ['Survival Rate %', 'survival_rate'],
+      ['PPR', 'ppr'],
+    ],
+    race_only: [
+      ['Race Events', 'events'],
+      ['Race Points', 'points'],
+      ['Race Wins', 'wins'],
+      ['Win Rate %', 'win_rate'],
+      ['Unique Racers', 'unique_racers'],
+      ['Race High Score', 'high_score'],
+      ['Race PPR', 'ppr'],
+      ['Top PPR Racer', 'top_ppr_name'],
+      ['Top PPR', 'top_ppr'],
+      ['Top PPR Events', 'top_ppr_events'],
+    ],
+    br_only: [
+      ['BR Events', 'events'],
+      ['BR Points', 'points'],
+      ['BR Wins', 'wins'],
+      ['Win Rate %', 'win_rate'],
+      ['Unique Racers', 'unique_racers'],
+      ['BR High Score', 'high_score'],
+      ['BR PPR', 'ppr'],
+      ['Top PPR Racer', 'top_ppr_name'],
+      ['Top PPR', 'top_ppr'],
+      ['Top PPR Events', 'top_ppr_events'],
+    ],
+    mycycle: [
+      ['Tracked Racers', 'tracked_racers'],
+      ['Cycles Completed', 'cycles_completed'],
+      ['Near Complete', 'near_complete'],
+      ['Current Cycle Races', 'current_cycle_races'],
+    ],
+  };
 
-  const seasonComplete = seasonRows.filter((row) => Number(row.completed || 0) > 0).length;
-  const seasonRaceProgress = seasonRows.reduce((sum, row) => sum + Number(row.races || 0), 0);
-  const seasonPointProgress = seasonRows.reduce((sum, row) => sum + Number(row.points || 0), 0);
+  const renderedGroups = groupOrder
+    .map((groupKey) => {
+      const group = groups[groupKey];
+      if (!group) return '';
 
-  const rivalsAvgGap = rivalsRows.length
-    ? (rivalsRows.reduce((sum, row) => sum + Number(row.point_gap || 0), 0) / rivalsRows.length)
+      const seasonStats = group?.season || {};
+      const allSeasonStats = group?.all_seasons || {};
+      const metrics = metricMap[groupKey] || [];
+
+      const statsMarkup = metrics.map(([label, key]) => {
+        const seasonValue = seasonStats?.[key];
+        const allValue = hasPriorSeasons ? allSeasonStats?.[key] : null;
+        const normalizedSeason = (typeof seasonValue === 'number') ? fmt(seasonValue) : (seasonValue || '—');
+        const normalizedAll = hasPriorSeasons
+          ? ((typeof allValue === 'number') ? fmt(allValue) : (allValue || '—'))
+          : 'N/A';
+
+        return `<div class="analytics-stat">
+          <div class="analytics-stat__label">${escapeHtml(label)}</div>
+          <div class="analytics-stat__compare">
+            <span><strong>${escapeHtml(seasonLabel)}:</strong> ${escapeHtml(String(normalizedSeason))}</span>
+            <span><strong>${escapeHtml(allSeasonsLabel)}:</strong> ${escapeHtml(String(normalizedAll))}</span>
+          </div>
+        </div>`;
+      }).join('');
+
+      return `<section class="analytics-group">
+        <h3 class="analytics-group__title">${escapeHtml(group?.title || groupKey)}</h3>
+        <div class="analytics-grid">${statsMarkup}</div>
+      </section>`;
+    })
+    .filter(Boolean);
+
+  if (!renderedGroups.length) {
+    host.innerHTML = `<div class="empty">No analytics available yet.</div>`;
+    return;
+  }
+
+  const metricCount = renderedGroups.length
+    ? groupOrder.reduce((sum, key) => sum + ((metricMap[key] || []).length), 0)
     : 0;
-  const closestRival = rivalsRows.reduce((best, row) => {
-    if (!best) return row;
-    return Number(row.point_gap || Number.MAX_SAFE_INTEGER) < Number(best.point_gap || Number.MAX_SAFE_INTEGER)
-      ? row
-      : best;
-  }, null);
+  el('analytics-range-pill').textContent = hasPriorSeasons
+    ? `Season vs All Seasons • ${metricCount} metrics`
+    : `Current Season Only • ${metricCount} metrics`;
 
-  const racePointsTotal = racesRows.reduce((sum, row) => sum + Number(row.race_points || 0), 0);
-  const brPointsTotal = racesRows.reduce((sum, row) => sum + Number(row.br_points || 0), 0);
-  const raceEventsTotal = racesRows.reduce((sum, row) => sum + Number(row.race_count || 0), 0);
-  const brEventsTotal = racesRows.reduce((sum, row) => sum + Number(row.br_count || 0), 0);
-  const raceHighScorePeak = racesRows.reduce((best, row) => Math.max(best, Number(row.race_high_score || 0), Number(row.br_high_score || 0)), 0);
-
-  const groups = [
-    {
-      title: 'MyCycle Analytics',
-      stats: [
-        ['Tracked Racers', fmt(mycycleRows.length)],
-        ['Total Cycles Completed', fmt(mycycleCycles)],
-        ['Near-Complete Racers', fmt(mycycleNear)],
-        ['Current Cycle Races', fmt(mycycleRaces)],
-      ],
-    },
-    {
-      title: 'Season Quest Analytics',
-      stats: [
-        ['Tracked Quest Players', fmt(seasonRows.length)],
-        ['Any Quest Completed', fmt(seasonComplete)],
-        ['Total Season Races Logged', fmt(seasonRaceProgress)],
-        ['Total Season Points Logged', fmt(seasonPointProgress)],
-      ],
-    },
-    {
-      title: 'Tilt Analytics',
-      stats: [
-        ['Tilt Participants', fmt(data?.tilt?.participants || 0)],
-        ['Total Tilt Points', fmt(tiltTotals.points || 0)],
-        ['Tilt Levels', fmt(tiltTotals.levels || 0)],
-        ['Top Tiltee Finishes', fmt(tiltTotals.top_tiltee || 0)],
-        ['Deaths Today', fmt(data?.tilt?.deaths_today || 0)],
-      ],
-    },
-    {
-      title: 'Rivals Analytics',
-      stats: [
-        ['Active Rivalries', fmt(rivalsRows.length)],
-        ['Average Gap', fmt(Math.round(rivalsAvgGap))],
-        ['Closest Rival Pair', closestRival ? `${closestRival.display_a} vs ${closestRival.display_b}` : '—'],
-        ['Closest Gap', closestRival ? fmt(closestRival.point_gap || 0) : '—'],
-      ],
-    },
-    {
-      title: 'Race + BR Analytics',
-      stats: [
-        ['Tracked Racers', fmt(racesRows.length)],
-        ['Race Points Total', fmt(racePointsTotal)],
-        ['BR Points Total', fmt(brPointsTotal)],
-        ['Race Events', fmt(raceEventsTotal)],
-        ['BR Events', fmt(brEventsTotal)],
-        ['Peak High Score', fmt(raceHighScorePeak)],
-      ],
-    },
-    {
-      title: 'System Snapshot',
-      stats: [
-        ['Last Updated', data?.updated_at || '—'],
-        ['Language', data?.settings?.language || 'en'],
-        ['Rivals Min Races', fmt(data?.settings?.rivals?.min_races || 0)],
-        ['Rivals Max Point Gap', fmt(data?.settings?.rivals?.max_point_gap || 0)],
-      ],
-    },
-  ];
-
-  el('analytics-range-pill').textContent = `Groups ${groups.length} • Metrics ${groups.reduce((sum, group) => sum + group.stats.length, 0)}`;
-
-  host.innerHTML = groups.map((group) => {
-    const statsMarkup = group.stats.map(([label, value]) => analyticsStat(label, value)).join('');
-    return `<section class="analytics-group"><h3 class="analytics-group__title">${escapeHtml(group.title)}</h3><div class="analytics-grid">${statsMarkup}</div></section>`;
-  }).join('');
+  host.innerHTML = renderedGroups.join('');
 }
+
 
 function wireRaceFilterButtons() {
   document.querySelectorAll('.mini-filter-btn[data-race-filter]').forEach((btn) => {

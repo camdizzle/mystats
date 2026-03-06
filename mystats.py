@@ -3660,6 +3660,7 @@ def _build_main_dashboard_payload():
     season_quest_rows = get_quest_completion_leaderboard(limit=100)
     season_quest_targets = get_season_quest_targets()
     tilt_totals, tilt_users = get_tilt_season_stats()
+    analytics_payload = _build_dashboard_analytics_payload(mycycle_rows, tilt_totals, tilt_users)
 
     return {
         'updated_at': datetime.now().isoformat(timespec='seconds'),
@@ -3683,6 +3684,262 @@ def _build_main_dashboard_payload():
         'settings': {
             'language': get_ui_language(),
             'rivals': get_rival_settings(),
+        },
+        'analytics': analytics_payload,
+    }
+
+
+def _collect_results_season_directories(current_dir):
+    current = os.path.abspath(current_dir or '')
+    if not current or not os.path.isdir(current):
+        return [], False
+
+    def has_allraces_csv(path):
+        return bool(glob.glob(os.path.join(path, 'allraces_*.csv')))
+
+    discovered = []
+    parent = os.path.dirname(current)
+    if parent and os.path.isdir(parent):
+        for name in sorted(os.listdir(parent)):
+            candidate = os.path.join(parent, name)
+            if os.path.isdir(candidate) and has_allraces_csv(candidate):
+                discovered.append(candidate)
+
+    if current not in discovered and has_allraces_csv(current):
+        discovered.append(current)
+
+    if not discovered:
+        nested = [
+            os.path.join(current, name)
+            for name in sorted(os.listdir(current))
+            if os.path.isdir(os.path.join(current, name)) and has_allraces_csv(os.path.join(current, name))
+        ]
+        if nested:
+            discovered = nested
+
+    normalized = []
+    for item in discovered:
+        abspath = os.path.abspath(item)
+        if abspath not in normalized:
+            normalized.append(abspath)
+
+    has_prior = len(normalized) > 1
+    return normalized, has_prior
+
+
+def _safe_float(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _aggregate_mode_from_directories(directories):
+    mode_template = {
+        'events': 0,
+        'points': 0,
+        'wins': 0,
+        'high_score': 0,
+        'unique_racers': set(),
+        'users': defaultdict(lambda: {'events': 0, 'points': 0}),
+    }
+    mode_stats = {
+        'combined': copy.deepcopy(mode_template),
+        'race': copy.deepcopy(mode_template),
+        'br': copy.deepcopy(mode_template),
+    }
+
+    for directory in directories:
+        for allraces_file in glob.glob(os.path.join(directory, 'allraces_*.csv')):
+            try:
+                with open(allraces_file, 'r', encoding='utf-8', errors='ignore') as f:
+                    reader = csv.reader(f)
+                    for row in reader:
+                        if len(row) < 5:
+                            continue
+
+                        mode = str(row[4] or '').strip().lower()
+                        if mode not in ('race', 'br'):
+                            continue
+
+                        username = str(row[1] or '').strip().lower()
+                        display_name = str(row[2] or '').strip() or username
+                        if not username:
+                            continue
+
+                        points = _safe_int(row[3])
+                        place_digits = ''.join(ch for ch in str(row[0] or '') if ch.isdigit())
+                        placement = _safe_int(place_digits)
+
+                        for key in ('combined', mode):
+                            bucket = mode_stats[key]
+                            bucket['events'] += 1
+                            bucket['points'] += points
+                            bucket['high_score'] = max(bucket['high_score'], points)
+                            if placement == 1:
+                                bucket['wins'] += 1
+                            bucket['unique_racers'].add(display_name or username)
+                            bucket['users'][username]['events'] += 1
+                            bucket['users'][username]['points'] += points
+            except Exception:
+                continue
+
+    def finalize(bucket):
+        events = int(bucket['events'])
+        points = int(bucket['points'])
+        wins = int(bucket['wins'])
+        high_score = int(bucket['high_score'])
+        unique_racers = len(bucket['unique_racers'])
+        ppr = round((points / events), 2) if events else 0.0
+        win_rate = round((wins / events) * 100, 2) if events else 0.0
+
+        best_name = '—'
+        best_ppr = 0.0
+        best_events = 0
+        for username, user_stats in bucket['users'].items():
+            user_events = int(user_stats['events'])
+            if user_events < 25:
+                continue
+            user_ppr = _safe_float(user_stats['points']) / max(1, user_events)
+            if user_ppr > best_ppr:
+                best_ppr = user_ppr
+                best_name = username
+                best_events = user_events
+
+        return {
+            'events': events,
+            'points': points,
+            'wins': wins,
+            'win_rate': win_rate,
+            'high_score': high_score,
+            'unique_racers': unique_racers,
+            'ppr': ppr,
+            'top_ppr_name': best_name,
+            'top_ppr': round(best_ppr, 2),
+            'top_ppr_events': best_events,
+        }
+
+    return {key: finalize(value) for key, value in mode_stats.items()}
+
+
+def _aggregate_tilt_from_directories(directories):
+    totals = {'points': 0, 'levels': 0, 'top_tiltee': 0, 'deaths': 0}
+    users = set()
+
+    for directory in directories:
+        for tilt_file in glob.glob(os.path.join(directory, 'tilts_*.csv')):
+            try:
+                with open(tilt_file, 'r', encoding='utf-8', errors='ignore') as f:
+                    for row in csv.reader(f):
+                        detail = parse_tilt_result_detail(row)
+                        if not detail:
+                            continue
+                        users.add(detail.get('display_name') or detail.get('username') or 'unknown')
+                        totals['points'] += _safe_int(detail.get('points', 0))
+                        totals['levels'] += 1
+                        if detail.get('is_top_tiltee'):
+                            totals['top_tiltee'] += 1
+            except Exception:
+                continue
+
+    totals['deaths'] = max(0, int(totals['levels']) - int(totals['top_tiltee']))
+    totals['participants'] = len(users)
+    totals['ppr'] = round((totals['points'] / totals['levels']), 2) if totals['levels'] else 0.0
+    totals['survival_rate'] = round(((totals['levels'] - totals['deaths']) / totals['levels']) * 100, 2) if totals['levels'] else 0.0
+    return totals
+
+
+def _aggregate_mycycle_from_directories(directories):
+    totals = {'tracked_racers': 0, 'cycles_completed': 0, 'near_complete': 0, 'current_cycle_races': 0}
+
+    for directory in directories:
+        cycle_file = os.path.join(directory, MYCYCLE_FILE_NAME)
+        if not os.path.isfile(cycle_file):
+            continue
+        try:
+            with open(cycle_file, 'r', encoding='utf-8') as f:
+                payload = json.load(f)
+            sessions = payload.get('sessions') if isinstance(payload, dict) else {}
+            merged_users = {}
+            if isinstance(sessions, dict):
+                for session in sessions.values():
+                    users = session.get('users') if isinstance(session, dict) else {}
+                    if not isinstance(users, dict):
+                        continue
+                    for username, row in users.items():
+                        if username not in merged_users:
+                            merged_users[username] = {'cycles_completed': 0, 'progress_total': 0, 'progress_hits': 0, 'current_cycle_races': 0}
+                        merged_users[username]['cycles_completed'] += _safe_int(row.get('cycles_completed', 0))
+                        merged_users[username]['progress_total'] = max(_safe_int(row.get('progress_total', 0)), merged_users[username]['progress_total'])
+                        merged_users[username]['progress_hits'] = max(_safe_int(row.get('progress_hits', 0)), merged_users[username]['progress_hits'])
+                        merged_users[username]['current_cycle_races'] += _safe_int(row.get('current_cycle_races', 0))
+
+            totals['tracked_racers'] += len(merged_users)
+            totals['cycles_completed'] += sum(_safe_int(row.get('cycles_completed', 0)) for row in merged_users.values())
+            totals['near_complete'] += sum(1 for row in merged_users.values() if (_safe_int(row.get('progress_total', 0)) - _safe_int(row.get('progress_hits', 0))) <= 2)
+            totals['current_cycle_races'] += sum(_safe_int(row.get('current_cycle_races', 0)) for row in merged_users.values())
+        except Exception:
+            continue
+
+    return totals
+
+
+def _build_dashboard_analytics_payload(mycycle_rows, tilt_totals, tilt_users):
+    current_dir = config.get_setting('directory') or os.getcwd()
+    season_dirs, has_prior = _collect_results_season_directories(current_dir)
+    current_only_dirs = [os.path.abspath(current_dir)] if os.path.isdir(current_dir) else []
+    all_dirs = season_dirs if season_dirs else current_only_dirs
+
+    season_modes = _aggregate_mode_from_directories(current_only_dirs)
+    all_modes = _aggregate_mode_from_directories(all_dirs) if has_prior else None
+
+    tilt_season = {
+        'participants': len(tilt_users or {}),
+        'points': _safe_int((tilt_totals or {}).get('points', 0)),
+        'levels': _safe_int((tilt_totals or {}).get('levels', 0)),
+        'top_tiltee': _safe_int((tilt_totals or {}).get('top_tiltee', 0)),
+    }
+    tilt_season['deaths'] = max(0, tilt_season['levels'] - tilt_season['top_tiltee'])
+    tilt_season['ppr'] = round((tilt_season['points'] / tilt_season['levels']), 2) if tilt_season['levels'] else 0.0
+    tilt_season['survival_rate'] = round(((tilt_season['levels'] - tilt_season['deaths']) / tilt_season['levels']) * 100, 2) if tilt_season['levels'] else 0.0
+
+    mycycle_season = {
+        'tracked_racers': len(mycycle_rows or []),
+        'cycles_completed': sum(_safe_int(row.get('cycles_completed', 0)) for row in (mycycle_rows or [])),
+        'near_complete': sum(1 for row in (mycycle_rows or []) if (_safe_int(row.get('progress_total', 0)) - _safe_int(row.get('progress_hits', 0))) <= 2),
+        'current_cycle_races': sum(_safe_int(row.get('current_cycle_races', 0)) for row in (mycycle_rows or [])),
+    }
+
+    return {
+        'season_label': f"Season {config.get_setting('season') or 'Current'}",
+        'all_seasons_label': 'All Seasons',
+        'has_prior_seasons': has_prior,
+        'groups': {
+            'race_br_combined': {
+                'title': 'Race/BR Combined',
+                'season': season_modes.get('combined', {}),
+                'all_seasons': all_modes.get('combined', {}) if all_modes else None,
+            },
+            'tilt': {
+                'title': 'Tilt',
+                'season': tilt_season,
+                'all_seasons': _aggregate_tilt_from_directories(all_dirs) if has_prior else None,
+            },
+            'race_only': {
+                'title': 'Race Only',
+                'season': season_modes.get('race', {}),
+                'all_seasons': all_modes.get('race', {}) if all_modes else None,
+            },
+            'br_only': {
+                'title': 'BR Only',
+                'season': season_modes.get('br', {}),
+                'all_seasons': all_modes.get('br', {}) if all_modes else None,
+            },
+            'mycycle': {
+                'title': 'MyCycle',
+                'season': mycycle_season,
+                'all_seasons': _aggregate_mycycle_from_directories(all_dirs) if has_prior else None,
+            },
         },
     }
 
