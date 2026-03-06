@@ -966,9 +966,9 @@ function renderRaceTrends(data) {
 
   const summaryHost = el('trends-summary');
   const chartHost = el('trend-charts');
-  if (!summaryHost || !chartHost) return;
+  if (!chartHost) return;
 
-  summaryHost.innerHTML = [
+  if (summaryHost) summaryHost.innerHTML = [
     { label: 'Avg Unique Racers / Day', value: fmt(summary.avg_racers_per_day || 0) },
     { label: 'Avg Races / Day', value: fmt(summary.avg_races_per_day || 0) },
     { label: 'Avg PPR / Day', value: fmt(summary.avg_ppr_per_day || 0) },
