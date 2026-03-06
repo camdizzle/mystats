@@ -4600,25 +4600,63 @@ def open_settings_window():
     notebook = ttk.Notebook(content_frame)
     notebook.pack(fill="both", expand=True)
 
-    general_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
-    audio_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
-    chat_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
-    tilt_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
-    season_quests_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
-    rivals_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
-    mycycle_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
-    appearance_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
-    overlay_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
+    general_root_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
+    tilt_root_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
+    race_br_root_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
 
-    notebook.add(general_tab, text=tr("General"))
-    notebook.add(audio_tab, text=tr("Audio"))
-    notebook.add(chat_tab, text=tr("Chat"))
-    notebook.add(season_quests_tab, text=tr("Season Quests"))
-    notebook.add(rivals_tab, text=tr("Rivals"))
-    notebook.add(mycycle_tab, text=tr("MyCycle"))
-    notebook.add(appearance_tab, text=tr("Appearance"))
-    notebook.add(overlay_tab, text=tr("Overlay"))
-    notebook.add(tilt_tab, text=tr("Tilt"))
+    notebook.add(general_root_tab, text=tr("General"))
+    notebook.add(tilt_root_tab, text=tr("Tilt"))
+    notebook.add(race_br_root_tab, text="Race/BR")
+
+    general_root_tab.grid_columnconfigure(0, weight=1)
+    general_root_tab.grid_rowconfigure(0, weight=1)
+    tilt_root_tab.grid_columnconfigure(0, weight=1)
+    tilt_root_tab.grid_rowconfigure(0, weight=1)
+    race_br_root_tab.grid_columnconfigure(0, weight=1)
+    race_br_root_tab.grid_rowconfigure(0, weight=1)
+
+    general_sections = ttk.Notebook(general_root_tab)
+    general_sections.grid(row=0, column=0, sticky="nsew")
+
+    tilt_sections = ttk.Notebook(tilt_root_tab)
+    tilt_sections.grid(row=0, column=0, sticky="nsew")
+
+    race_br_sections = ttk.Notebook(race_br_root_tab)
+    race_br_sections.grid(row=0, column=0, sticky="nsew")
+
+    general_tab = ttk.Frame(general_sections, style="App.TFrame", padding=10)
+    audio_tab = ttk.Frame(general_sections, style="App.TFrame", padding=10)
+    appearance_tab = ttk.Frame(general_sections, style="App.TFrame", padding=10)
+
+    tilt_chat_tab = ttk.Frame(tilt_sections, style="App.TFrame", padding=10)
+    tilt_overlay_tab = ttk.Frame(tilt_sections, style="App.TFrame", padding=10)
+    tilt_horizontal_overlay_tab = ttk.Frame(tilt_sections, style="App.TFrame", padding=10)
+    tilt_thresholds_tab = ttk.Frame(tilt_sections, style="App.TFrame", padding=10)
+
+    race_chat_tab = ttk.Frame(race_br_sections, style="App.TFrame", padding=10)
+    race_alerts_tab = ttk.Frame(race_br_sections, style="App.TFrame", padding=10)
+    race_overlay_tab = ttk.Frame(race_br_sections, style="App.TFrame", padding=10)
+    race_horizontal_overlay_tab = ttk.Frame(race_br_sections, style="App.TFrame", padding=10)
+    mycycle_tab = ttk.Frame(race_br_sections, style="App.TFrame", padding=10)
+    rivals_tab = ttk.Frame(race_br_sections, style="App.TFrame", padding=10)
+    season_quests_tab = ttk.Frame(race_br_sections, style="App.TFrame", padding=10)
+
+    general_sections.add(audio_tab, text=tr("Audio"))
+    general_sections.add(appearance_tab, text=tr("Appearance"))
+    general_sections.add(general_tab, text=tr("General"))
+
+    tilt_sections.add(tilt_chat_tab, text="Tilt Chat")
+    tilt_sections.add(tilt_overlay_tab, text="Tilt Overlay")
+    tilt_sections.add(tilt_horizontal_overlay_tab, text="Tilt Horizontal Overlay")
+    tilt_sections.add(tilt_thresholds_tab, text="Tilt Command Thresholds")
+
+    race_br_sections.add(race_chat_tab, text=tr("Chat"))
+    race_br_sections.add(race_alerts_tab, text="Alerts")
+    race_br_sections.add(race_overlay_tab, text=tr("Overlay"))
+    race_br_sections.add(race_horizontal_overlay_tab, text="Horizontal Overlay")
+    race_br_sections.add(mycycle_tab, text=tr("MyCycle"))
+    race_br_sections.add(rivals_tab, text=tr("Rivals"))
+    race_br_sections.add(season_quests_tab, text=tr("Season Quests"))
 
     # --- General tab ---
     ttk.Label(general_tab, text=tr("Core app settings"), style="Small.TLabel").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
@@ -4732,24 +4770,24 @@ def open_settings_window():
         audio_tab.grid_columnconfigure(idx, weight=1)
 
     # --- Chat tab ---
-    ttk.Label(chat_tab, text="Control what MyStats announces in chat", style="Small.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 8))
+    ttk.Label(race_chat_tab, text="Control what MyStats announces in chat", style="Small.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 8))
 
     chat_br_results_var = tk.BooleanVar(value=is_chat_response_enabled("chat_br_results"))
     chat_race_results_var = tk.BooleanVar(value=is_chat_response_enabled("chat_race_results"))
     chat_all_commands_var = tk.BooleanVar(value=is_chat_response_enabled("chat_all_commands"))
     competitive_raid_monitor_enabled_var = tk.BooleanVar(value=is_chat_response_enabled("competitive_raid_monitor_enabled"))
 
-    ttk.Checkbutton(chat_tab, text="BR Results", variable=chat_br_results_var).grid(row=1, column=0, sticky="w", pady=2)
-    ttk.Checkbutton(chat_tab, text="Race Results", variable=chat_race_results_var).grid(row=2, column=0, sticky="w", pady=2)
-    ttk.Checkbutton(chat_tab, text="All !commands", variable=chat_all_commands_var).grid(row=3, column=0, sticky="w", pady=2)
-    ttk.Checkbutton(chat_tab, text="Competitive Raid Alerts (opt-in)", variable=competitive_raid_monitor_enabled_var).grid(row=4, column=0, sticky="w", pady=2)
+    ttk.Checkbutton(race_chat_tab, text="BR Results", variable=chat_br_results_var).grid(row=1, column=0, sticky="w", pady=2)
+    ttk.Checkbutton(race_chat_tab, text="Race Results", variable=chat_race_results_var).grid(row=2, column=0, sticky="w", pady=2)
+    ttk.Checkbutton(race_chat_tab, text="All !commands", variable=chat_all_commands_var).grid(row=3, column=0, sticky="w", pady=2)
+    ttk.Checkbutton(race_chat_tab, text="Competitive Raid Alerts (opt-in)", variable=competitive_raid_monitor_enabled_var).grid(row=4, column=0, sticky="w", pady=2)
 
     race_narrative_alerts_var = tk.BooleanVar(value=is_chat_response_enabled("race_narrative_alerts_enabled"))
     race_narrative_grinder_var = tk.BooleanVar(value=is_chat_response_enabled("race_narrative_grinder_enabled"))
     race_narrative_winmilestone_var = tk.BooleanVar(value=is_chat_response_enabled("race_narrative_winmilestone_enabled"))
     race_narrative_leadchange_var = tk.BooleanVar(value=is_chat_response_enabled("race_narrative_leadchange_enabled"))
 
-    race_alerts_frame = ttk.LabelFrame(chat_tab, text="Race Narrative Player Alerts", style="Card.TLabelframe")
+    race_alerts_frame = ttk.LabelFrame(race_alerts_tab, text="Race Narrative Player Alerts", style="Card.TLabelframe")
     race_alerts_frame.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(10, 0))
 
     ttk.Checkbutton(race_alerts_frame, text="Narrative Alerts", variable=race_narrative_alerts_var).grid(row=0, column=0, sticky="w", padx=10, pady=(8, 4))
@@ -4772,7 +4810,7 @@ def open_settings_window():
     race_narrative_max_items_entry.grid(row=3, column=2, sticky="w", padx=(0, 10), pady=(2, 8))
     race_narrative_max_items_entry.insert(0, config.get_setting("race_narrative_alert_max_items") or "3")
 
-    message_delay_frame = ttk.LabelFrame(chat_tab, text="Message Delay", style="Card.TLabelframe")
+    message_delay_frame = ttk.LabelFrame(race_alerts_tab, text="Message Delay", style="Card.TLabelframe")
     message_delay_frame.grid(row=6, column=0, columnspan=2, sticky="ew", pady=(10, 0))
 
     announce_delay_var = tk.BooleanVar(value=config.get_setting("announcedelay") == "True")
@@ -4781,10 +4819,11 @@ def open_settings_window():
     delay_seconds_entry = ttk.Entry(message_delay_frame, width=12, justify='center')
     delay_seconds_entry.grid(row=1, column=1, sticky="w", padx=(8, 10), pady=(0, 8))
     delay_seconds_entry.insert(0, config.get_setting("announcedelayseconds") or "")
-    chat_tab.grid_columnconfigure(0, weight=1)
+    race_chat_tab.grid_columnconfigure(0, weight=1)
+    race_alerts_tab.grid_columnconfigure(0, weight=1)
 
     # --- Tilt tab ---
-    ttk.Label(tilt_tab, text="Configure tilt chat alerts, !tiltsurvivors threshold, and tilt overlay behavior", style="Small.TLabel").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
+    ttk.Label(tilt_chat_tab, text="Configure tilt chat alerts", style="Small.TLabel").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
 
     chat_tilt_results_var = tk.BooleanVar(value=is_chat_response_enabled("chat_tilt_results"))
     chat_tilt_suppress_offline_var = tk.BooleanVar(value=is_chat_response_enabled("chat_tilt_suppress_offline"))
@@ -4793,7 +4832,7 @@ def open_settings_window():
     narrative_alert_winmilestone_var = tk.BooleanVar(value=is_chat_response_enabled("narrative_alert_winmilestone_enabled"))
     narrative_alert_leadchange_var = tk.BooleanVar(value=is_chat_response_enabled("narrative_alert_leadchange_enabled"))
 
-    tilt_alerts_frame = ttk.LabelFrame(tilt_tab, text="Tilt Chat Alerts", style="Card.TLabelframe")
+    tilt_alerts_frame = ttk.LabelFrame(tilt_chat_tab, text="Tilt Chat Alerts", style="Card.TLabelframe")
     tilt_alerts_frame.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 8))
 
     ttk.Checkbutton(tilt_alerts_frame, text="Tilt Results", variable=chat_tilt_results_var).grid(row=0, column=0, sticky="w", padx=10, pady=(8, 4))
@@ -4818,14 +4857,15 @@ def open_settings_window():
     narrative_alert_max_items_entry.grid(row=5, column=2, sticky="w", padx=(0, 10), pady=(2, 8))
     narrative_alert_max_items_entry.insert(0, config.get_setting("narrative_alert_max_items") or "3")
 
-    ttk.Label(tilt_tab, text="Max names announced (Race/Tilt)").grid(row=2, column=0, sticky="w", pady=(2, 4))
+    ttk.Label(tilt_chat_tab, text="Max names announced (Race/Tilt)").grid(row=2, column=0, sticky="w", pady=(2, 4))
     max_name_values = [str(i) for i in range(3, 26)]
     selected_max_names = tk.StringVar(value=str(get_chat_max_names()))
-    max_names_combobox = ttk.Combobox(tilt_tab, textvariable=selected_max_names, values=max_name_values, width=5, state="readonly")
+    max_names_combobox = ttk.Combobox(tilt_chat_tab, textvariable=selected_max_names, values=max_name_values, width=5, state="readonly")
     max_names_combobox.grid(row=2, column=1, sticky="w", pady=(2, 4), padx=(8, 0))
 
-    tiltsurvivors_frame = ttk.LabelFrame(tilt_tab, text="Tilt Command Thresholds", style="Card.TLabelframe")
-    tiltsurvivors_frame.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(6, 8))
+    ttk.Label(tilt_thresholds_tab, text="Configure !tiltsurvivors filtering", style="Small.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 8))
+    tiltsurvivors_frame = ttk.LabelFrame(tilt_thresholds_tab, text="Tilt Command Thresholds", style="Card.TLabelframe")
+    tiltsurvivors_frame.grid(row=1, column=0, sticky="ew", pady=(0, 8))
     ttk.Label(tiltsurvivors_frame, text="!tiltsurvivors minimum levels participated", style="Small.TLabel").grid(row=0, column=0, sticky="w", padx=(10, 8), pady=(8, 4))
     tiltsurvivors_min_levels_entry = ttk.Entry(tiltsurvivors_frame, width=12, justify='center')
     tiltsurvivors_min_levels_entry.grid(row=0, column=1, sticky="w", padx=(0, 10), pady=(8, 4))
@@ -5060,31 +5100,18 @@ def open_settings_window():
     theme_combobox.bind('<<ComboboxSelected>>', apply_selected_theme)
 
 
-    # --- Overlay tab ---
-    overlay_tab.grid_columnconfigure(0, weight=1)
-    overlay_tab.grid_rowconfigure(1, weight=1)
+    # --- Overlay tabs ---
+    race_overlay_tab.grid_columnconfigure(0, weight=1)
 
     ttk.Label(
-        overlay_tab,
+        race_overlay_tab,
         text="Control OBS overlay visuals from the desktop app",
         style="Small.TLabel"
     ).grid(row=0, column=0, sticky="w", pady=(0, 8))
 
-    overlay_sections = ttk.Notebook(overlay_tab)
-    overlay_sections.grid(row=1, column=0, sticky="nsew")
+    # Race/BR results overlay settings
 
-    results_overlay_tab = ttk.Frame(overlay_sections, style="App.TFrame", padding=12)
-    horizontal_overlay_tab = ttk.Frame(overlay_sections, style="App.TFrame", padding=12)
-    tilt_overlay_tab = ttk.Frame(overlay_sections, style="App.TFrame", padding=12)
-
-    overlay_sections.add(results_overlay_tab, text="Results Overlay")
-    overlay_sections.add(horizontal_overlay_tab, text="Horizontal Ticker")
-    overlay_sections.add(tilt_overlay_tab, text="Tilt Overlay")
-
-    # Results overlay settings
-    results_overlay_tab.grid_columnconfigure(0, weight=1)
-
-    core_overlay_frame = ttk.LabelFrame(results_overlay_tab, text="Results Display", style="Card.TLabelframe")
+    core_overlay_frame = ttk.LabelFrame(race_overlay_tab, text="Results Display", style="Card.TLabelframe")
     core_overlay_frame.grid(row=0, column=0, sticky="nsew")
     core_overlay_frame.grid_columnconfigure(0, weight=1)
 
@@ -5140,8 +5167,8 @@ def open_settings_window():
     ttk.Checkbutton(overlay_toggles_frame, text="Horizontal ticker layout (1080x100)", variable=overlay_horizontal_layout_var).grid(row=2, column=0, sticky="w", pady=(0, 2))
 
     # Horizontal ticker settings
-    horizontal_overlay_tab.grid_columnconfigure(0, weight=1)
-    horizontal_feed_frame = ttk.LabelFrame(horizontal_overlay_tab, text="Feed Items", style="Card.TLabelframe")
+    race_horizontal_overlay_tab.grid_columnconfigure(0, weight=1)
+    horizontal_feed_frame = ttk.LabelFrame(race_horizontal_overlay_tab, text="Feed Items", style="Card.TLabelframe")
     horizontal_feed_frame.grid(row=0, column=0, sticky="nsew")
     horizontal_feed_frame.grid_columnconfigure(0, weight=1)
 
@@ -5172,10 +5199,13 @@ def open_settings_window():
     overlay_horizontal_feed_tilt_season_var = tk.BooleanVar(value=str(config.get_setting("overlay_horizontal_feed_tilt_season") or "True") == "True")
     overlay_horizontal_feed_tilt_last_run_var = tk.BooleanVar(value=str(config.get_setting("overlay_horizontal_feed_tilt_last_run") or "True") == "True")
 
-    ttk.Separator(horizontal_feed_frame).grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 4))
+    tilt_horizontal_overlay_tab.grid_columnconfigure(0, weight=1)
+    tilt_horizontal_feed_frame = ttk.LabelFrame(tilt_horizontal_overlay_tab, text="Feed Items", style="Card.TLabelframe")
+    tilt_horizontal_feed_frame.grid(row=0, column=0, sticky="nsew")
+    tilt_horizontal_feed_frame.grid_columnconfigure(0, weight=1)
 
-    tilt_feed_frame = ttk.Frame(horizontal_feed_frame, style="App.TFrame")
-    tilt_feed_frame.grid(row=2, column=0, sticky="nsew", padx=10, pady=(0, 8))
+    tilt_feed_frame = ttk.Frame(tilt_horizontal_feed_frame, style="App.TFrame")
+    tilt_feed_frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=(8, 8))
     tilt_feed_frame.grid_columnconfigure(0, weight=1)
     ttk.Label(tilt_feed_frame, text="Tilt ticker feed", style="Small.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 2))
     ttk.Checkbutton(tilt_feed_frame, text="Tilt Current Run", variable=overlay_horizontal_feed_tilt_current_var).grid(row=1, column=0, sticky="w", pady=(0, 2))
@@ -5243,7 +5273,7 @@ def open_settings_window():
     ).grid(row=6, column=0, columnspan=3, sticky="w")
 
     ttk.Label(
-        overlay_tab,
+        race_overlay_tab,
         text="Restart MyStats after changing port. Visual changes apply on next refresh.",
         style="Small.TLabel"
     ).grid(row=2, column=0, sticky="w", pady=(8, 0))
