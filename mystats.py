@@ -267,8 +267,15 @@ def get_placement_emote(place):
     return {1: "🥇", 2: "🥈", 3: "🥉"}.get(place, "")
 
 
+def show_leaderboard_medal_emotes():
+    config_manager = globals().get('config')
+    if config_manager is None:
+        return True
+    return str(config_manager.get_setting('chat_leaderboard_show_medals') or 'True') == 'True'
+
+
 def format_ranked_label(place):
-    emote = get_placement_emote(place)
+    emote = get_placement_emote(place) if show_leaderboard_medal_emotes() else ""
     return f"{emote} {place}." if emote else f"{place}."
 
 
@@ -5045,12 +5052,14 @@ def open_settings_window():
     chat_br_results_var = tk.BooleanVar(value=is_chat_response_enabled("chat_br_results"))
     chat_race_results_var = tk.BooleanVar(value=is_chat_response_enabled("chat_race_results"))
     chat_all_commands_var = tk.BooleanVar(value=is_chat_response_enabled("chat_all_commands"))
+    chat_leaderboard_show_medals_var = tk.BooleanVar(value=str(config.get_setting("chat_leaderboard_show_medals") or "True") == "True")
     competitive_raid_monitor_enabled_var = tk.BooleanVar(value=is_chat_response_enabled("competitive_raid_monitor_enabled"))
 
     ttk.Checkbutton(race_chat_tab, text="BR Results", variable=chat_br_results_var).grid(row=1, column=0, sticky="w", pady=2)
     ttk.Checkbutton(race_chat_tab, text="Race Results", variable=chat_race_results_var).grid(row=2, column=0, sticky="w", pady=2)
     ttk.Checkbutton(race_chat_tab, text="All !commands", variable=chat_all_commands_var).grid(row=3, column=0, sticky="w", pady=2)
-    ttk.Checkbutton(race_chat_tab, text="Competitive Raid Alerts (opt-in)", variable=competitive_raid_monitor_enabled_var).grid(row=4, column=0, sticky="w", pady=2)
+    ttk.Checkbutton(race_chat_tab, text="Show top-3 medal emotes in leaderboard commands", variable=chat_leaderboard_show_medals_var).grid(row=4, column=0, sticky="w", pady=2)
+    ttk.Checkbutton(race_chat_tab, text="Competitive Raid Alerts (opt-in)", variable=competitive_raid_monitor_enabled_var).grid(row=5, column=0, sticky="w", pady=2)
 
     race_narrative_alerts_var = tk.BooleanVar(value=is_chat_response_enabled("race_narrative_alerts_enabled"))
     race_narrative_grinder_var = tk.BooleanVar(value=is_chat_response_enabled("race_narrative_grinder_enabled"))
@@ -5559,6 +5568,7 @@ def open_settings_window():
         chat_race_results_var.set(True)
         chat_tilt_results_var.set(True)
         chat_all_commands_var.set(True)
+        chat_leaderboard_show_medals_var.set(True)
         competitive_raid_monitor_enabled_var.set(False)
         chat_narrative_alerts_var.set(True)
         chat_tilt_suppress_offline_var.set(True)
@@ -5676,6 +5686,7 @@ def open_settings_window():
         config.set_setting("UI_THEME", selected_theme.get(), persistent=True)
         config.set_setting("chat_br_results", str(chat_br_results_var.get()), persistent=True)
         config.set_setting("chat_race_results", str(chat_race_results_var.get()), persistent=True)
+        config.set_setting("chat_leaderboard_show_medals", str(chat_leaderboard_show_medals_var.get()), persistent=True)
         config.set_setting("chat_tilt_results", str(chat_tilt_results_var.get()), persistent=True)
         config.set_setting("chat_tilt_suppress_offline", str(chat_tilt_suppress_offline_var.get()), persistent=True)
         config.set_setting("chat_all_commands", str(chat_all_commands_var.get()), persistent=True)
@@ -6766,7 +6777,7 @@ class ConfigManager:
                                 'chunk_alert_sound', 'reset_audio_sound', 'audio_device', 'checkpoint_file',
                                 'tilt_player_file', 'active_event_ids', 'paused_event_ids', 'checkpoint_results_file',
                                 'tilts_results_file', 'tilt_level_file', 'map_data_file', 'map_results_file',
-                                'UI_THEME', 'chat_br_results', 'chat_race_results', 'chat_tilt_results',
+                                'UI_THEME', 'chat_br_results', 'chat_race_results', 'chat_leaderboard_show_medals', 'chat_tilt_results',
                                 'chat_tilt_suppress_offline',
                                 'chat_mystats_command', 'chat_all_commands', 'chat_narrative_alerts', 'competitive_raid_monitor_enabled', 'competitive_raid_phase', 'competitive_raid_queue_started_at', 'competitive_raid_live_started_at', 'competitive_raid_last_summary_live_started_at',
                                 'narrative_alert_grinder_enabled', 'narrative_alert_winmilestone_enabled',
@@ -6803,6 +6814,7 @@ class ConfigManager:
         self.defaults = {
             'chat_br_results': 'True',
             'chat_race_results': 'True',
+            'chat_leaderboard_show_medals': 'True',
             'chat_tilt_results': 'True',
             'chat_tilt_suppress_offline': 'True',
             'chat_mystats_command': 'True',
