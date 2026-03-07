@@ -11078,9 +11078,14 @@ async def competitive_raid_monitor(bot):
             live_streamer = normalize_channel_name((live_info or {}).get('streamer'))
 
             queue_started_at = (queue_info or {}).get('started_at') or _parse_iso_utc(config.get_setting('competitive_raid_queue_started_at'))
-            live_started_at = (live_info or {}).get('started_at') or _parse_iso_utc(config.get_setting('competitive_raid_live_started_at'))
+            live_started_at = (live_info or {}).get('started_at')
+            previous_phase = str(config.get_setting('competitive_raid_phase') or '').lower()
+            persisted_live_start = _parse_iso_utc(config.get_setting('competitive_raid_live_started_at'))
 
-            if queue_streamer:
+            if live_streamer:
+                bot.last_competitive_raid_streamer = live_streamer
+                persist_competitive_raid_snapshot(payload, live_streamer, live_started_at)
+            elif queue_streamer:
                 bot.last_competitive_raid_streamer = queue_streamer
                 persist_competitive_raid_snapshot(payload, queue_streamer, live_started_at)
 
@@ -11088,47 +11093,38 @@ async def competitive_raid_monitor(bot):
                 queue_start_iso = queue_started_at.isoformat()
                 if config.get_setting('competitive_raid_queue_started_at') != queue_start_iso:
                     config.set_setting('competitive_raid_queue_started_at', queue_start_iso, persistent=True)
-                    config.set_setting('competitive_raid_phase', 'queue', persistent=True)
-                    queue_message = (
-                        f"🟡 {local_streamer} is next up for competitive raids! "
-                        f"Queue is open now: https://pixelbypixel.studio/competitions"
-                    )
-                    if bot.channel is not None:
-                        await send_chat_message(bot.channel, queue_message, category='race')
-                    enqueue_overlay_event('raid_queue_open', queue_message)
+                    if previous_phase != 'live':
+                        config.set_setting('competitive_raid_phase', 'queue', persistent=True)
 
             if live_streamer == local_streamer and live_started_at is not None:
                 live_start_iso = live_started_at.isoformat()
                 if config.get_setting('competitive_raid_live_started_at') != live_start_iso:
                     config.set_setting('competitive_raid_live_started_at', live_start_iso, persistent=True)
-
+                    config.set_setting('competitive_raid_phase', 'live', persistent=True)
                     participant_count = _extract_participant_count(
                         payload,
                         preferred_node=(live_info or {}).get('source'),
                         streamer_name=local_streamer,
                     )
+                    raider_segment = (
+                        f" ({participant_count:,} raiders)" if participant_count is not None else ""
+                    )
+                    live_message = (
+                        f"🏁 Competitive raid host selected: {format_user_tag(local_streamer)}{raider_segment}! "
+                        "Welcome competitive raiders—good luck and have fun!"
+                    )
+                    if bot.channel is not None:
+                        await send_chat_message(bot.channel, live_message, category='race')
+                    enqueue_overlay_event('raid_selected', live_message)
 
-                    if participant_count is not None and participant_count < 10:
-                        cancel_message = (
-                            f"🛑 Competitive raid cancelled for {local_streamer}: only {participant_count} participants (minimum 10)."
-                        )
-                        if bot.channel is not None:
-                            await send_chat_message(bot.channel, cancel_message, category='race')
-                        enqueue_overlay_event('raid_cancelled', cancel_message)
-                        config.set_setting('competitive_raid_phase', 'idle', persistent=True)
-                        config.set_setting('competitive_raid_last_summary_live_started_at', live_start_iso, persistent=True)
-                    else:
-                        config.set_setting('competitive_raid_phase', 'live', persistent=True)
-                        live_message = f"🔴 Competitive raid has begun for {local_streamer}!"
-                        if bot.channel is not None:
-                            await send_chat_message(bot.channel, live_message, category='race')
-                        enqueue_overlay_event('raid_live_started', live_message)
-
-            persisted_live_start = _parse_iso_utc(config.get_setting('competitive_raid_live_started_at'))
-            if persisted_live_start and live_streamer == local_streamer and str(config.get_setting('competitive_raid_phase') or '').lower() == 'live':
-                elapsed = datetime.now(timezone.utc) - persisted_live_start
+            if (
+                previous_phase == 'live'
+                and persisted_live_start is not None
+                and live_streamer != local_streamer
+                and (datetime.now(timezone.utc) - persisted_live_start) >= timedelta(minutes=18)
+            ):
                 summary_key = persisted_live_start.isoformat()
-                if elapsed >= timedelta(minutes=20) and config.get_setting('competitive_raid_last_summary_live_started_at') != summary_key:
+                if config.get_setting('competitive_raid_last_summary_live_started_at') != summary_key:
                     history_payload = None
                     try:
                         history_payload = await asyncio.to_thread(fetch_competitions_history_payload)
@@ -11142,22 +11138,24 @@ async def competitive_raid_monitor(bot):
                     enqueue_overlay_event('raid_summary', summary_message)
                     config.set_setting('competitive_raid_last_summary_live_started_at', summary_key, persistent=True)
                     config.set_setting('competitive_raid_phase', 'idle', persistent=True)
+                    config.set_setting('competitive_raid_live_started_at', '', persistent=True)
 
             now_utc = datetime.now(timezone.utc)
-            if queue_streamer == local_streamer and queue_started_at is not None:
-                queue_end = queue_started_at + timedelta(minutes=15)
-                if now_utc < queue_end:
-                    remaining = (queue_end - now_utc).total_seconds()
-                    next_poll_at = time.monotonic() + max(10, min(30, remaining / 3))
-                else:
-                    next_poll_at = time.monotonic() + 15
-            elif live_streamer == local_streamer and live_started_at is not None:
+            current_phase = str(config.get_setting('competitive_raid_phase') or '').lower()
+            if current_phase == 'live' and live_streamer == local_streamer and live_started_at is not None:
                 live_end = live_started_at + timedelta(minutes=20)
                 if now_utc < live_end:
                     remaining = (live_end - now_utc).total_seconds()
                     next_poll_at = time.monotonic() + (10 if remaining < 90 else 30)
                 else:
                     next_poll_at = time.monotonic() + 20
+            elif queue_streamer == local_streamer and queue_started_at is not None:
+                queue_end = queue_started_at + timedelta(minutes=15)
+                if now_utc < queue_end:
+                    remaining = (queue_end - now_utc).total_seconds()
+                    next_poll_at = time.monotonic() + max(10, min(30, remaining / 3))
+                else:
+                    next_poll_at = time.monotonic() + 15
             else:
                 started_at = get_competitive_raid_started_at(payload)
                 delay_seconds = get_competitive_raid_poll_delay_seconds(started_at)
