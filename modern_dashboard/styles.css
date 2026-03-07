@@ -51,6 +51,7 @@ body {
 }
 .kpi-label { color: #9bb1d6; font-size: .74rem; text-transform: uppercase; letter-spacing: .08em; }
 .kpi-value { font-weight: 700; color: #8be8ae; font-size: .92rem; }
+
 .legend { display: grid; gap: 6px; font-size: .79rem; color: #c5d4f0; }
 .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 7px; }
 .dot--hit { background: #3ddc8f; }
@@ -182,6 +183,7 @@ body {
   gap: 6px;
   margin-bottom: 10px;
 }
+
 .mini-filter-btn {
   border-radius: 999px;
   border: 1px solid rgba(127,216,255,.3);
@@ -239,6 +241,32 @@ body {
 .rivals-onboarding--collapsed .rivals-onboarding__steps,
 .rivals-onboarding--collapsed .rivals-onboarding__context {
   display: none;
+}
+
+.rivals-controls {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) auto auto auto;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.rivals-controls input,
+.rivals-controls select,
+.rivals-controls button {
+  border-radius: 8px;
+  border: 1px solid rgba(127,216,255,.3);
+  background: rgba(255,255,255,.06);
+  color: #d4e4ff;
+  padding: 6px 8px;
+  font-size: .72rem;
+}
+
+.rivals-controls input:focus,
+.rivals-controls select:focus,
+.rivals-controls button:focus,
+.rivals-onboarding__toggle:focus {
+  outline: 2px solid rgba(140, 241, 184, .85);
+  outline-offset: 1px;
 }
 
 .analytics-shell {
@@ -305,4 +333,95 @@ body {
 
 .analytics-stat__compare strong {
   color: #8be8ae;
+}
+
+.trend-bars {
+  display: grid;
+  gap: 7px;
+}
+
+.trend-grid {
+  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+  align-items: start;
+}
+
+.trend-highlights-full {
+  grid-column: 1 / -1;
+}
+
+.trend-chart-card {
+  min-height: 260px;
+}
+
+.trend-line-chart {
+  width: 100%;
+  height: 188px;
+  margin-top: 4px;
+}
+
+.trend-axis {
+  stroke: rgba(255,255,255,.28);
+  stroke-width: 1;
+}
+
+.trend-line-path {
+  fill: none;
+  stroke: #4ec9ff;
+  stroke-width: 2.5;
+}
+
+.trend-line-dot {
+  fill: #8be8ae;
+  stroke: rgba(11, 26, 51, .95);
+  stroke-width: 1;
+}
+
+.trend-axis-label {
+  fill: #9bb1d6;
+  font-size: 9px;
+  dominant-baseline: hanging;
+}
+
+.trend-line-summary {
+  margin-top: 6px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 4px 8px;
+  color: #c9dcff;
+  font-size: .68rem;
+}
+
+.trend-line-summary strong {
+  color: #8be8ae;
+}
+
+.trend-bar-row {
+  display: grid;
+  gap: 4px;
+}
+
+.trend-bar-row__meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: #d9e8ff;
+  font-size: .72rem;
+}
+
+.trend-bar-row__meta strong {
+  color: #8be8ae;
+}
+
+.trend-bar-track {
+  width: 100%;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.1);
+  overflow: hidden;
+}
+
+.trend-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #4ec9ff, #3ddc8f);
 }

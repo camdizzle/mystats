@@ -5,6 +5,14 @@ let raceDashboardFilter = 'both';
 let tiltSortBy = 'tilt_points';
 let tiltSortOrder = 'desc';
 let rivalsGuideCollapsed = false;
+let rivalsSortBy = 'closest';
+let rivalsSearchQuery = '';
+let rivalsGapPreset = 'all';
+let rivalsRowsSnapshot = [];
+let rivalsSettingsSnapshot = {};
+let mycyclePage = 1;
+let mycyclePageSize = 120;
+let mycycleQuery = '';
 
 const I18N = {
   en: {},
@@ -37,6 +45,14 @@ const I18N = {
     'Updated now': 'Actualizado ahora',
     'Updated': 'Actualizado',
     'Unable to load MyCycle data.': 'No se pudieron cargar los datos de MyCycle.',
+    'No rivals currently qualify. Try lowering Minimum Season Races or increasing Maximum Point Gap in Settings → Rivals.': 'No hay rivales que califiquen ahora. Baja Carreras mínimas o sube Brecha máxima en Ajustes → Rivals.',
+    'Current closest rivalry': 'Rivalidad más cercana actual',
+    'Rivals Highlights': 'Resumen de rivales',
+    'No rivalries found with current settings': 'No se encontraron rivalidades con la configuración actual',
+    'Closest Matchup': 'Enfrentamiento más parejo',
+    'Most One-Sided': 'Más desigual',
+    'point gap': 'brecha de puntos',
+    'Most One-Sided = largest point gap. Tie-breaker: larger race gap.': 'Más desigual = mayor brecha de puntos. Desempate: mayor brecha de carreras.',
   },
   au: {
     'Tracked Racers': 'Tracked Mates on the Track',
@@ -67,6 +83,14 @@ const I18N = {
     'Updated now': 'Updated just now, fresh as',
     'Updated': 'Updated, fresh off the barbie',
     'Unable to load MyCycle data.': 'Could not load MyCycle data, bit crook.',
+    'No rivals currently qualify. Try lowering Minimum Season Races or increasing Maximum Point Gap in Settings → Rivals.': 'No rivals qualify right now. Lower min races or lift max gap in Settings → Rivals, mate.',
+    'Current closest rivalry': 'Current closest rivalry',
+    'Rivals Highlights': 'Rivals Highlights',
+    'No rivalries found with current settings': 'No rivalries with current settings, mate',
+    'Closest Matchup': 'Closest Matchup',
+    'Most One-Sided': 'Most One-Sided',
+    'point gap': 'point gap',
+    'Most One-Sided = largest point gap. Tie-breaker: larger race gap.': 'Most One-Sided = biggest point gap. Tie-breaker: bigger race gap.',
   }
 };
 
@@ -168,8 +192,13 @@ function renderCycleHighlights(rows = []) {
   }, null);
 
   const newestCycler = rows
-    .filter((row) => row.last_cycle_completed_at)
-    .sort((a, b) => String(b.last_cycle_completed_at).localeCompare(String(a.last_cycle_completed_at)))[0] || null;
+    .filter((row) => row.last_cycle_completed_at_iso || row.last_cycle_completed_at)
+    .sort((a, b) => {
+      const left = Number(a.last_cycle_completed_at_epoch || 0);
+      const right = Number(b.last_cycle_completed_at_epoch || 0);
+      if (left !== right) return right - left;
+      return String(b.last_cycle_completed_at || '').localeCompare(String(a.last_cycle_completed_at || ''));
+    })[0] || null;
 
   const topName = topCycler?.display_name || topCycler?.username || '—';
   const topCycles = Number(topCycler?.cycles_completed || 0);
@@ -187,6 +216,7 @@ function renderMyCycleRows(data) {
   if (!rowsHost) return;
 
   const rows = Array.isArray(data?.mycycle?.rows) ? data.mycycle.rows : [];
+  const pageInfo = data?.mycycle?.pagination || null;
   const settings = data?.mycycle?.settings || {};
   const minPlace = Number(settings.min_place || 1);
   const maxPlace = Number(settings.max_place || 10);
@@ -199,12 +229,22 @@ function renderMyCycleRows(data) {
   renderKpis(rows);
   renderCycleHighlights(rows);
 
+  const pager = pageInfo ? `
+    <div class="subline" style="margin-bottom:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      <input id="mycycle-search" type="text" placeholder="Filter racer" value="${escapeHtml(mycycleQuery)}" style="padding:6px 8px;border-radius:6px;border:1px solid #3d4b63;background:#0f1724;color:#e8eef8;" />
+      <button id="mycycle-search-btn" type="button">Apply</button>
+      <button id="mycycle-prev" type="button" ${pageInfo.page <= 1 ? 'disabled' : ''}>Prev</button>
+      <button id="mycycle-next" type="button" ${pageInfo.page >= pageInfo.total_pages ? 'disabled' : ''}>Next</button>
+      <span>${escapeHtml(`Page ${pageInfo.page}/${pageInfo.total_pages} • ${pageInfo.total} racers`)}</span>
+    </div>
+  ` : '';
+
   if (!rows.length) {
-    rowsHost.innerHTML = `<div class="empty">${escapeHtml(t('No MyCycle race data yet.'))}</div>`;
+    rowsHost.innerHTML = `${pager}<div class="empty">${escapeHtml(t('No MyCycle race data yet.'))}</div>`;
     return;
   }
 
-  rowsHost.innerHTML = rows.slice(0, 120).map((row, idx) => {
+  rowsHost.innerHTML = pager + rows.map((row, idx) => {
     const hits = new Set(Array.isArray(row.placement_hits) ? row.placement_hits.map((x) => Number(x)) : []);
     const chips = placementRange.map((place) => {
       const hit = hits.has(place);
@@ -219,7 +259,7 @@ function renderMyCycleRows(data) {
     return `
       <div class="row">
         <div class="row-head">
-          <span class="rank">#${idx + 1}</span>
+          <span class="rank">#${idx + 1 + ((pageInfo?.page || 1) - 1) * (pageInfo?.page_size || rows.length)}</span>
           <span class="name">${escapeHtml(row.display_name || row.username || '-')}</span>
           <span class="stat">${escapeHtml(`${fmt(row.cycles_completed)} cycles`)}</span>
         </div>
@@ -229,6 +269,30 @@ function renderMyCycleRows(data) {
       </div>
     `;
   }).join('');
+
+  const searchInput = el('mycycle-search');
+  const searchBtn = el('mycycle-search-btn');
+  const prevBtn = el('mycycle-prev');
+  const nextBtn = el('mycycle-next');
+  if (searchBtn && searchInput) {
+    searchBtn.onclick = () => {
+      mycycleQuery = String(searchInput.value || '').trim();
+      mycyclePage = 1;
+      refresh();
+    };
+  }
+  if (prevBtn) {
+    prevBtn.onclick = () => {
+      mycyclePage = Math.max(1, mycyclePage - 1);
+      refresh();
+    };
+  }
+  if (nextBtn && pageInfo) {
+    nextBtn.onclick = () => {
+      mycyclePage = Math.min(pageInfo.total_pages || mycyclePage, mycyclePage + 1);
+      refresh();
+    };
+  }
 }
 
 function renderSeasonKpis(rows = []) {
@@ -465,11 +529,12 @@ function getRivalsOnboardingSteps(settings = {}) {
   const minRaces = Math.max(1, Number(settings?.min_races || 0) || 50);
   const maxGap = Math.max(0, Number(settings?.max_point_gap || 0) || 1500);
   const pairCount = Math.max(1, Number(settings?.pair_count || 0) || 25);
+  const hardCap = Math.max(1, Number(settings?.max_pairs || 0) || 200);
 
   return [
     `1) MyStats scans players with at least ${fmt(minRaces)} season races.`,
     `2) It compares point totals and keeps pairs within a ${fmt(maxGap)}-point gap.`,
-    `3) The dashboard ranks the ${fmt(Math.min(200, pairCount))} closest pairs (smaller gap = stronger rivalry).`,
+    `3) The dashboard ranks the ${fmt(Math.min(hardCap, pairCount))} closest pairs (smaller gap = stronger rivalry).`,
     '4) Use !rivals <name> for personal rivals, or !h2h <name1> <name2> for direct matchups in chat.',
   ];
 }
@@ -483,13 +548,13 @@ function renderRivalsOnboarding(settings = {}, rows = []) {
   stepsHost.innerHTML = steps.map((step) => `<li>${escapeHtml(step)}</li>`).join('');
 
   if (!rows.length) {
-    contextHost.textContent = 'No rivals currently qualify. Try lowering Minimum Season Races or increasing Maximum Point Gap in Settings → Rivals.';
+    contextHost.textContent = t('No rivals currently qualify. Try lowering Minimum Season Races or increasing Maximum Point Gap in Settings → Rivals.');
     return;
   }
 
   const closest = rows[0];
   const closestNames = `${closest.display_a || closest.user_a || 'Player A'} vs ${closest.display_b || closest.user_b || 'Player B'}`;
-  contextHost.textContent = `Current closest rivalry: ${closestNames} at ${fmt(closest.point_gap)} points apart.`;
+  contextHost.textContent = `${t('Current closest rivalry')}: ${closestNames} at ${fmt(closest.point_gap)} points apart.`;
 }
 
 function wireRivalsOnboardingToggle() {
@@ -542,7 +607,7 @@ function renderRivalsHighlights(rows = []) {
   if (!host) return;
 
   if (!rows.length) {
-    host.innerHTML = '<div class="highlight-card"><div class="highlight-title">Rivals Highlights</div><div class="highlight-main">No rivalries found with current settings</div></div>';
+    host.innerHTML = `<div class="highlight-card"><div class="highlight-title">${escapeHtml(t('Rivals Highlights'))}</div><div class="highlight-main">${escapeHtml(t('No rivalries found with current settings'))}</div></div>`;
     return;
   }
 
@@ -562,18 +627,126 @@ function renderRivalsHighlights(rows = []) {
   const oneSidedNames = `${mostOneSided.display_a || mostOneSided.user_a || '—'} vs ${mostOneSided.display_b || mostOneSided.user_b || '—'}`;
 
   host.innerHTML = [
-    `<div class="highlight-card"><div class="highlight-title">Closest Matchup</div><div class="highlight-main">${escapeHtml(closestNames)}</div><div class="highlight-detail">${escapeHtml(`${fmt(closest.point_gap)} point gap`)}</div></div>`,
-    `<div class="highlight-card"><div class="highlight-title">Most One-Sided</div><div class="highlight-main">${escapeHtml(oneSidedNames)}</div><div class="highlight-detail">${escapeHtml(`${fmt(mostOneSided.point_gap)} point gap`)}</div></div>`,
+    `<div class="highlight-card"><div class="highlight-title">${escapeHtml(t('Closest Matchup'))}</div><div class="highlight-main">${escapeHtml(closestNames)}</div><div class="highlight-detail">${escapeHtml(`${fmt(closest.point_gap)} ${t('point gap')}`)}</div></div>`,
+    `<div class="highlight-card" title="${escapeHtml(t('Most One-Sided = largest point gap. Tie-breaker: larger race gap.'))}"><div class="highlight-title">${escapeHtml(t('Most One-Sided'))}</div><div class="highlight-main">${escapeHtml(oneSidedNames)}</div><div class="highlight-detail">${escapeHtml(`${fmt(mostOneSided.point_gap)} ${t('point gap')}`)}</div></div>`,
   ].join('');
+}
+
+function getFilteredSortedRivalRows(rows = []) {
+  const trimmedQuery = rivalsSearchQuery.trim().toLowerCase();
+  const gapLimit = rivalsGapPreset === 'all' ? Number.POSITIVE_INFINITY : Number(rivalsGapPreset || 0);
+
+  const filtered = rows.filter((row) => {
+    const rowGap = Number(row.point_gap || 0);
+    if (Number.isFinite(gapLimit) && rowGap > gapLimit) return false;
+    if (!trimmedQuery) return true;
+    const nameA = String(row.display_a || row.user_a || '').toLowerCase();
+    const nameB = String(row.display_b || row.user_b || '').toLowerCase();
+    return nameA.includes(trimmedQuery) || nameB.includes(trimmedQuery);
+  });
+
+  const sorted = [...filtered].sort((a, b) => {
+    const pointsA = Number(a.points_a || 0);
+    const pointsB = Number(a.points_b || 0);
+    const racesA = Number(a.races_a || 0);
+    const racesB = Number(a.races_b || 0);
+    const gapA = Math.abs(pointsA - pointsB);
+
+    const pointsC = Number(b.points_a || 0);
+    const pointsD = Number(b.points_b || 0);
+    const racesC = Number(b.races_a || 0);
+    const racesD = Number(b.races_b || 0);
+    const gapB = Math.abs(pointsC - pointsD);
+
+    if (rivalsSortBy === 'widest') return gapB - gapA;
+    if (rivalsSortBy === 'most-races') return (racesC + racesD) - (racesA + racesB);
+    if (rivalsSortBy === 'best-ppr') {
+      const pprEdgeA = Math.abs((racesA > 0 ? pointsA / racesA : 0) - (racesB > 0 ? pointsB / racesB : 0));
+      const pprEdgeB = Math.abs((racesC > 0 ? pointsC / racesC : 0) - (racesD > 0 ? pointsD / racesD : 0));
+      return pprEdgeB - pprEdgeA;
+    }
+    if (rivalsSortBy === 'score') return Number(b.rivalry_score || 0) - Number(a.rivalry_score || 0);
+    return gapA - gapB;
+  });
+
+  return sorted;
+}
+
+function exportRivalsCsv() {
+  if (!rivalsRowsSnapshot.length) return;
+  const headers = ['rank', 'player_a', 'points_a', 'races_a', 'player_b', 'points_b', 'races_b', 'point_gap', 'recent_point_gap_30d', 'trend', 'rivalry_score'];
+  const lines = [headers.join(',')];
+  rivalsRowsSnapshot.forEach((row, idx) => {
+    lines.push([
+      idx + 1,
+      row.display_a || row.user_a || '',
+      Number(row.points_a || 0),
+      Number(row.races_a || 0),
+      row.display_b || row.user_b || '',
+      Number(row.points_b || 0),
+      Number(row.races_b || 0),
+      Number(row.point_gap || 0),
+      Number(row.recent_point_gap_30d || 0),
+      row.trend_direction || 'steady',
+      Number(row.rivalry_score || 0),
+    ].map((value) => `"${String(value).replace(/"/g, '""')}"`).join(','));
+  });
+
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `rivals_${new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-')}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function wireRivalsControls() {
+  const search = el('rivals-search');
+  const sort = el('rivals-sort');
+  const preset = el('rivals-preset');
+  const exportBtn = el('rivals-export');
+  if (!search || !sort || !preset || !exportBtn || search.dataset.wired === 'true') return;
+
+  search.dataset.wired = 'true';
+  sort.value = rivalsSortBy;
+  preset.value = rivalsGapPreset;
+
+  search.addEventListener('input', () => {
+    rivalsSearchQuery = search.value || '';
+    renderRivalsRows({ rivals: rivalsRowsSnapshot, settings: rivalsSettingsSnapshot });
+  });
+  sort.addEventListener('change', () => {
+    rivalsSortBy = sort.value || 'closest';
+    renderRivalsRows({ rivals: rivalsRowsSnapshot, settings: rivalsSettingsSnapshot });
+  });
+  preset.addEventListener('change', () => {
+    rivalsGapPreset = preset.value || 'all';
+    renderRivalsRows({ rivals: rivalsRowsSnapshot, settings: rivalsSettingsSnapshot });
+  });
+  exportBtn.addEventListener('click', exportRivalsCsv);
 }
 
 function renderRivalsRows(data) {
   const rowsHost = el('rivals-leaderboard');
   if (!rowsHost) return;
 
-  const rows = Array.isArray(data?.rivals) ? data.rivals : [];
+  const incomingRows = Array.isArray(data?.rivals) ? data.rivals : [];
+  rivalsSettingsSnapshot = data?.settings || rivalsSettingsSnapshot;
+  if (incomingRows.length) {
+    rivalsRowsSnapshot = incomingRows;
+  }
+  const rows = getFilteredSortedRivalRows(rivalsRowsSnapshot);
+  wireRivalsControls();
 
-  renderRivalsOnboarding(data?.settings?.rivals || {}, rows);
+  const rivalsSettings = {
+    ...(data?.settings?.rivals || {}),
+    max_pairs: Number(data?.settings?.rivals_limits?.max_pairs || 200),
+  };
+
+  renderRivalsOnboarding(rivalsSettings, rows);
   renderRivalsKpis(rows);
   renderRivalsHighlights(rows);
 
@@ -660,9 +833,9 @@ function renderRaceDashboardKpis(rows = [], filterMode = 'both') {
 
   host.innerHTML = [
     { label: t('Tracked Racers'), value: fmt(filteredRows.length) },
-    { label: filterMode === 'race' ? 'Total Races' : (filterMode === 'br' ? 'Total BRs' : 'Total Events'), value: fmt(totalEvents) },
+    { label: filterMode === 'race' ? 'Total Races' : (filterMode === 'br' ? 'Total BRs' : 'Total Races'), value: fmt(totalEvents) },
     { label: 'Total Points', value: fmt(totalPoints) },
-    { label: 'Avg Points/Event', value: avgPoints.toFixed(1) },
+    { label: 'Avg Points/Race', value: avgPoints.toFixed(1) },
   ].map((kpi) => (
     `<div class="kpi"><div class="kpi-label">${escapeHtml(kpi.label)}</div><div class="kpi-value">${escapeHtml(kpi.value)}</div></div>`
   )).join('');
@@ -733,8 +906,8 @@ function renderRaceDashboardRows(data) {
           <span class="stat">${escapeHtml(`${fmt(row.totals.points)} pts`)}</span>
         </div>
         <div class="quest-metrics">
-          <span>Events: ${escapeHtml(fmt(row.totals.events))}</span>
-          <span>Avg/Event: ${escapeHtml(avg.toFixed(1))}</span>
+          <span>Races: ${escapeHtml(fmt(row.totals.events))}</span>
+          <span>Avg/Race: ${escapeHtml(avg.toFixed(1))}</span>
           <span>High Score: ${escapeHtml(fmt(row.totals.highScore))}</span>
           <span>Race: ${escapeHtml(`${fmt(row.race_points)} pts / ${fmt(row.race_count)}`)}</span>
           <span>BR: ${escapeHtml(`${fmt(row.br_points)} pts / ${fmt(row.br_count)}`)}</span>
@@ -758,7 +931,7 @@ function renderAnalyticsRows(data) {
   const groupOrder = ['race_br_combined', 'tilt', 'race_only', 'br_only', 'mycycle'];
   const metricMap = {
     race_br_combined: [
-      ['Events', 'events'],
+      ['Races', 'events'],
       ['Points', 'points'],
       ['Wins', 'wins'],
       ['Win Rate %', 'win_rate'],
@@ -767,7 +940,7 @@ function renderAnalyticsRows(data) {
       ['PPR', 'ppr'],
       ['Top PPR Racer', 'top_ppr_name'],
       ['Top PPR', 'top_ppr'],
-      ['Top PPR Events', 'top_ppr_events'],
+      ['Top PPR Races', 'top_ppr_events'],
     ],
     tilt: [
       ['Participants', 'participants'],
@@ -779,7 +952,7 @@ function renderAnalyticsRows(data) {
       ['PPR', 'ppr'],
     ],
     race_only: [
-      ['Race Events', 'events'],
+      ['Race Count', 'events'],
       ['Race Points', 'points'],
       ['Race Wins', 'wins'],
       ['Win Rate %', 'win_rate'],
@@ -788,10 +961,10 @@ function renderAnalyticsRows(data) {
       ['Race PPR', 'ppr'],
       ['Top PPR Racer', 'top_ppr_name'],
       ['Top PPR', 'top_ppr'],
-      ['Top PPR Events', 'top_ppr_events'],
+      ['Top PPR Races', 'top_ppr_events'],
     ],
     br_only: [
-      ['BR Events', 'events'],
+      ['BR Races', 'events'],
       ['BR Points', 'points'],
       ['BR Wins', 'wins'],
       ['Win Rate %', 'win_rate'],
@@ -800,7 +973,7 @@ function renderAnalyticsRows(data) {
       ['BR PPR', 'ppr'],
       ['Top PPR Racer', 'top_ppr_name'],
       ['Top PPR', 'top_ppr'],
-      ['Top PPR Events', 'top_ppr_events'],
+      ['Top PPR Races', 'top_ppr_events'],
     ],
     mycycle: [
       ['Tracked Racers', 'tracked_racers'],
@@ -859,6 +1032,100 @@ function renderAnalyticsRows(data) {
 }
 
 
+
+function renderSimpleLineChart(title, rows, valueKey, labelKey, formatter = (v) => fmt(v)) {
+  if (!Array.isArray(rows) || !rows.length) {
+    return `<section class="analytics-group"><h3 class="analytics-group__title">${escapeHtml(title)}</h3><div class="empty">No trend data yet.</div></section>`;
+  }
+
+  const chartWidth = 560;
+  const chartHeight = 180;
+  const padX = 22;
+  const padY = 16;
+  const innerW = chartWidth - (padX * 2);
+  const innerH = chartHeight - (padY * 2);
+
+  const values = rows.map((row) => Number(row?.[valueKey] || 0));
+  const labels = rows.map((row) => String(row?.[labelKey] || '—'));
+  const maxValue = Math.max(...values, 1);
+  const minValue = Math.min(...values, 0);
+  const range = Math.max(1, maxValue - minValue);
+
+  const points = values.map((value, idx) => {
+    const x = padX + ((innerW * idx) / Math.max(1, values.length - 1));
+    const y = padY + (innerH - (((value - minValue) / range) * innerH));
+    return { x, y, value, label: labels[idx] };
+  });
+
+  const pathD = points.map((pt, idx) => `${idx === 0 ? 'M' : 'L'}${pt.x.toFixed(2)} ${pt.y.toFixed(2)}`).join(' ');
+
+  const dots = points.map((pt) => (
+    `<circle class="trend-line-dot" cx="${pt.x.toFixed(2)}" cy="${pt.y.toFixed(2)}" r="3.5">
+      <title>${escapeHtml(`${pt.label}: ${formatter(pt.value)}`)}</title>
+    </circle>`
+  )).join('');
+
+  const xTicks = points.map((pt, idx) => {
+    if (points.length > 8 && idx % 2 !== 0) return '';
+    return `<text class="trend-axis-label" x="${pt.x.toFixed(2)}" y="${(chartHeight - 2).toFixed(2)}" text-anchor="middle">${escapeHtml(pt.label)}</text>`;
+  }).join('');
+
+  const summary = rows.map((row) => {
+    const label = String(row?.[labelKey] || '—');
+    const value = Number(row?.[valueKey] || 0);
+    return `<span>${escapeHtml(label)}: <strong>${escapeHtml(formatter(value))}</strong></span>`;
+  }).join('');
+
+  return `<section class="analytics-group trend-chart-card"><h3 class="analytics-group__title">${escapeHtml(title)}</h3>
+    <svg class="trend-line-chart" viewBox="0 0 ${chartWidth} ${chartHeight}" role="img" aria-label="${escapeHtml(title)}">
+      <line x1="${padX}" y1="${chartHeight - padY}" x2="${chartWidth - padX}" y2="${chartHeight - padY}" class="trend-axis"></line>
+      <line x1="${padX}" y1="${padY}" x2="${padX}" y2="${chartHeight - padY}" class="trend-axis"></line>
+      <path d="${pathD}" class="trend-line-path"></path>
+      ${dots}
+      ${xTicks}
+    </svg>
+    <div class="trend-line-summary">${summary}</div>
+  </section>`;
+}
+
+function renderRaceTrends(data) {
+  const trends = data?.race_trends || {};
+  const summary = trends?.summary || {};
+  const seasonSeries = Array.isArray(trends?.season_series) ? trends.season_series : [];
+  const dailyRows = Array.isArray(trends?.daily_current_season) ? trends.daily_current_season : [];
+
+  const summaryHost = el('trends-summary');
+  const chartHost = el('trend-charts');
+  if (!chartHost) return;
+
+  if (summaryHost) summaryHost.innerHTML = [
+    { label: 'Avg Unique Racers / Day', value: fmt(summary.avg_racers_per_day || 0) },
+    { label: 'Avg Races / Day', value: fmt(summary.avg_races_per_day || 0) },
+    { label: 'Avg PPR / Day', value: fmt(summary.avg_ppr_per_day || 0) },
+    { label: 'Rolling 7D Racers', value: fmt(summary.rolling7_avg_racers || 0) },
+    { label: 'Rolling 7D Races', value: fmt(summary.rolling7_avg_races || 0) },
+    { label: 'Race Share %', value: fmt(summary.race_share_percent || 0) },
+    { label: 'BR Share %', value: fmt(summary.br_share_percent || 0) },
+    { label: 'Days with Data', value: fmt(summary.days_with_data || 0) },
+  ].map((kpi) => `<div class="kpi"><div class="kpi-label">${escapeHtml(kpi.label)}</div><div class="kpi-value">${escapeHtml(String(kpi.value))}</div></div>`).join('');
+
+  const latestDays = dailyRows.slice(-21);
+  const charts = [
+    renderSimpleLineChart('Unique Racers per Season', seasonSeries, 'unique_racers', 'season_label'),
+    renderSimpleLineChart('Total Races per Season', seasonSeries, 'total_races', 'season_label'),
+    renderSimpleLineChart('Current Season Daily Unique Racers', latestDays, 'unique_racers', 'date'),
+    renderSimpleLineChart('Current Season Daily Total Races', latestDays, 'total_races', 'date'),
+    renderSimpleLineChart('Current Season Daily PPR', latestDays, 'ppr', 'date', (v) => Number(v || 0).toFixed(2)),
+    renderSimpleLineChart('Current Season Daily BR Count', latestDays, 'br_count', 'date'),
+  ];
+
+  chartHost.classList.add('trend-grid');
+  chartHost.innerHTML = charts.join('');
+  el('trends-range-pill').textContent = trends.has_prior_seasons
+    ? `Season + historical trends • ${seasonSeries.length} seasons`
+    : 'Current season trends only';
+}
+
 function wireRaceFilterButtons() {
   document.querySelectorAll('.mini-filter-btn[data-race-filter]').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -894,7 +1161,7 @@ function wireTiltSortControls() {
 
 function getRequestedViewFromLocation() {
   const hashView = String(window.location.hash || '').replace('#', '').trim();
-  const validViews = new Set(['mycycle', 'season-quests', 'tilt', 'rivals', 'races', 'analytics']);
+  const validViews = new Set(['mycycle', 'season-quests', 'tilt', 'rivals', 'races', 'analytics', 'trends']);
   if (validViews.has(hashView)) return hashView;
 
   const viewFromQuery = new URLSearchParams(window.location.search).get('view');
@@ -925,7 +1192,12 @@ function wireViewTabs() {
 
 async function refresh() {
   try {
-    const resp = await fetch('/api/dashboard/main', { cache: 'no-store' });
+    const params = new URLSearchParams({
+      mycycle_page: String(mycyclePage),
+      mycycle_page_size: String(mycyclePageSize),
+    });
+    if (mycycleQuery) params.set('mycycle_query', mycycleQuery);
+    const resp = await fetch(`/api/dashboard/main?${params.toString()}`, { cache: 'no-store' });
     const data = await resp.json();
     currentLanguage = data?.settings?.language || currentLanguage || 'en';
     el('updated-at').textContent = data.updated_at ? `${t('Updated')} ${data.updated_at}` : t('Updated now');
@@ -935,6 +1207,7 @@ async function refresh() {
     renderRivalsRows(data);
     renderRaceDashboardRows(data);
     renderAnalyticsRows(data);
+    renderRaceTrends(data);
   } catch (error) {
     console.error('dashboard refresh failed', error);
     const node = el('mycycle');
