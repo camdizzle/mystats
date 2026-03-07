@@ -948,10 +948,8 @@ function renderRaceDashboardRows(data) {
 }
 
 
-function renderAnalyticsRows(data) {
-  const host = el('analytics-groups');
-  if (!host) return;
 
+function buildAnalyticsGroupsMarkup(data) {
   const analytics = data?.analytics || {};
   const groups = analytics?.groups || {};
   const seasonLabel = analytics?.season_label || 'Season';
@@ -961,104 +959,71 @@ function renderAnalyticsRows(data) {
   const groupOrder = ['race_br_combined', 'tilt', 'race_only', 'br_only', 'mycycle'];
   const metricMap = {
     race_br_combined: [
-      ['Races', 'events'],
-      ['Points', 'points'],
-      ['Wins', 'wins'],
-      ['Win Rate %', 'win_rate'],
-      ['Unique Racers', 'unique_racers'],
-      ['High Score', 'high_score'],
-      ['PPR', 'ppr'],
-      ['Top PPR Racer', 'top_ppr_name'],
-      ['Top PPR', 'top_ppr'],
-      ['Top PPR Races', 'top_ppr_events'],
+      ['Races', 'events'], ['Points', 'points'], ['Wins', 'wins'], ['Win Rate %', 'win_rate'], ['Unique Racers', 'unique_racers'],
+      ['High Score', 'high_score'], ['PPR', 'ppr'], ['Top PPR Racer', 'top_ppr_name'], ['Top PPR', 'top_ppr'], ['Top PPR Races', 'top_ppr_events'],
     ],
     tilt: [
-      ['Participants', 'participants'],
-      ['Tilt Points', 'points'],
-      ['Tilt Levels', 'levels'],
-      ['Top Tiltee Finishes', 'top_tiltee'],
-      ['Deaths', 'deaths'],
-      ['Survival Rate %', 'survival_rate'],
-      ['PPR', 'ppr'],
+      ['Participants', 'participants'], ['Tilt Points', 'points'], ['Tilt Levels', 'levels'], ['Top Tiltee Finishes', 'top_tiltee'],
+      ['Deaths', 'deaths'], ['Survival Rate %', 'survival_rate'], ['PPR', 'ppr'],
     ],
     race_only: [
-      ['Race Count', 'events'],
-      ['Race Points', 'points'],
-      ['Race Wins', 'wins'],
-      ['Win Rate %', 'win_rate'],
-      ['Unique Racers', 'unique_racers'],
-      ['Race High Score', 'high_score'],
-      ['Race PPR', 'ppr'],
-      ['Top PPR Racer', 'top_ppr_name'],
-      ['Top PPR', 'top_ppr'],
-      ['Top PPR Races', 'top_ppr_events'],
+      ['Race Count', 'events'], ['Race Points', 'points'], ['Race Wins', 'wins'], ['Win Rate %', 'win_rate'], ['Unique Racers', 'unique_racers'],
+      ['Race High Score', 'high_score'], ['Race PPR', 'ppr'], ['Top PPR Racer', 'top_ppr_name'], ['Top PPR', 'top_ppr'], ['Top PPR Races', 'top_ppr_events'],
     ],
     br_only: [
-      ['BR Races', 'events'],
-      ['BR Points', 'points'],
-      ['BR Wins', 'wins'],
-      ['Win Rate %', 'win_rate'],
-      ['Unique Racers', 'unique_racers'],
-      ['BR High Score', 'high_score'],
-      ['BR PPR', 'ppr'],
-      ['Top PPR Racer', 'top_ppr_name'],
-      ['Top PPR', 'top_ppr'],
-      ['Top PPR Races', 'top_ppr_events'],
+      ['BR Races', 'events'], ['BR Points', 'points'], ['BR Wins', 'wins'], ['Win Rate %', 'win_rate'], ['Unique Racers', 'unique_racers'],
+      ['BR High Score', 'high_score'], ['BR PPR', 'ppr'], ['Top PPR Racer', 'top_ppr_name'], ['Top PPR', 'top_ppr'], ['Top PPR Races', 'top_ppr_events'],
     ],
     mycycle: [
-      ['Tracked Racers', 'tracked_racers'],
-      ['Cycles Completed', 'cycles_completed'],
-      ['Near Complete', 'near_complete'],
-      ['Current Cycle Races', 'current_cycle_races'],
+      ['Tracked Racers', 'tracked_racers'], ['Cycles Completed', 'cycles_completed'], ['Near Complete', 'near_complete'], ['Current Cycle Races', 'current_cycle_races'],
     ],
   };
 
-  const renderedGroups = groupOrder
-    .map((groupKey) => {
-      const group = groups[groupKey];
-      if (!group) return '';
+  const renderedGroups = groupOrder.map((groupKey) => {
+    const group = groups[groupKey];
+    if (!group) return '';
+    const seasonStats = group?.season || {};
+    const allSeasonStats = group?.all_seasons || {};
+    const metrics = metricMap[groupKey] || [];
 
-      const seasonStats = group?.season || {};
-      const allSeasonStats = group?.all_seasons || {};
-      const metrics = metricMap[groupKey] || [];
+    const statsMarkup = metrics.map(([label, key]) => {
+      const seasonValue = seasonStats?.[key];
+      const allValue = hasPriorSeasons ? allSeasonStats?.[key] : null;
+      const normalizedSeason = (typeof seasonValue === 'number') ? fmt(seasonValue) : (seasonValue || '—');
+      const normalizedAll = hasPriorSeasons
+        ? ((typeof allValue === 'number') ? fmt(allValue) : (allValue || '—'))
+        : 'N/A';
 
-      const statsMarkup = metrics.map(([label, key]) => {
-        const seasonValue = seasonStats?.[key];
-        const allValue = hasPriorSeasons ? allSeasonStats?.[key] : null;
-        const normalizedSeason = (typeof seasonValue === 'number') ? fmt(seasonValue) : (seasonValue || '—');
-        const normalizedAll = hasPriorSeasons
-          ? ((typeof allValue === 'number') ? fmt(allValue) : (allValue || '—'))
-          : 'N/A';
+      return `<div class="analytics-stat">
+        <div class="analytics-stat__label">${escapeHtml(label)}</div>
+        <div class="analytics-stat__compare">
+          <span><strong>${escapeHtml(seasonLabel)}:</strong> ${escapeHtml(String(normalizedSeason))}</span>
+          <span><strong>${escapeHtml(allSeasonsLabel)}:</strong> ${escapeHtml(String(normalizedAll))}</span>
+        </div>
+      </div>`;
+    }).join('');
 
-        return `<div class="analytics-stat">
-          <div class="analytics-stat__label">${escapeHtml(label)}</div>
-          <div class="analytics-stat__compare">
-            <span><strong>${escapeHtml(seasonLabel)}:</strong> ${escapeHtml(String(normalizedSeason))}</span>
-            <span><strong>${escapeHtml(allSeasonsLabel)}:</strong> ${escapeHtml(String(normalizedAll))}</span>
-          </div>
-        </div>`;
-      }).join('');
-
-      return `<section class="analytics-group">
-        <h3 class="analytics-group__title">${escapeHtml(group?.title || groupKey)}</h3>
-        <div class="analytics-grid">${statsMarkup}</div>
-      </section>`;
-    })
-    .filter(Boolean);
-
-  if (!renderedGroups.length) {
-    host.innerHTML = `<div class="empty">No analytics available yet.</div>`;
-    return;
-  }
+    return `<section class="analytics-group">
+      <h3 class="analytics-group__title">${escapeHtml(group?.title || groupKey)}</h3>
+      <div class="analytics-grid">${statsMarkup}</div>
+    </section>`;
+  }).filter(Boolean);
 
   const metricCount = renderedGroups.length
     ? groupOrder.reduce((sum, key) => sum + ((metricMap[key] || []).length), 0)
     : 0;
-  el('analytics-range-pill').textContent = hasPriorSeasons
+  const analyticsLabel = hasPriorSeasons
     ? `Season vs All Seasons • ${metricCount} metrics`
     : `Current Season Only • ${metricCount} metrics`;
 
-  host.innerHTML = renderedGroups.join('');
+  if (!renderedGroups.length) {
+    return {
+      markup: '<section class="analytics-group"><h3 class="analytics-group__title">Analytics Snapshot</h3><div class="empty">No analytics available yet.</div></section>',
+      label: analyticsLabel,
+    };
+  }
+
+  return { markup: renderedGroups.join(''), label: analyticsLabel };
 }
 
 
@@ -1140,7 +1105,10 @@ function renderRaceTrends(data) {
   ].map((kpi) => `<div class="kpi"><div class="kpi-label">${escapeHtml(kpi.label)}</div><div class="kpi-value">${escapeHtml(String(kpi.value))}</div></div>`).join('');
 
   const latestDays = dailyRows.slice(-21);
+  const analyticsSection = buildAnalyticsGroupsMarkup(data);
+
   const charts = [
+    analyticsSection.markup,
     renderSimpleLineChart('Unique Racers per Season', seasonSeries, 'unique_racers', 'season_label'),
     renderSimpleLineChart('Total Races per Season', seasonSeries, 'total_races', 'season_label'),
     renderSimpleLineChart('Current Season Daily Unique Racers', latestDays, 'unique_racers', 'date'),
@@ -1151,9 +1119,10 @@ function renderRaceTrends(data) {
 
   chartHost.classList.add('trend-grid');
   chartHost.innerHTML = charts.join('');
-  el('trends-range-pill').textContent = trends.has_prior_seasons
+  const trendLabel = trends.has_prior_seasons
     ? `Season + historical trends • ${seasonSeries.length} seasons`
     : 'Current season trends only';
+  el('trends-range-pill').textContent = `${trendLabel} • ${analyticsSection.label}`;
 }
 
 function wireRaceFilterButtons() {
@@ -1245,7 +1214,7 @@ function wireTiltSortControls() {
 
 function getRequestedViewFromLocation() {
   const hashView = String(window.location.hash || '').replace('#', '').trim();
-  const validViews = new Set(['mycycle', 'season-quests', 'tilt', 'rivals', 'races', 'analytics', 'trends']);
+  const validViews = new Set(['mycycle', 'season-quests', 'tilt', 'rivals', 'races', 'trends']);
   if (validViews.has(hashView)) return hashView;
 
   const viewFromQuery = new URLSearchParams(window.location.search).get('view');
@@ -1307,12 +1276,11 @@ async function refresh() {
     renderTiltRows(data);
     renderRivalsRows(data);
     renderRaceDashboardRows(data);
-    renderAnalyticsRows(data);
     renderRaceTrends(data);
   } catch (error) {
     console.error('dashboard refresh failed', error);
     const fallback = `<div class="empty">${escapeHtml(t('Unable to load MyCycle data.'))}</div>`;
-    ['mycycle', 'season-quests', 'tilt-leaderboard', 'rivals-leaderboard', 'races-leaderboard', 'analytics-groups', 'trend-charts'].forEach((id) => {
+    ['mycycle', 'season-quests', 'tilt-leaderboard', 'rivals-leaderboard', 'races-leaderboard', 'trend-charts'].forEach((id) => {
       const node = el(id);
       if (node) node.innerHTML = fallback;
     });
