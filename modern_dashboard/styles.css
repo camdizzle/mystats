@@ -243,6 +243,32 @@ body {
   display: none;
 }
 
+.rivals-controls {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) auto auto auto;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.rivals-controls input,
+.rivals-controls select,
+.rivals-controls button {
+  border-radius: 8px;
+  border: 1px solid rgba(127,216,255,.3);
+  background: rgba(255,255,255,.06);
+  color: #d4e4ff;
+  padding: 6px 8px;
+  font-size: .72rem;
+}
+
+.rivals-controls input:focus,
+.rivals-controls select:focus,
+.rivals-controls button:focus,
+.rivals-onboarding__toggle:focus {
+  outline: 2px solid rgba(140, 241, 184, .85);
+  outline-offset: 1px;
+}
+
 .analytics-shell {
   display: block;
 }
