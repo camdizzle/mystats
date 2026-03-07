@@ -3526,6 +3526,10 @@ def _build_overlay_header_stats(data_dir):
     today_entries = 0
     today_races = 0
     today_unique = set()
+    today_br_points = 0
+    today_br_entries = 0
+    today_br_unique = set()
+    today_brs = 0
     today_file = config.get_setting('allraces_file')
     if today_file:
         try:
@@ -3541,10 +3545,17 @@ def _build_overlay_header_stats(data_dir):
                         continue
                     if not racer:
                         continue
+                    race_mode = str(row[4] or '').strip().lower()
                     today_points += points
                     today_entries += 1
                     if _is_first_place_row(row):
                         today_races += 1
+                    if race_mode == 'br':
+                        today_br_points += points
+                        today_br_entries += 1
+                        today_br_unique.add(racer.lower())
+                        if _is_first_place_row(row):
+                            today_brs += 1
         except Exception:
             pass
 
@@ -3555,6 +3566,9 @@ def _build_overlay_header_stats(data_dir):
         'unique_racers_season': len(season_unique),
         'total_races_today': today_races,
         'total_races_season': season_races,
+        'br_avg_points_today': round((today_br_points / today_br_entries), 2) if today_br_entries else 0,
+        'br_racers_today': len(today_br_unique),
+        'total_brs_today': today_brs,
     }
 
 
@@ -12510,12 +12524,85 @@ async def race(bot):
 async def royale(bot):
     last_modified_royale = None
     marbcount = 0
+    br_cache_loaded = False
+    br_user_totals = {}
 
     def add_color_tag(widget, tag_name, color):
         widget.tag_configure(tag_name, foreground=color)
 
     def insert_colored_text(text_area, text, tag_name):
         text_area.insert(tk.END, text, tag_name)
+
+    def atomic_write_text(path, content, *, errors='ignore'):
+        temp_path = f"{path}.tmp"
+        with open(temp_path, 'w', encoding='utf-8', errors=errors) as tmp:
+            tmp.write(content)
+        os.replace(temp_path, path)
+
+    def map_name_color(color_code):
+        color_lookup = {
+            '6E95FFFF': 'blue',
+            'F91ED2FF': 'magenta',
+            'FF82D6FF': 'violet',
+            '79FFC7FF': 'green',
+            'F88688FF': 'red',
+            'DA6700FF': 'orange',
+        }
+        return color_lookup.get(str(color_code).strip().upper(), 'white')
+
+    def resolve_br_identity(br_winner_row):
+        winner_login = str(br_winner_row[1] if len(br_winner_row) > 1 else '').strip().lower()
+        winner_display = str(br_winner_row[2] if len(br_winner_row) > 2 else '').strip()
+        if not winner_display:
+            winner_display = winner_login
+        if winner_login and winner_login != winner_display.lower():
+            winner_label = f"{winner_display}({winner_login})"
+        else:
+            winner_label = winner_display
+        return winner_login, winner_display, winner_label
+
+    def build_br_winner_message(*, crownwin, chunk_alert, winner_label, points, kills, damage, total_points, wins, races):
+        prefix = "🧃 " if chunk_alert else ""
+        event_text = "CROWN WIN! 👑" if crownwin else "Battle Royale Champion 🏆"
+        return (
+            f"{prefix}{event_text}: {winner_label} | {points:,} points | {kills} eliminations | {damage} damage | "
+            f"Today's stats: {total_points:,} points | {wins} wins | {races:,} races"
+        )
+
+    def load_br_user_totals_from_allraces():
+        totals = {}
+        try:
+            with open(config.get_setting('allraces_file'), 'r', encoding='utf-8', errors='ignore') as f:
+                for row in iter_csv_rows(f):
+                    if len(row) < 5:
+                        continue
+                    username = str(row[1]).strip().lower()
+                    if not username:
+                        continue
+                    entry = totals.setdefault(username, {'points': 0, 'wins': 0, 'races': 0})
+                    entry['races'] += 1
+                    entry['points'] += _safe_int(row[3])
+                    if str(row[0]).strip() == '1':
+                        entry['wins'] += 1
+        except FileNotFoundError:
+            with open(config.get_setting('allraces_file'), 'w', encoding='utf-8', errors='ignore'):
+                pass
+        except Exception:
+            logger.error("An error occurred while loading BR totals cache", exc_info=True)
+        return totals
+
+    def update_br_user_totals_cache(rows):
+        for row in rows:
+            if len(row) < 4:
+                continue
+            username = str(row[1]).strip().lower()
+            if not username:
+                continue
+            entry = br_user_totals.setdefault(username, {'points': 0, 'wins': 0, 'races': 0})
+            entry['races'] += 1
+            entry['points'] += _safe_int(row[3])
+            if str(row[0]).strip() == '1':
+                entry['wins'] += 1
 
     # Crown Winner Display
     def display_battle_royale_crownwinner(text_area, marbcount, wname, wpoints, wkills, wdam, wcount, winnertotalpoints, namecolor):
@@ -12527,6 +12614,7 @@ async def royale(bot):
         add_color_tag(text_area, "blue", "blue")
         add_color_tag(text_area, "magenta", "magenta")
         add_color_tag(text_area, "violet", "violet")
+        add_color_tag(text_area, "orange", "orange")
 
         insert_colored_text(text_area, "\n", "white")
         insert_colored_text(text_area, "CROWN WIN! 👑: ", "yellow")
@@ -12557,6 +12645,7 @@ async def royale(bot):
         add_color_tag(text_area, "blue", "blue")
         add_color_tag(text_area, "magenta", "magenta")
         add_color_tag(text_area, "violet", "violet")
+        add_color_tag(text_area, "orange", "orange")
 
         insert_colored_text(text_area, "\n", "white")
         insert_colored_text(text_area, "Battle Royale: (", "white")
@@ -12580,6 +12669,7 @@ async def royale(bot):
         try:
             current_modified_royale = await asyncio.to_thread(os.path.getmtime, config.get_setting('br_file'))
         except FileNotFoundError:
+            await asyncio.sleep(2)
             continue
         if last_modified_royale is None:
             last_modified_royale = current_modified_royale
@@ -12597,10 +12687,10 @@ async def royale(bot):
             winner = ''
             crownwin = False
             last_br_winner = config.get_setting('last_br_winner')
-            t_points = int(config.get_setting('totalpointstoday'))
-            t_count = int(config.get_setting('totalcounttoday'))
-            s_t_points = int(config.get_setting('totalpointsseason'))
-            s_t_count = int(config.get_setting('totalcountseason'))
+            t_points = _safe_int(config.get_setting('totalpointstoday'))
+            t_count = _safe_int(config.get_setting('totalcounttoday'))
+            s_t_points = _safe_int(config.get_setting('totalpointsseason'))
+            s_t_count = _safe_int(config.get_setting('totalcountseason'))
             last_modified_royale = current_modified_royale
 
             # Initialize br_winner to None before processing
@@ -12609,7 +12699,7 @@ async def royale(bot):
             max_retries = 3  # Number of retry attempts
             retry_delay = 2  # Delay between retries (in seconds)
             attempts = 0  # Track the number of attempts
-            lines = None  # Initialize lines variable
+            parsed_rows = None
 
             while attempts < max_retries:
                 try:
@@ -12621,9 +12711,9 @@ async def royale(bot):
                     result = chardet.detect(data)
                     encoding = result['encoding']
 
-                    # Open the file using the detected encoding and read the lines
+                    # Open the file using the detected encoding and parse CSV rows
                     with open(config.get_setting('br_file'), 'r', encoding=encoding, errors='ignore') as f:
-                        lines = f.readlines()
+                        parsed_rows = list(iter_csv_rows(f))
 
                     # If file reading is successful, break out of the retry loop
                     break
@@ -12631,23 +12721,24 @@ async def royale(bot):
                 except PermissionError as e:
                     attempts += 1
                     logger.warning("Permission denied: %s. Retrying in %s seconds... (Attempt %d/%d)", e, retry_delay, attempts, max_retries)
-                    time.sleep(retry_delay)  # Wait before retrying
+                    await asyncio.sleep(retry_delay)
 
                 except Exception as e:
                     attempts += 1
                     logger.warning("An error occurred: %s. Retrying in %s seconds... (Attempt %d/%d)", e, retry_delay, attempts, max_retries)
-                    time.sleep(retry_delay)
+                    await asyncio.sleep(retry_delay)
 
             # After retry attempts, handle failure if the file could not be opened
-            if lines is None:
+            if parsed_rows is None:
                 logger.error("Failed to open BR file after %d attempts.", max_retries)
             else:
-                # Ensure that lines is not empty before accessing elements
-                if lines:
-                    # Process the header
-                    header = lines[0].replace('\x00', '').strip().split(',')
+                # Ensure that parsed_rows is not empty before accessing elements
+                if parsed_rows:
+                    first_row = parsed_rows[0]
+                    has_header = not str(first_row[0]).strip().isdigit() if first_row else False
+                    data_rows = parsed_rows[1:] if has_header else parsed_rows
 
-                    marbcount = len(lines)
+                    marbcount = len(data_rows)
 
                     # Handle active_event_ids
                     event_ids_tmp = config.get_setting('active_event_ids')
@@ -12660,10 +12751,8 @@ async def royale(bot):
 
                     brdata = []  # Initialize brdata
 
-                    # Process each line, starting from the second line (skip header)
-                    for line in lines[1:]:
-                        # Clean and split the line
-                        cleaned_line = line.replace('\x00', '').strip().split(',')
+                    # Process each row, skipping a detected header
+                    for cleaned_line in data_rows:
 
                         # Ensure the cleaned_line has the expected length to avoid index errors
                         if len(cleaned_line) < 8:
@@ -12690,11 +12779,13 @@ async def royale(bot):
                         if cleaned_line[0] == '1':
                             br_winner = cleaned_line
 
-                            if br_winner[1] == last_br_winner:
+                            winner_login, winner_display, winner_label = resolve_br_identity(br_winner)
+
+                            if winner_login == str(last_br_winner or '').strip().lower():
                                 crownwin = True
                             else:
                                 crownwin = False
-                            config.set_setting('last_br_winner', br_winner[1], persistent=False)
+                            config.set_setting('last_br_winner', winner_login, persistent=False)
 
                             t_count += 1
                             s_t_count += 1
@@ -12703,172 +12794,103 @@ async def royale(bot):
                     logger.warning("BR file is empty or could not be processed.")
 
                 # Check if br_winner is assigned before using it
-                if br_winner is not None and len(br_winner) >= 8 and br_winner[4]:
-                    t_points += int(br_winner[4])
-                    s_t_points += int(br_winner[4])
+                if br_winner is not None and len(br_winner) >= 8:
+                    winner_login, winner_display, winner_label = resolve_br_identity(br_winner)
+                    current_score = _safe_int(br_winner[4])
+                    winner_kills = _safe_int(br_winner[6])
+                    winner_damage = _safe_int(br_winner[7])
+
+                    if not winner_login:
+                        logger.warning("Skipping BR winner update due to missing winner login: %s", br_winner)
+                        continue
+
+                    t_points += current_score
+                    s_t_points += current_score
 
                     append_csv_rows_safely(config.get_setting('allraces_file'), brdata)
 
-                    race_counts = {row[1]: 0 for row in brdata}
+                    if not br_cache_loaded or t_count <= 1:
+                        br_user_totals = load_br_user_totals_from_allraces()
+                        br_cache_loaded = True
+                    else:
+                        update_br_user_totals_cache(brdata)
 
-                    with open(config.get_setting('allraces_file'), 'r', encoding='utf-8', errors='ignore') as f:
-                        reader = iter_csv_rows(f)
-                        for row in reader:
-                            if len(row) >= 2 and row[1] in race_counts:
-                                race_counts[row[1]] += 1
-
-                    for player_name, count in race_counts.items():
-                        if count == 120:
+                    for row in brdata:
+                        player_name = str(row[1]).strip().lower()
+                        player_totals = br_user_totals.get(player_name, {})
+                        if player_totals.get('races', 0) == 120 and is_chat_response_enabled("chat_br_results"):
                             announcement_message = (
                                 f"🎉 {player_name} has just completed their "
                                 f"120th race today! Congratulations! 🎉"
                             )
-                            if is_chat_response_enabled("chat_br_results"):
-                                await send_chat_message(bot.channel, announcement_message, category="br")
+                            await send_chat_message(bot.channel, announcement_message, category="br")
 
-                    if int(br_winner[4]) >= int(config.get_setting('chunk_alert_value')) and config.get_setting(
-                            'chunk_alert') == 'True':
+                    chunk_alert_enabled = config.get_setting('chunk_alert') == 'True'
+                    chunk_alert_threshold = _safe_int(config.get_setting('chunk_alert_value'))
+                    is_chunk_alert = chunk_alert_enabled and current_score >= chunk_alert_threshold
+
+                    if is_chunk_alert:
                         audio_device = config.get_setting('audio_device')
                         audio_file_path = config.get_setting('chunk_alert_sound')
-
                         if audio_file_path:
                             play_audio_file(audio_file_path, device_name=audio_device)
 
-                    if br_winner[1] != br_winner[2].lower():
-                        winnersname = br_winner[1]
-                    else:
-                        winnersname = br_winner[2]
-
-                    current_score = int(br_winner[4])
-
-                    if current_score > int(config.get_setting('hscore')):
-                        config.set_setting('hscore_name', winnersname, persistent=False)
+                    br_high_score_global = _safe_int(config.get_setting('hscore'))
+                    if current_score > br_high_score_global:
+                        config.set_setting('hscore_name', winner_display, persistent=False)
                         config.set_setting('hscore', current_score, persistent=False)
-                        br_hscore = int(config.get_setting('hscore'))
-                        br_hscore_format = format(br_hscore, ',')
-                        with open('HighScore.txt', 'w', encoding='utf-8', errors='ignore') as hs:
-                            hs.write(str(config.get_setting('hscore_name')) + '\n')
-                            hs.write(str(br_hscore_format + '\n'))
+                        high_score_payload = f"{config.get_setting('hscore_name')}\n{current_score:,}\n"
+                        atomic_write_text('HighScore.txt', high_score_payload)
 
-                    if current_score > int(config.get_setting('br_hs_season')):
+                    if current_score > _safe_int(config.get_setting('br_hs_season')):
                         config.set_setting('br_hs_season', current_score, persistent=False)
 
-                    if current_score > int(config.get_setting('br_hs_today')):
+                    if current_score > _safe_int(config.get_setting('br_hs_today')):
                         config.set_setting('br_hs_today', current_score, persistent=False)
-                    lastwinner1 = ""
 
-                    if br_winner[1] != br_winner[2].lower():
-                        lastwinner1 = "{} ({}) with {} points, ".format(br_winner[2], br_winner[1], br_winner[4])
-                    else:
-                        lastwinner1 = "{} with {} points, ".format(br_winner[2], br_winner[4])
-
-                    lastwinner2 = "{} kills and {} damage.".format(br_winner[6], br_winner[7])
-
-                    with open('LatestWinner.txt', 'w', encoding='utf-8', errors='ignore') as hs:
-                        hs.write("Previous Winner:" + '\n')
-                        hs.write(lastwinner1 + '\n')
-                        hs.write(lastwinner2 + '\n')
-
-                    with open('LatestWinner_horizontal.txt', 'w', encoding='utf-8', errors='replace') as lwh:
-                        lwh.write("Previous Winner: " + lastwinner1 + lastwinner2)
+                    latest_winner_summary = f"{winner_label} with {current_score} points, "
+                    latest_winner_detail = f"{winner_kills} kills and {winner_damage} damage."
+                    atomic_write_text(
+                        'LatestWinner.txt',
+                        f"Previous Winner:\n{latest_winner_summary}\n{latest_winner_detail}\n"
+                    )
+                    atomic_write_text(
+                        'LatestWinner_horizontal.txt',
+                        f"Previous Winner: {latest_winner_summary}{latest_winner_detail}",
+                        errors='replace'
+                    )
 
                     logger.info("Data synced: BR latest winner files updated")
 
-                    if t_count > 0:
-                        avgptstoday = t_points / t_count
-                    else:
-                        avgptstoday = 0
-
+                    avgptstoday = (t_points / t_count) if t_count > 0 else 0
                     config.set_setting('avgpointstoday', avgptstoday, persistent=False)
                     config.set_setting('totalpointstoday', t_points, persistent=False)
                     config.set_setting('totalcounttoday', t_count, persistent=False)
                     config.set_setting('totalpointsseason', s_t_points, persistent=False)
                     config.set_setting('totalcountseason', s_t_count, persistent=False)
                     update_config_labels()
-                    winnertotalpoints = 0
-                    wcount = 0
-                    totalcount = 0
 
-                    try:
-                        with open(config.get_setting('allraces_file'), 'r', encoding='utf-8', errors='ignore') as f:
-                            reader = iter_csv_rows(f)
-                            for row in reader:
-                                if row[1] == winnersname.lower():
-                                    winnertotalpoints += int(row[3])
-                                    if row[0] == '1':
-                                        wcount += 1
-                                if row[1] == br_winner[1]:
-                                    totalcount += 1
-                    except FileNotFoundError:
-                        print("File not found. " + config.get_setting('allraces_file'))
-                        with open(config.get_setting('allraces_file'), 'w', encoding='utf-8', errors='ignore'):
-                            pass
-                    except Exception as e:
-                        logger.error("An error occurred while processing the file", exc_info=True)
+                    winner_totals = br_user_totals.get(winner_login, {'points': 0, 'wins': 0, 'races': 0})
+                    winnertotalpoints = winner_totals.get('points', 0)
+                    wcount = winner_totals.get('wins', 0)
+                    totalcount = winner_totals.get('races', 0)
 
-                    if br_winner[1] != br_winner[2].lower():
-                        wname = br_winner[1]
-                    else:
-                        wname = br_winner[2]
-                    wpoints = '{:,}'.format(int(br_winner[4]))
-                    wkills = br_winner[6]
-                    wdam = br_winner[7]
+                    wname = winner_display
+                    wpoints = f"{current_score:,}"
+                    wkills = str(winner_kills)
+                    wdam = str(winner_damage)
 
-                    if int(br_winner[4]) >= int(config.get_setting('chunk_alert_value')) and config.get_setting(
-                            'chunk_alert') == 'True':
-                        if crownwin:
-                            if br_winner[1] != br_winner[2].lower():
-                                message = "🧃 CROWN WIN! 👑: {}({}) | {} points | {} eliminations | {} damage | ".format(
-                                    br_winner[2], br_winner[1], '{:,}'.format(int(br_winner[4])), br_winner[6],
-                                    br_winner[7]) + "Today's stats: " + str(
-                                    '{:,}'.format(int(winnertotalpoints))) + " points | " + str(
-                                    wcount) + " wins | " + " " + str('{:,}'.format(int(totalcount))) + " races"
-                            else:
-                                message = "🧃 CROWN WIN! 👑: {} | {} points | {} eliminations | {} damage | ".format(
-                                    br_winner[2], '{:,}'.format(int(br_winner[4])), br_winner[6],
-                                    br_winner[7]) + "Today's stats: " + str(
-                                    '{:,}'.format(int(winnertotalpoints))) + " points | " + str(
-                                    wcount) + " wins | " + " " + str('{:,}'.format(int(totalcount))) + " races"
-                        else:
-                            if br_winner[1] != br_winner[2].lower():
-                                message = "🧃 Battle Royale Champion 🏆: {}({}) | {} points | {} eliminations | {} damage | ".format(
-                                    br_winner[2], br_winner[1], '{:,}'.format(int(br_winner[4])), br_winner[6],
-                                    br_winner[7]) + "Today's stats: " + str(
-                                    '{:,}'.format(int(winnertotalpoints))) + " points | " + str(
-                                    wcount) + " wins | " + " " + str('{:,}'.format(int(totalcount))) + " races"
-                            else:
-                                message = "🧃 Battle Royale Champion 🏆: {} | {} points | {} eliminations | {} damage | ".format(
-                                    br_winner[2], '{:,}'.format(int(br_winner[4])), br_winner[6],
-                                    br_winner[7]) + "Today's stats: " + str(
-                                    '{:,}'.format(int(winnertotalpoints))) + " points | " + str(
-                                    wcount) + " wins | " + " " + str('{:,}'.format(int(totalcount))) + " races"
-                    else:
-                        if crownwin:
-                            if br_winner[1] != br_winner[2].lower():
-                                message = "CROWN WIN! 👑: {}({}) | {} points | {} eliminations | {} damage | ".format(
-                                    br_winner[2], br_winner[1], '{:,}'.format(int(br_winner[4])), br_winner[6],
-                                    br_winner[7]) + "Today's stats: " + str(
-                                    '{:,}'.format(int(winnertotalpoints))) + " points | " + str(
-                                    wcount) + " wins | " + " " + str('{:,}'.format(int(totalcount))) + " races"
-                            else:
-                                message = "CROWN WIN! 👑: {} | {} points | {} eliminations | {} damage | ".format(
-                                    br_winner[2], '{:,}'.format(int(br_winner[4])), br_winner[6],
-                                    br_winner[7]) + "Today's stats: " + str(
-                                    '{:,}'.format(int(winnertotalpoints))) + " points | " + str(
-                                    wcount) + " wins | " + " " + str('{:,}'.format(int(totalcount))) + " races"
-                        else:
-                            if br_winner[1] != br_winner[2].lower():
-                                message = "Battle Royale Champion 🏆: {}({}) | {} points | {} eliminations | {} damage | ".format(
-                                    br_winner[2], br_winner[1], '{:,}'.format(int(br_winner[4])), br_winner[6],
-                                    br_winner[7]) + "Today's stats: " + str(
-                                    '{:,}'.format(int(winnertotalpoints))) + " points | " + str(
-                                    wcount) + " wins | " + " " + str('{:,}'.format(int(totalcount))) + " races"
-                            else:
-                                message = "Battle Royale Champion 🏆: {} | {} points | {} eliminations | {} damage | ".format(
-                                    br_winner[2], '{:,}'.format(int(br_winner[4])), br_winner[6],
-                                    br_winner[7]) + "Today's stats: " + str(
-                                    '{:,}'.format(int(winnertotalpoints))) + " points | " + str(
-                                    wcount) + " wins | " + " " + str('{:,}'.format(int(totalcount))) + " races"
+                    message = build_br_winner_message(
+                        crownwin=crownwin,
+                        chunk_alert=is_chunk_alert,
+                        winner_label=winner_label,
+                        points=current_score,
+                        kills=winner_kills,
+                        damage=winner_damage,
+                        total_points=winnertotalpoints,
+                        wins=wcount,
+                        races=totalcount,
+                    )
                     if config.get_setting('announcedelay') == 'True':
                         await send_chat_message(bot.channel, message, category="br", apply_delay=True)
                         write_overlays()
@@ -12894,41 +12916,12 @@ async def royale(bot):
                         enqueue_overlay_event('quest_completed', quest_message)
                         await send_chat_message(bot.channel, quest_message, category="br")
 
+                    namecolor = map_name_color(br_winner[3])
                     if crownwin:
-                        # Determine the name color based on the br_winner color code
-                        if br_winner[3] == '6E95FFFF':
-                            namecolor = "blue"
-                        elif br_winner[3] == 'F91ED2FF':
-                            namecolor = "magenta"
-                        elif br_winner[3] == 'FF82D6FF':  # Change to violet
-                            namecolor = "violet"
-                        elif br_winner[3] == '79FFC7FF':
-                            namecolor = "green"
-                        elif br_winner[3] == 'F88688FF':
-                            namecolor = "red"
-                        elif br_winner[3] == 'DA6700FF':
-                            namecolor = "orange"
-                        else:
-                            namecolor = "white"
                         display_battle_royale_crownwinner(text_area, marbcount, wname, wpoints, wkills, wdam, wcount,
                                                           winnertotalpoints, namecolor)
 
                     else:
-                        # Determine the name color based on the br_winner color code
-                        if br_winner[3] == '6E95FFFF':
-                            namecolor = "blue"
-                        elif br_winner[3] == 'F91ED2FF':
-                            namecolor = "magenta"
-                        elif br_winner[3] == 'FF82D6FF':  # Change to violet
-                            namecolor = "violet"
-                        elif br_winner[3] == '79FFC7FF':
-                            namecolor = "green"
-                        elif br_winner[3] == 'F88688FF':
-                            namecolor = "red"
-                        elif br_winner[3] == 'DA6700FF':
-                            namecolor = "orange"
-                        else:
-                            namecolor = "white"
                         display_battle_royale_winner(text_area, marbcount, wname, wpoints, wkills, wdam, wcount,
                                                      winnertotalpoints, namecolor)
                 else:
