@@ -88,6 +88,58 @@ HAS_TTKBOOTSTRAP = ttkbootstrap_module is not None
 DEFAULT_UI_THEME = "darkly"
 app_style = None
 season_quest_tree = None
+
+SEASON_QUEST_DEFINITIONS = [
+    {
+        'id': 'races',
+        'label': 'Season Races',
+        'target_key': 'season_quest_target_races',
+        'legacy_complete_key': 'season_quest_complete_races',
+        'message': "🎯 Season Quest Complete: {name} finished {value:,} / {target:,} season races!",
+    },
+    {
+        'id': 'points',
+        'label': 'Season Points',
+        'target_key': 'season_quest_target_points',
+        'legacy_complete_key': 'season_quest_complete_points',
+        'message': "🎯 Season Quest Complete: {name} earned {value:,} / {target:,} season points!",
+    },
+    {
+        'id': 'race_hs',
+        'label': 'Race High Score',
+        'target_key': 'season_quest_target_race_hs',
+        'legacy_complete_key': 'season_quest_complete_race_hs',
+        'message': "🎯 Season Quest Complete: {name} reached race high score {value:,} (target {target:,})!",
+    },
+    {
+        'id': 'br_hs',
+        'label': 'BR High Score',
+        'target_key': 'season_quest_target_br_hs',
+        'legacy_complete_key': 'season_quest_complete_br_hs',
+        'message': "🎯 Season Quest Complete: {name} reached BR high score {value:,} (target {target:,})!",
+    },
+    {
+        'id': 'tilt_levels',
+        'label': 'Tilt Levels',
+        'target_key': 'season_quest_target_tilt_levels',
+        'legacy_complete_key': 'season_quest_complete_tilt_levels',
+        'message': "🎯 Season Quest Complete: {name} participated in {value:,} / {target:,} tilt levels!",
+    },
+    {
+        'id': 'tilt_tops',
+        'label': 'Top Tiltees',
+        'target_key': 'season_quest_target_tilt_tops',
+        'legacy_complete_key': 'season_quest_complete_tilt_tops',
+        'message': "🎯 Season Quest Complete: {name} got {value:,} / {target:,} top-tiltee finishes!",
+    },
+    {
+        'id': 'tilt_points',
+        'label': 'Tilt Points',
+        'target_key': 'season_quest_target_tilt_points',
+        'legacy_complete_key': 'season_quest_complete_tilt_points',
+        'message': "🎯 Season Quest Complete: {name} earned {value:,} / {target:,} tilt points!",
+    },
+]
 rivals_tree = None
 mycycle_tree = None
 mycycle_session_label = None
@@ -1570,84 +1622,119 @@ def _get_season_quest_completer_name():
     return 'The streamer'
 
 
+def _season_quest_value_map(tilt_totals=None):
+    if tilt_totals is None:
+        tilt_totals, _ = get_tilt_season_stats()
+    return {
+        'races': get_int_setting('totalcountseason', 0),
+        'points': get_int_setting('totalpointsseason', 0),
+        'race_hs': get_int_setting('race_hs_season', 0),
+        'br_hs': get_int_setting('br_hs_season', 0),
+        'tilt_levels': tilt_totals.get('levels', 0),
+        'tilt_tops': tilt_totals.get('top_tiltees', 0),
+        'tilt_points': tilt_totals.get('points', 0),
+    }
+
+
+def _get_season_scope_key():
+    raw_season = str(config.get_setting('season') or '').strip().lower()
+    normalized = ''.join(ch for ch in raw_season if ch.isalnum() or ch in ('-', '_'))
+    return normalized or 'default'
+
+
+def _load_season_quest_completion_state():
+    raw_state = config.get_setting('season_quest_completion_state') or '{}'
+    try:
+        parsed = json.loads(raw_state)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        parsed = {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _save_season_quest_completion_state(state):
+    serialized = json.dumps(state, separators=(',', ':'), sort_keys=True)
+    config.set_setting('season_quest_completion_state', serialized, persistent=True)
+
+
+def _is_season_quest_complete(quest_definition, season_key, state):
+    season_state = state.get(season_key, {})
+    if not isinstance(season_state, dict):
+        season_state = {}
+    if season_state.get(quest_definition['id']) is True:
+        return True
+
+    legacy_flag = str(config.get_setting(quest_definition['legacy_complete_key']) or 'False').lower() == 'true'
+    if legacy_flag:
+        season_state[quest_definition['id']] = True
+        state[season_key] = season_state
+        return True
+    return False
+
+
 def get_season_quest_updates():
     if not is_chat_response_enabled("season_quests_enabled"):
         return []
 
     tilt_totals, _ = get_tilt_season_stats()
-
-    quest_definitions = [
-        {
-            'target_key': 'season_quest_target_races',
-            'complete_key': 'season_quest_complete_races',
-            'value': get_int_setting('totalcountseason', 0),
-            'message': "🎯 Season Quest Complete: {name} finished {value:,} / {target:,} season races!"
-        },
-        {
-            'target_key': 'season_quest_target_points',
-            'complete_key': 'season_quest_complete_points',
-            'value': get_int_setting('totalpointsseason', 0),
-            'message': "🎯 Season Quest Complete: {name} earned {value:,} / {target:,} season points!"
-        },
-        {
-            'target_key': 'season_quest_target_race_hs',
-            'complete_key': 'season_quest_complete_race_hs',
-            'value': get_int_setting('race_hs_season', 0),
-            'message': "🎯 Season Quest Complete: {name} reached race high score {value:,} (target {target:,})!"
-        },
-        {
-            'target_key': 'season_quest_target_br_hs',
-            'complete_key': 'season_quest_complete_br_hs',
-            'value': get_int_setting('br_hs_season', 0),
-            'message': "🎯 Season Quest Complete: {name} reached BR high score {value:,} (target {target:,})!"
-        },
-        {
-            'target_key': 'season_quest_target_tilt_levels',
-            'complete_key': 'season_quest_complete_tilt_levels',
-            'value': tilt_totals['levels'],
-            'message': "🎯 Season Quest Complete: {name} participated in {value:,} / {target:,} tilt levels!"
-        },
-        {
-            'target_key': 'season_quest_target_tilt_tops',
-            'complete_key': 'season_quest_complete_tilt_tops',
-            'value': tilt_totals['top_tiltees'],
-            'message': "🎯 Season Quest Complete: {name} got {value:,} / {target:,} top-tiltee finishes!"
-        },
-        {
-            'target_key': 'season_quest_target_tilt_points',
-            'complete_key': 'season_quest_complete_tilt_points',
-            'value': tilt_totals['points'],
-            'message': "🎯 Season Quest Complete: {name} earned {value:,} / {target:,} tilt points!"
-        },
-    ]
+    value_map = _season_quest_value_map(tilt_totals)
+    completion_state = _load_season_quest_completion_state()
+    season_key = _get_season_scope_key()
 
     quest_messages = []
     completer_name = _get_season_quest_completer_name()
+    state_updated = False
 
-    for quest in quest_definitions:
+    for quest in SEASON_QUEST_DEFINITIONS:
         target_value = get_int_setting(quest['target_key'], 0)
-        already_complete = str(config.get_setting(quest['complete_key']) or 'False').lower() == 'true'
+        already_complete = _is_season_quest_complete(quest, season_key, completion_state)
 
         if target_value <= 0 or already_complete:
             continue
 
-        if quest['value'] >= target_value:
-            config.set_setting(quest['complete_key'], 'True', persistent=True)
-            quest_messages.append(quest['message'].format(name=completer_name, value=quest['value'], target=target_value))
+        current_value = value_map.get(quest['id'], 0)
+        if current_value >= target_value:
+            season_state = completion_state.setdefault(season_key, {})
+            if not isinstance(season_state, dict):
+                season_state = {}
+                completion_state[season_key] = season_state
+            season_state[quest['id']] = True
+            config.set_setting(quest['legacy_complete_key'], 'True', persistent=True)
+            quest_messages.append(quest['message'].format(name=completer_name, value=current_value, target=target_value))
+            state_updated = True
+
+    if state_updated:
+        _save_season_quest_completion_state(completion_state)
 
     return quest_messages
 
 
 def get_season_quest_targets():
     return {
-        'races': get_int_setting('season_quest_target_races', 0),
-        'points': get_int_setting('season_quest_target_points', 0),
-        'race_hs': get_int_setting('season_quest_target_race_hs', 0),
-        'br_hs': get_int_setting('season_quest_target_br_hs', 0),
-        'tilt_levels': get_int_setting('season_quest_target_tilt_levels', 0),
-        'tilt_tops': get_int_setting('season_quest_target_tilt_tops', 0),
-        'tilt_points': get_int_setting('season_quest_target_tilt_points', 0),
+        quest['id']: get_int_setting(quest['target_key'], 0)
+        for quest in SEASON_QUEST_DEFINITIONS
     }
+
+
+
+def _build_files_signature(file_paths):
+    signature_parts = []
+    for file_path in sorted(file_paths):
+        try:
+            stat = os.stat(file_path)
+            signature_parts.append((os.path.abspath(file_path), int(stat.st_mtime_ns), int(stat.st_size)))
+        except OSError:
+            continue
+    return tuple(signature_parts)
+
+
+def _load_csv_rows_with_detection(csv_path):
+    with open(csv_path, 'rb') as f:
+        raw_data = f.read()
+    result = chardet.detect(raw_data)
+    encoding = result['encoding'] if result['encoding'] else 'utf-8'
+    with open(csv_path, 'r', encoding=encoding, errors='ignore') as f:
+        for row in iter_csv_rows(f):
+            yield row
 
 
 def get_tilt_season_stats():
@@ -1658,117 +1745,123 @@ def get_tilt_season_stats():
     if not directory:
         return totals, user_stats
 
-    for tilt_results in glob.glob(os.path.join(directory, "tilts_*.csv")):
+    tilt_files = glob.glob(os.path.join(directory, "tilts_*.csv"))
+    signature = _build_files_signature(tilt_files)
+    if _tilt_season_stats_cache.get('signature') == signature:
+        return copy.deepcopy(_tilt_season_stats_cache.get('value'))
+
+    for tilt_results in tilt_files:
         try:
-            with open(tilt_results, 'rb') as f:
-                raw_data = f.read()
-            result = chardet.detect(raw_data)
-            encoding = result['encoding'] if result['encoding'] else 'utf-8'
+            for row in _load_csv_rows_with_detection(tilt_results):
+                detail = parse_tilt_result_detail(row)
+                if detail is None:
+                    continue
 
-            with open(tilt_results, 'r', encoding=encoding, errors='ignore') as f:
-                reader = iter_csv_rows(f)
-                for row in reader:
-                    detail = parse_tilt_result_detail(row)
-                    if detail is None:
-                        continue
+                username = detail['username'].strip().lower()
+                if not username:
+                    continue
 
-                    username = detail['username'].strip().lower()
-                    if not username:
-                        continue
+                if username not in user_stats:
+                    user_stats[username] = {
+                        'display_name': detail['username'].strip() or username,
+                        'tilt_levels': 0,
+                        'tilt_top_tiltee': 0,
+                        'tilt_points': 0,
+                    }
 
-                    if username not in user_stats:
-                        user_stats[username] = {
-                            'display_name': detail['username'].strip() or username,
-                            'tilt_levels': 0,
-                            'tilt_top_tiltee': 0,
-                            'tilt_points': 0,
-                        }
+                user_stats[username]['tilt_levels'] += 1
+                user_stats[username]['tilt_points'] += detail['points']
+                totals['levels'] += 1
+                totals['points'] += detail['points']
 
-                    user_stats[username]['tilt_levels'] += 1
-                    user_stats[username]['tilt_points'] += detail['points']
-                    totals['levels'] += 1
-                    totals['points'] += detail['points']
-
-                    if detail['is_top_tiltee']:
-                        user_stats[username]['tilt_top_tiltee'] += 1
-                        totals['top_tiltees'] += 1
+                if detail['is_top_tiltee']:
+                    user_stats[username]['tilt_top_tiltee'] += 1
+                    totals['top_tiltees'] += 1
         except FileNotFoundError:
             continue
-        except Exception as e:
+        except Exception:
             logger.error("Error reading tilt stats from %s", tilt_results, exc_info=True)
 
+    _tilt_season_stats_cache['signature'] = signature
+    _tilt_season_stats_cache['value'] = (copy.deepcopy(totals), copy.deepcopy(user_stats))
     return totals, user_stats
 
 
 def get_user_season_stats():
     user_stats = {}
-    for allraces in glob.glob(os.path.join(config.get_setting('directory'), "allraces_*.csv")):
+    data_dir = config.get_setting('directory')
+    if not data_dir:
+        return {}
+
+    allraces_files = glob.glob(os.path.join(data_dir, "allraces_*.csv"))
+    tilt_files = glob.glob(os.path.join(data_dir, "tilts_*.csv"))
+    signature = (
+        _build_files_signature(allraces_files),
+        _build_files_signature(tilt_files),
+    )
+    if _user_season_stats_cache.get('signature') == signature:
+        return copy.deepcopy(_user_season_stats_cache.get('value'))
+
+    cutoff_30d = datetime.now(timezone.utc) - timedelta(days=30)
+
+    for allraces in allraces_files:
         try:
-            with open(allraces, 'rb') as f:
-                raw_data = f.read()
-            result = chardet.detect(raw_data)
-            encoding = result['encoding'] if result['encoding'] else 'utf-8'
+            for row in _load_csv_rows_with_detection(allraces):
+                if len(row) < 5:
+                    continue
+                username = row[1].strip().lower()
+                display_name = row[2].strip() if len(row) > 2 else username
+                if not username:
+                    continue
 
-            with open(allraces, 'r', encoding=encoding, errors='ignore') as f:
-                reader = iter_csv_rows(f)
-                for row in reader:
-                    if len(row) < 5:
-                        continue
-                    username = row[1].strip().lower()
-                    display_name = row[2].strip() if len(row) > 2 else username
-                    if not username:
-                        continue
+                if username not in user_stats:
+                    user_stats[username] = {
+                        'display_name': display_name or username,
+                        'races': 0,
+                        'points': 0,
+                        'race_hs': 0,
+                        'br_hs': 0,
+                        'tilt_levels': 0,
+                        'tilt_top_tiltee': 0,
+                        'tilt_points': 0,
+                    }
 
-                    if username not in user_stats:
-                        user_stats[username] = {
-                            'display_name': display_name or username,
-                            'races': 0,
-                            'points': 0,
-                            'race_hs': 0,
-                            'br_hs': 0,
-                            'tilt_levels': 0,
-                            'tilt_top_tiltee': 0,
-                            'tilt_points': 0,
-                        }
+                if display_name:
+                    user_stats[username]['display_name'] = display_name
 
-                    if display_name:
-                        user_stats[username]['display_name'] = display_name
-
-                    user_stats[username]['races'] += 1
-                    row_timestamp = None
-                    if row:
-                        try:
-                            row_timestamp = parser.parse(str(row[0]).strip())
-                            if row_timestamp.tzinfo is None:
-                                row_timestamp = row_timestamp.replace(tzinfo=timezone.utc)
-                            else:
-                                row_timestamp = row_timestamp.astimezone(timezone.utc)
-                        except Exception:
-                            row_timestamp = None
-
+                user_stats[username]['races'] += 1
+                row_timestamp = None
+                if row:
                     try:
-                        points = int(row[3])
-                    except (TypeError, ValueError):
-                        points = 0
+                        row_timestamp = parser.parse(str(row[0]).strip())
+                        if row_timestamp.tzinfo is None:
+                            row_timestamp = row_timestamp.replace(tzinfo=timezone.utc)
+                        else:
+                            row_timestamp = row_timestamp.astimezone(timezone.utc)
+                    except Exception:
+                        row_timestamp = None
 
-                    user_stats[username]['points'] += points
-                    if row_timestamp is not None:
-                        cutoff_30d = datetime.now(timezone.utc) - timedelta(days=30)
-                        if row_timestamp >= cutoff_30d:
-                            user_stats[username].setdefault('recent_races_30d', 0)
-                            user_stats[username].setdefault('recent_points_30d', 0)
-                            user_stats[username]['recent_races_30d'] += 1
-                            user_stats[username]['recent_points_30d'] += points
+                try:
+                    points = int(row[3])
+                except (TypeError, ValueError):
+                    points = 0
 
-                    mode = row[4].strip().lower()
-                    if mode == 'race' and points > user_stats[username]['race_hs']:
-                        user_stats[username]['race_hs'] = points
-                    elif mode == 'br' and points > user_stats[username]['br_hs']:
-                        user_stats[username]['br_hs'] = points
+                user_stats[username]['points'] += points
+                if row_timestamp is not None and row_timestamp >= cutoff_30d:
+                    user_stats[username].setdefault('recent_races_30d', 0)
+                    user_stats[username].setdefault('recent_points_30d', 0)
+                    user_stats[username]['recent_races_30d'] += 1
+                    user_stats[username]['recent_points_30d'] += points
+
+                mode = row[4].strip().lower()
+                if mode == 'race' and points > user_stats[username]['race_hs']:
+                    user_stats[username]['race_hs'] = points
+                elif mode == 'br' and points > user_stats[username]['br_hs']:
+                    user_stats[username]['br_hs'] = points
 
         except FileNotFoundError:
             continue
-        except Exception as e:
+        except Exception:
             logger.error("Error reading season stats from %s", allraces, exc_info=True)
 
     _, tilt_user_stats = get_tilt_season_stats()
@@ -1796,6 +1889,8 @@ def get_user_season_stats():
         stats.setdefault('recent_races_30d', 0)
         stats.setdefault('recent_points_30d', 0)
 
+    _user_season_stats_cache['signature'] = signature
+    _user_season_stats_cache['value'] = copy.deepcopy(user_stats)
     return user_stats
 
 
@@ -1820,14 +1915,18 @@ def get_user_quest_progress(username):
 
     targets = get_season_quest_targets()
     stats = user_stats[target_username]
+    stat_value_map = {
+        'races': stats['races'],
+        'points': stats['points'],
+        'race_hs': stats['race_hs'],
+        'br_hs': stats['br_hs'],
+        'tilt_levels': stats.get('tilt_levels', 0),
+        'tilt_tops': stats.get('tilt_top_tiltee', 0),
+        'tilt_points': stats.get('tilt_points', 0),
+    }
     quest_rows = [
-        ("Season Races", stats['races'], targets['races']),
-        ("Season Points", stats['points'], targets['points']),
-        ("Race High Score", stats['race_hs'], targets['race_hs']),
-        ("BR High Score", stats['br_hs'], targets['br_hs']),
-        ("Tilt Levels", stats['tilt_levels'], targets['tilt_levels']),
-        ("Top Tiltees", stats['tilt_top_tiltee'], targets['tilt_tops']),
-        ("Tilt Points", stats['tilt_points'], targets['tilt_points']),
+        (quest['label'], stat_value_map.get(quest['id'], 0), targets.get(quest['id'], 0))
+        for quest in SEASON_QUEST_DEFINITIONS
     ]
 
     completed = 0
@@ -1896,9 +1995,11 @@ def get_quest_completion_leaderboard(limit=100):
             'tilt_levels': stats.get('tilt_levels', 0),
             'tilt_top_tiltee': stats.get('tilt_top_tiltee', 0),
             'tilt_points': stats.get('tilt_points', 0),
+            'recent_points_30d': stats.get('recent_points_30d', 0),
+            'recent_races_30d': stats.get('recent_races_30d', 0),
         })
 
-    leaderboard.sort(key=lambda row: (row['completed'], row['points'], row['races']), reverse=True)
+    leaderboard.sort(key=lambda row: (row['completed'], (row['completed'] / row['active_quests']) if row['active_quests'] else 0.0, row.get('recent_points_30d', 0), row['points'], row['races']), reverse=True)
     return leaderboard[:limit]
 
 
@@ -2343,6 +2444,8 @@ MYCYCLE_SAVE_RETRY_DELAY_S = 0.15
 _dashboard_main_cache = {'value': None, 'created_at': 0.0}
 _dashboard_main_cache_ttl_s = 5.0
 _mycycle_aggregate_cache = {}
+_tilt_season_stats_cache = {'signature': None, 'value': ({'levels': 0, 'top_tiltees': 0, 'points': 0}, {})}
+_user_season_stats_cache = {'signature': None, 'value': {}}
 
 RIVALS_MAX_PAIRS = 200
 RIVALS_MAX_MIN_RACES = 10000
@@ -2367,6 +2470,8 @@ RIVALS_USER_COOLDOWN_S = 5.0
 def _invalidate_dashboard_cache():
     _dashboard_main_cache['value'] = None
     _dashboard_main_cache['created_at'] = 0.0
+    _tilt_season_stats_cache['signature'] = None
+    _user_season_stats_cache['signature'] = None
 
 
 def _mycycle_file_path():
@@ -4084,7 +4189,6 @@ def _build_main_dashboard_payload():
             'rows': season_quest_rows,
             'targets': season_quest_targets,
         },
-        'season_quest_targets': season_quest_targets,
         'rivals': get_global_rivalries(limit=RIVALS_MAX_PAIRS),
         'races': get_race_dashboard_leaderboard(limit=250),
         'mycycle': {
@@ -4830,6 +4934,57 @@ def dashboard_main_payload():
             'total': len(rows),
             'total_pages': max(1, math.ceil(len(rows) / page_size)) if rows else 1,
             'query': q,
+        }
+
+    season_q = (request.args.get('season_query') or '').strip().lower()
+    try:
+        season_page = max(1, int(request.args.get('season_page', 1)))
+    except (TypeError, ValueError):
+        season_page = 1
+    try:
+        season_page_size = min(250, max(10, int(request.args.get('season_page_size', 100))))
+    except (TypeError, ValueError):
+        season_page_size = 100
+    season_sort_by = (request.args.get('season_sort_by') or 'completed').strip().lower()
+    season_sort_order = (request.args.get('season_sort_order') or 'desc').strip().lower()
+
+    if season_q or season_page > 1 or season_page_size != 100 or season_sort_by != 'completed' or season_sort_order != 'desc':
+        payload = copy.deepcopy(payload)
+        season_rows = list(payload.get('season_quests', {}).get('rows') or [])
+        if season_q:
+            season_rows = [
+                row for row in season_rows
+                if season_q in str(row.get('display_name') or '').lower() or season_q in str(row.get('username') or '').lower()
+            ]
+
+        sort_fields = {
+            'name': lambda row: str(row.get('display_name') or row.get('username') or '').lower(),
+            'completed': lambda row: (
+                int(row.get('completed', 0)),
+                (int(row.get('completed', 0)) / max(1, int(row.get('active_quests', 0)))) if int(row.get('active_quests', 0)) else 0,
+                int(row.get('points', 0)),
+            ),
+            'points': lambda row: int(row.get('points', 0)),
+            'races': lambda row: int(row.get('races', 0)),
+            'race_hs': lambda row: int(row.get('race_hs', 0)),
+            'br_hs': lambda row: int(row.get('br_hs', 0)),
+            'tilt_points': lambda row: int(row.get('tilt_points', 0)),
+        }
+        sort_key = sort_fields.get(season_sort_by, sort_fields['completed'])
+        reverse_sort = season_sort_order != 'asc'
+        season_rows.sort(key=sort_key, reverse=reverse_sort)
+
+        season_start = (season_page - 1) * season_page_size
+        season_end = season_start + season_page_size
+        payload['season_quests']['rows'] = season_rows[season_start:season_end]
+        payload['season_quests']['pagination'] = {
+            'page': season_page,
+            'page_size': season_page_size,
+            'total': len(season_rows),
+            'total_pages': max(1, math.ceil(len(season_rows) / season_page_size)) if season_rows else 1,
+            'query': season_q,
+            'sort_by': season_sort_by,
+            'sort_order': 'asc' if season_sort_order == 'asc' else 'desc',
         }
 
     return jsonify(payload)
@@ -5669,7 +5824,11 @@ def open_settings_window():
     def reset_season_quest_progress():
         for completion_key in ("season_quest_complete_races", "season_quest_complete_points", "season_quest_complete_race_hs", "season_quest_complete_br_hs", "season_quest_complete_tilt_levels", "season_quest_complete_tilt_tops", "season_quest_complete_tilt_points"):
             config.set_setting(completion_key, "False", persistent=True)
-        messagebox.showinfo("Season Quests", "Season quest completion flags have been reset.")
+        completion_state = _load_season_quest_completion_state()
+        completion_state[_get_season_scope_key()] = {}
+        _save_season_quest_completion_state(completion_state)
+        _invalidate_dashboard_cache()
+        messagebox.showinfo("Season Quests", "Season quest completion flags have been reset for the active season.")
 
     ttk.Button(season_quests_tab, text="Reset Quest Progress", command=reset_season_quest_progress).grid(row=8, column=0, sticky="w", pady=(8, 0))
     ttk.Button(season_quests_tab, text="View Quest Completion", command=lambda: open_quest_completion_window(settings_window)).grid(row=8, column=1, sticky="w", pady=(8, 0))
@@ -6191,13 +6350,28 @@ def open_settings_window():
         config.set_setting("race_narrative_alert_max_items", race_narrative_max_items_entry.get(), persistent=True)
         config.set_setting("tiltsurvivors_min_levels", tiltsurvivors_min_levels_entry.get(), persistent=True)
         config.set_setting("season_quests_enabled", str(season_quests_enabled_var.get()), persistent=True)
-        config.set_setting("season_quest_target_races", season_quest_races_entry.get(), persistent=True)
-        config.set_setting("season_quest_target_points", season_quest_points_entry.get(), persistent=True)
-        config.set_setting("season_quest_target_race_hs", season_quest_race_hs_entry.get(), persistent=True)
-        config.set_setting("season_quest_target_br_hs", season_quest_br_hs_entry.get(), persistent=True)
-        config.set_setting("season_quest_target_tilt_levels", season_quest_tilt_levels_entry.get(), persistent=True)
-        config.set_setting("season_quest_target_tilt_tops", season_quest_tilt_tops_entry.get(), persistent=True)
-        config.set_setting("season_quest_target_tilt_points", season_quest_tilt_points_entry.get(), persistent=True)
+        season_target_bounds = {
+            "season_quest_target_races": (1000, 0, 10000000),
+            "season_quest_target_points": (500000, 0, 500000000),
+            "season_quest_target_race_hs": (3000, 0, 1000000),
+            "season_quest_target_br_hs": (3000, 0, 1000000),
+            "season_quest_target_tilt_levels": (1000, 0, 1000000),
+            "season_quest_target_tilt_tops": (100, 0, 1000000),
+            "season_quest_target_tilt_points": (500000, 0, 500000000),
+        }
+        season_target_entries = {
+            "season_quest_target_races": season_quest_races_entry,
+            "season_quest_target_points": season_quest_points_entry,
+            "season_quest_target_race_hs": season_quest_race_hs_entry,
+            "season_quest_target_br_hs": season_quest_br_hs_entry,
+            "season_quest_target_tilt_levels": season_quest_tilt_levels_entry,
+            "season_quest_target_tilt_tops": season_quest_tilt_tops_entry,
+            "season_quest_target_tilt_points": season_quest_tilt_points_entry,
+        }
+        for target_key, entry_widget in season_target_entries.items():
+            default_value, min_value, max_value = season_target_bounds[target_key]
+            target_value = _bounded_int(entry_widget.get(), default_value, min_value, max_value)
+            config.set_setting(target_key, str(target_value), persistent=True)
         config.set_setting("rivals_enabled", str(rivals_enabled_var.get()), persistent=True)
         rivals_min_races = _bounded_int(rivals_min_races_entry.get(), 50, 1, RIVALS_MAX_MIN_RACES)
         rivals_max_gap = _bounded_int(rivals_max_gap_entry.get(), 1500, 0, RIVALS_MAX_POINT_GAP)
@@ -7280,6 +7454,7 @@ class ConfigManager:
                                 'season_quest_complete_races', 'season_quest_complete_points', 'season_quest_complete_race_hs',
                                 'season_quest_complete_br_hs', 'season_quest_complete_tilt_levels',
                                 'season_quest_complete_tilt_tops', 'season_quest_complete_tilt_points',
+                                'season_quest_completion_state',
                                 'rivals_enabled', 'rivals_min_races', 'rivals_max_point_gap', 'rivals_pair_count',
                                 'mycycle_enabled', 'mycycle_announcements_enabled', 'mycycle_include_br',
                                 'mycycle_min_place', 'mycycle_max_place', 'mycycle_primary_session_id',
@@ -7344,6 +7519,7 @@ class ConfigManager:
             'season_quest_complete_tilt_levels': 'False',
             'season_quest_complete_tilt_tops': 'False',
             'season_quest_complete_tilt_points': 'False',
+            'season_quest_completion_state': '{}',
             'rivals_enabled': 'True',
             'rivals_min_races': '50',
             'rivals_max_point_gap': '1500',
@@ -9752,8 +9928,26 @@ class Bot(commands.Bot):
             f"{format_user_tag(progress['display_name'])} Quest Progress: "
             f"{progress['completed']}/{progress['active_quests'] if progress['active_quests'] > 0 else 0} quests complete"
         )
-        details = " | ".join(progress['progress_lines'])
-        await self.send_command_response(ctx, f"🔎 {headline} | {details}")
+        detail_segments = list(progress['progress_lines'])
+        if not detail_segments:
+            await self.send_command_response(ctx, f"🔎 {headline}")
+            return
+
+        max_message_length = 420
+        prefix = "🔎 "
+        current_message = f"{prefix}{headline}"
+        sent_any = False
+        for segment in detail_segments:
+            candidate = f"{current_message} | {segment}"
+            if len(candidate) <= max_message_length:
+                current_message = candidate
+                continue
+            await self.send_command_response(ctx, current_message)
+            sent_any = True
+            current_message = f"{prefix}{segment}"
+
+        if current_message:
+            await self.send_command_response(ctx, current_message if sent_any else current_message)
 
 
     @commands.command(name='top10ppr')

@@ -13,6 +13,11 @@ let rivalsSettingsSnapshot = {};
 let mycyclePage = 1;
 let mycyclePageSize = 120;
 let mycycleQuery = '';
+let seasonPage = 1;
+let seasonPageSize = 100;
+let seasonQuery = '';
+let seasonSortBy = 'completed';
+let seasonSortOrder = 'desc';
 
 const I18N = {
   en: {},
@@ -36,6 +41,13 @@ const I18N = {
     'No season quest data yet.': 'Aún no hay datos de misiones de temporada.',
     'complete': 'completado',
     'Disabled': 'Desactivado',
+    'Season Races': 'Carreras de temporada',
+    'Season Points': 'Puntos de temporada',
+    'Race HS': 'Récord de carrera',
+    'BR HS': 'Récord BR',
+    'Tilt Levels': 'Niveles Tilt',
+    'Top Tiltees': 'Top Tiltees',
+    'Tilt Points': 'Puntos Tilt',
     'No tilt competitors yet.': 'Aún no hay competidores de tilt.',
     'Death Rate': 'Tasa de muertes',
     'Deaths Today': 'Muertes hoy',
@@ -74,6 +86,13 @@ const I18N = {
     'No season quest data yet.': 'No season quest data yet, matey.',
     'complete': 'done and dusted',
     'Disabled': 'Switched off',
+    'Season Races': 'Season Races',
+    'Season Points': 'Season Points',
+    'Race HS': 'Race HS',
+    'BR HS': 'BR HS',
+    'Tilt Levels': 'Tilt Levels',
+    'Top Tiltees': 'Top Tiltees',
+    'Tilt Points': 'Tilt Points',
     'No tilt competitors yet.': 'No tilt competitors yet, waiting on the crew.',
     'Death Rate': 'Death Rate, rough as guts',
     'Deaths Today': 'Deaths Today, crikey count',
@@ -317,15 +336,15 @@ function renderSeasonTargets(data) {
   if (!host) return;
 
   const seasonPayload = data?.season_quests;
-  const targets = (!Array.isArray(seasonPayload) && seasonPayload?.targets) || data?.season_quest_targets || {};
+  const targets = (!Array.isArray(seasonPayload) && seasonPayload?.targets) || {};
   const questCards = [
-    ['Season Races', targets.races],
-    ['Season Points', targets.points],
-    ['Race HS', targets.race_hs],
-    ['BR HS', targets.br_hs],
-    ['Tilt Levels', targets.tilt_levels],
-    ['Top Tiltees', targets.tilt_tops],
-    ['Tilt Points', targets.tilt_points],
+    [t('Season Races'), targets.races],
+    [t('Season Points'), targets.points],
+    [t('Race HS'), targets.race_hs],
+    [t('BR HS'), targets.br_hs],
+    [t('Tilt Levels'), targets.tilt_levels],
+    [t('Top Tiltees'), targets.tilt_tops],
+    [t('Tilt Points'), targets.tilt_points],
   ];
 
   host.innerHTML = questCards.map(([label, value]) => {
@@ -344,6 +363,17 @@ function renderSeasonQuestRows(data) {
     : (Array.isArray(seasonPayload?.rows) ? seasonPayload.rows : []);
   renderSeasonKpis(rows);
   renderSeasonTargets(data);
+
+  const seasonPagination = (!Array.isArray(seasonPayload) && seasonPayload?.pagination) || null;
+  const seasonRangePill = el('season-range-pill');
+  if (seasonRangePill) {
+    if (seasonPagination) {
+      seasonRangePill.textContent = `Showing ${fmt(rows.length)} of ${fmt(seasonPagination.total || rows.length)}`;
+    } else {
+      seasonRangePill.textContent = `Top ${fmt(rows.length)}`;
+    }
+  }
+  wireSeasonPaginationControls(seasonPagination);
 
   if (!rows.length) {
     rowsHost.innerHTML = `<div class="empty">${escapeHtml(t('No season quest data yet.'))}</div>`;
@@ -365,13 +395,13 @@ function renderSeasonQuestRows(data) {
         </div>
         <div class="progress-bar"><div class="progress-fill" style="width:${percent}%"></div></div>
         <div class="quest-metrics">
-          <span>Points: ${escapeHtml(fmt(row.points))}</span>
-          <span>Races: ${escapeHtml(fmt(row.races))}</span>
-          <span>Race HS: ${escapeHtml(fmt(row.race_hs))}</span>
-          <span>BR HS: ${escapeHtml(fmt(row.br_hs))}</span>
-          <span>Tilt Levels: ${escapeHtml(fmt(row.tilt_levels))}</span>
-          <span>Top Tiltees: ${escapeHtml(fmt(getTopTilteeCount(row)))}</span>
-          <span>Tilt Points: ${escapeHtml(fmt(row.tilt_points))}</span>
+          <span>${escapeHtml(t('Season Points'))}: ${escapeHtml(fmt(row.points))}</span>
+          <span>${escapeHtml(t('Season Races'))}: ${escapeHtml(fmt(row.races))}</span>
+          <span>${escapeHtml(t('Race HS'))}: ${escapeHtml(fmt(row.race_hs))}</span>
+          <span>${escapeHtml(t('BR HS'))}: ${escapeHtml(fmt(row.br_hs))}</span>
+          <span>${escapeHtml(t('Tilt Levels'))}: ${escapeHtml(fmt(row.tilt_levels))}</span>
+          <span>${escapeHtml(t('Top Tiltees'))}: ${escapeHtml(fmt(getTopTilteeCount(row)))}</span>
+          <span>${escapeHtml(t('Tilt Points'))}: ${escapeHtml(fmt(row.tilt_points))}</span>
         </div>
       </div>
     `;
@@ -512,8 +542,8 @@ function renderTiltRows(data) {
           <span class="stat">${escapeHtml(tiltSortBy === 'pressure_score' ? `${fmt(Math.round(row.pressure_score))} pressure` : `${fmt(row.tilt_points)} pts`)}</span>
         </div>
         <div class="quest-metrics">
-          <span>Tilt Points: ${escapeHtml(fmt(row.tilt_points))}</span>
-          <span>Tilt Levels: ${escapeHtml(fmt(row.tilt_levels))}</span>
+          X
+          X
           <span>Top Tiltees: ${escapeHtml(fmt(getTopTilteeCount(row)))}</span>
           <span>Death Count: ${escapeHtml(fmt(row.deaths))}</span>
           <span>Death Rate: ${escapeHtml(`${row.death_rate.toFixed(1)}%`)}</span>
@@ -1138,6 +1168,60 @@ function wireRaceFilterButtons() {
   });
 }
 
+
+function wireSeasonControls() {
+  const queryInput = el('season-query');
+  const sortBySelect = el('season-sort-by');
+  const sortOrderSelect = el('season-sort-order');
+  if (queryInput) {
+    queryInput.value = seasonQuery;
+    queryInput.addEventListener('input', () => {
+      seasonQuery = String(queryInput.value || '').trim();
+      seasonPage = 1;
+      refresh();
+    });
+  }
+  if (sortBySelect) {
+    sortBySelect.value = seasonSortBy;
+    sortBySelect.addEventListener('change', () => {
+      seasonSortBy = sortBySelect.value || 'completed';
+      seasonPage = 1;
+      refresh();
+    });
+  }
+  if (sortOrderSelect) {
+    sortOrderSelect.value = seasonSortOrder;
+    sortOrderSelect.addEventListener('change', () => {
+      seasonSortOrder = sortOrderSelect.value === 'asc' ? 'asc' : 'desc';
+      seasonPage = 1;
+      refresh();
+    });
+  }
+}
+
+function wireSeasonPaginationControls(pageInfo) {
+  const prevBtn = el('season-prev-page');
+  const nextBtn = el('season-next-page');
+  const pageLabel = el('season-page-info');
+  if (pageLabel) {
+    pageLabel.textContent = pageInfo ? `Page ${pageInfo.page}/${Math.max(1, pageInfo.total_pages || 1)}` : 'Page 1/1';
+  }
+  if (prevBtn) {
+    prevBtn.disabled = !pageInfo || pageInfo.page <= 1;
+    prevBtn.onclick = () => {
+      seasonPage = Math.max(1, seasonPage - 1);
+      refresh();
+    };
+  }
+  if (nextBtn) {
+    nextBtn.disabled = !pageInfo || pageInfo.page >= (pageInfo.total_pages || 1);
+    nextBtn.onclick = () => {
+      seasonPage = Math.min(pageInfo.total_pages || seasonPage, seasonPage + 1);
+      refresh();
+    };
+  }
+}
+
 function wireTiltSortControls() {
   const sortBySelect = el('tilt-sort-by');
   const sortOrderSelect = el('tilt-sort-order');
@@ -1177,16 +1261,28 @@ function setActiveView(viewName) {
   document.querySelectorAll('.dashboard-nav-btn[data-view]').forEach((btn) => {
     const isActive = btn.dataset.view === activeView;
     btn.classList.toggle('dashboard-nav-btn--active', isActive);
+    btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
   });
 
   document.querySelectorAll('[data-panel]').forEach((panel) => {
-    panel.classList.toggle('is-hidden', panel.dataset.panel !== activeView);
+    const hidden = panel.dataset.panel !== activeView;
+    panel.classList.toggle('is-hidden', hidden);
+    panel.setAttribute('aria-hidden', hidden ? 'true' : 'false');
   });
 }
 
 function wireViewTabs() {
-  document.querySelectorAll('.dashboard-nav-btn[data-view]').forEach((btn) => {
+  const tabs = Array.from(document.querySelectorAll('.dashboard-nav-btn[data-view]'));
+  tabs.forEach((btn, index) => {
     btn.addEventListener('click', () => setActiveView(btn.dataset.view));
+    btn.addEventListener('keydown', (event) => {
+      if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
+      event.preventDefault();
+      const delta = event.key === 'ArrowRight' ? 1 : -1;
+      const nextIndex = (index + delta + tabs.length) % tabs.length;
+      tabs[nextIndex].focus();
+      setActiveView(tabs[nextIndex].dataset.view);
+    });
   });
 }
 
@@ -1197,6 +1293,11 @@ async function refresh() {
       mycycle_page_size: String(mycyclePageSize),
     });
     if (mycycleQuery) params.set('mycycle_query', mycycleQuery);
+    if (seasonQuery) params.set('season_query', seasonQuery);
+    params.set('season_page', String(seasonPage));
+    params.set('season_page_size', String(seasonPageSize));
+    params.set('season_sort_by', seasonSortBy);
+    params.set('season_sort_order', seasonSortOrder);
     const resp = await fetch(`/api/dashboard/main?${params.toString()}`, { cache: 'no-store' });
     const data = await resp.json();
     currentLanguage = data?.settings?.language || currentLanguage || 'en';
@@ -1210,8 +1311,11 @@ async function refresh() {
     renderRaceTrends(data);
   } catch (error) {
     console.error('dashboard refresh failed', error);
-    const node = el('mycycle');
-    if (node) node.innerHTML = `<div class="empty">${escapeHtml(t('Unable to load MyCycle data.'))}</div>`;
+    const fallback = `<div class="empty">${escapeHtml(t('Unable to load MyCycle data.'))}</div>`;
+    ['mycycle', 'season-quests', 'tilt-leaderboard', 'rivals-leaderboard', 'races-leaderboard', 'analytics-groups', 'trend-charts'].forEach((id) => {
+      const node = el(id);
+      if (node) node.innerHTML = fallback;
+    });
   }
 }
 
@@ -1224,6 +1328,7 @@ refresh();
 wireViewTabs();
 wireRaceFilterButtons();
 wireTiltSortControls();
+wireSeasonControls();
 wireRivalsOnboardingToggle();
 window.addEventListener('hashchange', () => {
   const hashView = getRequestedViewFromLocation();

@@ -16,16 +16,16 @@
     </header>
 
     <section class="dashboard-nav" role="tablist" aria-label="Dashboard views">
-      <button class="dashboard-nav-btn dashboard-nav-btn--active" data-view="mycycle" type="button">MyCycle</button>
-      <button class="dashboard-nav-btn" data-view="season-quests" type="button">Season Quests</button>
-      <button class="dashboard-nav-btn" data-view="tilt" type="button">Tilt Dashboard</button>
-      <button class="dashboard-nav-btn" data-view="rivals" type="button">Rivals</button>
-      <button class="dashboard-nav-btn" data-view="races" type="button">Race Dashboard</button>
-      <button class="dashboard-nav-btn" data-view="analytics" type="button">Analytics</button>
-      <button class="dashboard-nav-btn" data-view="trends" type="button">Race/BR Trends</button>
+      <button class="dashboard-nav-btn dashboard-nav-btn--active" data-view="mycycle" type="button" role="tab" aria-selected="true" aria-controls="panel-mycycle">MyCycle</button>
+      <button class="dashboard-nav-btn" data-view="season-quests" type="button" role="tab" aria-selected="false" aria-controls="panel-season-quests">Season Quests</button>
+      <button class="dashboard-nav-btn" data-view="tilt" type="button" role="tab" aria-selected="false" aria-controls="panel-tilt">Tilt Dashboard</button>
+      <button class="dashboard-nav-btn" data-view="rivals" type="button" role="tab" aria-selected="false" aria-controls="panel-rivals">Rivals</button>
+      <button class="dashboard-nav-btn" data-view="races" type="button" role="tab" aria-selected="false" aria-controls="panel-races">Race Dashboard</button>
+      <button class="dashboard-nav-btn" data-view="analytics" type="button" role="tab" aria-selected="false" aria-controls="panel-analytics">Analytics</button>
+      <button class="dashboard-nav-btn" data-view="trends" type="button" role="tab" aria-selected="false" aria-controls="panel-trends">Race/BR Trends</button>
     </section>
 
-    <section class="mycycle-shell" data-panel="mycycle">
+    <section id="panel-mycycle" class="mycycle-shell" data-panel="mycycle" role="tabpanel">
       <article class="summary-panel">
         <div id="mycycle-meta" class="meta"></div>
         <div id="summary-kpis" class="kpis"></div>
@@ -45,7 +45,7 @@
       </article>
     </section>
 
-    <section class="season-shell is-hidden" data-panel="season-quests">
+    <section id="panel-season-quests" class="season-shell is-hidden" data-panel="season-quests" role="tabpanel">
       <article class="summary-panel">
         <div class="meta">Season Quests overview</div>
         <div id="season-kpis" class="kpis"></div>
@@ -55,13 +55,37 @@
       <article class="leaderboard-panel">
         <div class="panel-title-row">
           <h2>Season Quest Leaderboard</h2>
-          <span id="season-range-pill" class="range-pill">Top 100</span>
+          <div class="tilt-sort-controls">
+            <label for="season-query" class="sr-only">Search season quests</label>
+            <input id="season-query" class="sort-select" type="search" placeholder="Search racer">
+            <label for="season-sort-by" class="sr-only">Sort season leaderboard by</label>
+            <select id="season-sort-by" class="sort-select">
+              <option value="completed">Completed</option>
+              <option value="points">Points</option>
+              <option value="races">Races</option>
+              <option value="race_hs">Race HS</option>
+              <option value="br_hs">BR HS</option>
+              <option value="tilt_points">Tilt Points</option>
+              <option value="name">Name</option>
+            </select>
+            <label for="season-sort-order" class="sr-only">Sort order</label>
+            <select id="season-sort-order" class="sort-select">
+              <option value="desc">Desc</option>
+              <option value="asc">Asc</option>
+            </select>
+            <span id="season-range-pill" class="range-pill">Top 100</span>
+          </div>
         </div>
         <div id="season-quests" class="rows"></div>
+        <div class="pagination-controls" id="season-pagination-controls">
+          <button type="button" class="mini-filter-btn" id="season-prev-page">Previous</button>
+          <span class="range-pill" id="season-page-info">Page 1</span>
+          <button type="button" class="mini-filter-btn" id="season-next-page">Next</button>
+        </div>
       </article>
     </section>
 
-    <section class="tilt-shell is-hidden" data-panel="tilt">
+    <section id="panel-tilt" class="tilt-shell is-hidden" data-panel="tilt" role="tabpanel">
       <article class="summary-panel">
         <div class="meta">Tilt Dashboard pulse</div>
         <div id="tilt-kpis" class="kpis"></div>
@@ -95,7 +119,7 @@
       </article>
     </section>
 
-    <section class="rivals-shell is-hidden" data-panel="rivals">
+    <section id="panel-rivals" class="rivals-shell is-hidden" data-panel="rivals" role="tabpanel">
       <article class="summary-panel">
         <div class="meta">Rivals snapshot</div>
         <div class="rivals-onboarding" id="rivals-onboarding">
@@ -137,7 +161,7 @@
         <div id="rivals-leaderboard" class="rows"></div>
       </article>
     </section>
-    <section class="races-shell is-hidden" data-panel="races">
+    <section id="panel-races" class="races-shell is-hidden" data-panel="races" role="tabpanel">
       <article class="summary-panel">
         <div class="meta">Race + BR snapshot</div>
         <div class="race-type-filter" role="group" aria-label="Race type filter">
@@ -158,7 +182,7 @@
       </article>
     </section>
 
-    <section class="analytics-shell is-hidden" data-panel="analytics">
+    <section id="panel-analytics" class="analytics-shell is-hidden" data-panel="analytics" role="tabpanel">
       <article class="analytics-panel">
         <div class="panel-title-row">
           <h2>Analytics Command Center</h2>
@@ -169,7 +193,7 @@
     </section>
 
 
-    <section class="trends-shell is-hidden" data-panel="trends">
+    <section id="panel-trends" class="trends-shell is-hidden" data-panel="trends" role="tabpanel">
       <article class="analytics-panel">
         <div class="panel-title-row">
           <h2>Race/BR Trend Charts</h2>
