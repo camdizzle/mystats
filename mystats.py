@@ -121,6 +121,31 @@ _log_file_handler.setFormatter(
 logger.addHandler(_log_file_handler)
 logger.setLevel(logging.INFO)
 
+_RAW_CSV_READER = csv.reader
+
+
+def _sanitize_csv_lines(file_obj):
+    """Yield text lines with embedded NUL bytes removed."""
+    for line in file_obj:
+        if "\x00" in line:
+            line = line.replace("\x00", "")
+        yield line
+
+
+def iter_csv_rows(file_obj, **reader_kwargs):
+    """Safely iterate CSV rows from a text file-like object."""
+    return _RAW_CSV_READER(_sanitize_csv_lines(file_obj), **reader_kwargs)
+
+def append_csv_rows_safely(file_path, rows):
+    """Append rows to CSV and force data to disk to reduce partial-write corruption."""
+    with open(file_path, "a", newline="", encoding="utf-8", errors="ignore") as csv_file:
+        writer = csv.writer(csv_file)
+        writer.writerows(rows)
+        csv_file.flush()
+        os.fsync(csv_file.fileno())
+
+
+
 SUPPORTED_UI_LANGUAGES = {'en', 'es', 'fr', 'de', 'pt', 'au'}
 
 LANGUAGE_DISPLAY_NAMES = {
@@ -673,7 +698,7 @@ def safe_read_csv_rows(path, retries=5, retry_delay=0.5):
             result = chardet.detect(raw_data)
             encoding = result['encoding'] if result['encoding'] else 'utf-8'
             decoded = raw_data.decode(encoding, errors='ignore')
-            return list(csv.reader(io.StringIO(decoded)))
+            return list(iter_csv_rows(io.StringIO(decoded)))
         except Exception:
             time.sleep(retry_delay)
 
@@ -1415,7 +1440,7 @@ def get_tilt_xp_totals_from_results_files(target_date=None):
             encoding = result['encoding'] if result['encoding'] else 'utf-8'
 
             with open(tilts_file, 'r', encoding=encoding, errors='ignore') as f:
-                reader = csv.reader(f)
+                reader = iter_csv_rows(f)
                 for row in reader:
                     parsed = parse_tilt_result_row(row)
                     if parsed is None:
@@ -1640,7 +1665,7 @@ def get_tilt_season_stats():
             encoding = result['encoding'] if result['encoding'] else 'utf-8'
 
             with open(tilt_results, 'r', encoding=encoding, errors='ignore') as f:
-                reader = csv.reader(f)
+                reader = iter_csv_rows(f)
                 for row in reader:
                     detail = parse_tilt_result_detail(row)
                     if detail is None:
@@ -1684,7 +1709,7 @@ def get_user_season_stats():
             encoding = result['encoding'] if result['encoding'] else 'utf-8'
 
             with open(allraces, 'r', encoding=encoding, errors='ignore') as f:
-                reader = csv.reader(f)
+                reader = iter_csv_rows(f)
                 for row in reader:
                     if len(row) < 5:
                         continue
@@ -1867,7 +1892,7 @@ def get_race_dashboard_leaderboard(limit=250):
             encoding = result['encoding'] if result['encoding'] else 'utf-8'
 
             with open(allraces, 'r', encoding=encoding, errors='ignore') as f:
-                reader = csv.reader(f)
+                reader = iter_csv_rows(f)
                 for row in reader:
                     if len(row) < 5:
                         continue
@@ -3210,7 +3235,7 @@ def _build_overlay_header_stats(data_dir):
     for allraces in glob.glob(os.path.join(data_dir, "allraces_*.csv")):
         try:
             with open(allraces, 'r', encoding='utf-8', errors='ignore') as f:
-                for row in csv.reader(f):
+                for row in iter_csv_rows(f):
                     if len(row) < 5:
                         continue
                     racer = (row[2] or '').strip() or (row[1] or '').strip()
@@ -3236,7 +3261,7 @@ def _build_overlay_header_stats(data_dir):
     if today_file:
         try:
             with open(today_file, 'r', encoding='utf-8', errors='ignore') as f:
-                for row in csv.reader(f):
+                for row in iter_csv_rows(f):
                     if len(row) < 5:
                         continue
                     racer = (row[2] or '').strip() or (row[1] or '').strip()
@@ -3357,7 +3382,7 @@ def _overlay_points_top10_filtered(file_paths, race_type_filter=None):
             continue
         try:
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                for row in csv.reader(f):
+                for row in iter_csv_rows(f):
                     if len(row) < 5:
                         continue
                     race_type = (row[4] or '').strip().lower() if len(row) >= 5 else ''
@@ -3443,7 +3468,7 @@ def _overlay_recent_race_payload(race_file):
 
     try:
         with open(race_file, 'r', encoding='utf-8', errors='ignore') as f:
-            for row in csv.reader(f):
+            for row in iter_csv_rows(f):
                 if len(row) < 4:
                     continue
 
@@ -3650,7 +3675,7 @@ def _build_tilt_overlay_payload():
             encoding = result['encoding'] if result and result.get('encoding') else 'utf-8'
 
             with open(todays_file, 'r', encoding=encoding, errors='ignore') as f:
-                for row in csv.reader(f):
+                for row in iter_csv_rows(f):
                     detail = parse_tilt_result_detail(row)
                     if detail is None:
                         continue
@@ -3984,7 +4009,7 @@ def _aggregate_mode_from_directories(directories):
         for allraces_file in glob.glob(os.path.join(directory, 'allraces_*.csv')):
             try:
                 with open(allraces_file, 'r', encoding='utf-8', errors='ignore') as f:
-                    reader = csv.reader(f)
+                    reader = iter_csv_rows(f)
                     for row in reader:
                         if len(row) < 5:
                             continue
@@ -4061,7 +4086,7 @@ def _aggregate_tilt_from_directories(directories):
         for tilt_file in glob.glob(os.path.join(directory, 'tilts_*.csv')):
             try:
                 with open(tilt_file, 'r', encoding='utf-8', errors='ignore') as f:
-                    for row in csv.reader(f):
+                    for row in iter_csv_rows(f):
                         detail = parse_tilt_result_detail(row)
                         if not detail:
                             continue
@@ -4197,7 +4222,7 @@ def _extract_race_br_trend_rows_from_directory(directory):
     for allraces_file in glob.glob(os.path.join(directory, 'allraces_*.csv')):
         try:
             with open(allraces_file, 'r', encoding='utf-8', errors='ignore') as f:
-                for row in csv.reader(f):
+                for row in iter_csv_rows(f):
                     if len(row) < 6:
                         continue
                     mode = str(row[4] or '').strip().lower()
@@ -4404,11 +4429,29 @@ def clear_invalid_token_data(reason):
     )
 
 
+def _sync_chatbot_identity_from_token(access_token):
+    """Refresh UI + config username from a known-good Twitch OAuth token."""
+    if not access_token:
+        return
+
+    username = fetch_twitch_username(access_token)
+    if username:
+        update_login_button_text(username)
+        try:
+            config.set_setting('TWITCH_USERNAME', username, persistent=True)
+        except Exception:
+            logger.exception("Failed to persist TWITCH_USERNAME after token update")
+    else:
+        logger.warning("Token update succeeded but username lookup failed; preserving current chatbot label")
+
+
 # Save token data to a file and reconnect the bot with the new token asynchronously
 def save_token_data(token_info):
     token_info['expires_at'] = time.time() + token_info.get('expires_in', 0)
     with open(TOKEN_FILE_PATH, 'w') as f:
         json.dump(token_info, f)
+
+    _sync_chatbot_identity_from_token(token_info.get('access_token'))
     print("Token data saved successfully. Restarting bot...")
 
     # Reconnect the bot asynchronously with the new token
@@ -7119,7 +7162,7 @@ def process_event_data(event_id):
             encoding = result['encoding'] if result['encoding'] else 'utf-8'
 
             with open(allraces, 'r', encoding=encoding, errors='ignore') as f:
-                reader = csv.reader(f)
+                reader = iter_csv_rows(f)
                 for row in reader:
                     if len(row) < 11:
                         continue
@@ -7171,7 +7214,7 @@ def process_event_data(event_id):
     for checkpoint_file in glob.glob(os.path.join(directory, "checkpoints_*.csv")):
         try:
             with open(checkpoint_file, 'r', encoding='utf-8', errors='ignore') as f:
-                reader = csv.reader(f)
+                reader = iter_csv_rows(f)
                 for row in reader:
                     try:
                         racer_name = row[1].lower()
@@ -7405,7 +7448,7 @@ def load_racer_data():
             result = chardet.detect(raw_data)
             encoding = result['encoding'] if result['encoding'] else 'utf-8'
             with open(allraces, 'r', encoding=encoding, errors='ignore') as f:
-                reader = csv.reader(f)
+                reader = iter_csv_rows(f)
                 for row in reader:
                     if len(row) < 7:
                         continue
@@ -7469,7 +7512,7 @@ def load_additional_settings():
             result = chardet.detect(raw_data)
             encoding = result['encoding'] if result['encoding'] else 'utf-8'
             with open(allraces, 'r', encoding=encoding, errors='ignore') as f:
-                reader = csv.reader(f)
+                reader = iter_csv_rows(f)
                 for row in reader:
                     if len(row) >= 5:
                         if int(row[0]) == 1:
@@ -7500,7 +7543,7 @@ def load_additional_settings():
         encoding = result['encoding'] if result['encoding'] else 'utf-8'  # Default to UTF-8 if detection fails
 
         with open(config.get_setting('allraces_file'), 'r', encoding=encoding, errors='ignore') as t:
-            today_reader = csv.reader(t)
+            today_reader = iter_csv_rows(t)
             rows = list(today_reader)
 
             for row in rows:
@@ -9247,7 +9290,7 @@ class Bot(commands.Bot):
 
                 # Open the file with the detected encoding
                 with open(allraces, 'r', encoding=encoding, errors='ignore') as f:
-                    reader = csv.reader(f)
+                    reader = iter_csv_rows(f)
                     for row in reader:
                         # Assume:
                         # row[1] contains the racer's name
@@ -9353,7 +9396,7 @@ class Bot(commands.Bot):
                 encoding = result['encoding'] if result['encoding'] else 'utf-8'
 
                 with open(allraces, 'r', encoding=encoding, errors='ignore') as f:
-                    reader = csv.reader(f)
+                    reader = iter_csv_rows(f)
                     for row in reader:
                         race_date = datetime.strptime(row[5], "%Y-%m-%d %H:%M:%S").date()
 
@@ -9478,7 +9521,7 @@ class Bot(commands.Bot):
                 encoding = result['encoding'] if result['encoding'] else 'utf-8'
 
                 with open(tilts_file, 'r', encoding=encoding, errors='ignore') as f:
-                    reader = csv.reader(f)
+                    reader = iter_csv_rows(f)
                     for row in reader:
                         parsed = parse_tilt_result_row(row)
                         if parsed is None:
@@ -9529,7 +9572,7 @@ class Bot(commands.Bot):
                     encoding = result['encoding'] if result['encoding'] else 'utf-8'
 
                     with open(tilts_file, 'r', encoding=encoding, errors='ignore') as f:
-                        reader = csv.reader(f)
+                        reader = iter_csv_rows(f)
                         for row in reader:
                             parsed = parse_tilt_result_row(row)
                             if parsed is None:
@@ -9657,7 +9700,7 @@ class Bot(commands.Bot):
                 encoding = result['encoding'] if result['encoding'] else 'utf-8'
 
                 with open(tilts_file, 'r', encoding=encoding, errors='ignore') as f:
-                    reader = csv.reader(f)
+                    reader = iter_csv_rows(f)
                     for row in reader:
                         detail = parse_tilt_result_detail(row)
                         if detail is None:
@@ -9703,7 +9746,7 @@ class Bot(commands.Bot):
                 encoding = result['encoding'] if result['encoding'] else 'utf-8'
 
                 with open(tilts_file, 'r', encoding=encoding, errors='ignore') as f:
-                    reader = csv.reader(f)
+                    reader = iter_csv_rows(f)
                     for row in reader:
                         parsed = parse_tilt_result_row(row)
                         if parsed is None:
@@ -9743,7 +9786,7 @@ class Bot(commands.Bot):
                 encoding = result['encoding'] if result['encoding'] else 'utf-8'
 
                 with open(tilts_file, 'r', encoding=encoding, errors='ignore') as f:
-                    reader = csv.reader(f)
+                    reader = iter_csv_rows(f)
                     for row in reader:
                         parsed = parse_tilt_result_row(row)
                         if parsed is None or len(row) < 2:
@@ -9824,7 +9867,7 @@ class Bot(commands.Bot):
         data = {}
         try:
             with open(config.get_setting('allraces_file'), 'r', encoding='utf-8', errors='ignore') as f:
-                reader = csv.reader(f)
+                reader = iter_csv_rows(f)
 
                 for row in reader:
                     # Check if the row has at least 11 columns and the 11th value is not 1
@@ -9858,7 +9901,7 @@ class Bot(commands.Bot):
         data = {}
         try:
             with open(config.get_setting('allraces_file'), 'r', encoding='utf-8', errors='ignore') as f:
-                reader = csv.reader(f)
+                reader = iter_csv_rows(f)
 
                 for row in reader:
                     if len(row) >= 5 and int(''.join(row[3]).replace('\x00', '')) != 0:
@@ -9890,7 +9933,7 @@ class Bot(commands.Bot):
         for allraces in glob.glob(os.path.join(config.get_setting('directory'), "allraces_*.csv")):
             try:
                 with open(allraces, 'r', encoding='utf-8', errors='ignore') as f:
-                    reader = csv.reader(f)
+                    reader = iter_csv_rows(f)
                     for row in reader:
                         if len(row) >= 5 and row[2]:
                             racer = row[2]
@@ -9919,7 +9962,7 @@ class Bot(commands.Bot):
         for allraces in glob.glob(os.path.join(config.get_setting('directory'), "allraces_*.csv")):
             try:
                 with open(allraces, 'r', encoding='utf-8', errors='ignore') as f:
-                    reader = csv.reader(f)
+                    reader = iter_csv_rows(f)
                     for row in reader:
                         if len(row) >= 5 and int(row[0]) == 1:
                             racer = row[2]
@@ -9948,7 +9991,7 @@ class Bot(commands.Bot):
         for allraces in glob.glob(os.path.join(config.get_setting('directory'), "allraces_*.csv")):
             try:
                 with open(allraces, 'r', encoding='utf-8', errors='ignore') as f:
-                    reader = csv.reader(f)
+                    reader = iter_csv_rows(f)
                     for row in reader:
                         if len(row) >= 5 and int(row[3]) != 0:
                             racer = row[2]
@@ -9986,7 +10029,7 @@ class Bot(commands.Bot):
                 encoding = result['encoding'] if result['encoding'] else 'utf-8'
 
                 with open(allraces, 'r', encoding=encoding, errors='ignore') as f:
-                    reader = csv.reader(f)
+                    reader = iter_csv_rows(f)
                     for row in reader:
                         # Check that the row has at least 12 columns and the 12th column equals "1"
                         if len(row) > 11 and row[11] == '1':
@@ -10045,7 +10088,7 @@ class Bot(commands.Bot):
         for allraces in glob.glob(os.path.join(config.get_setting('directory'), "allraces_*.csv")):
             try:
                 with open(allraces, 'r', encoding='utf-8', errors='ignore') as f:
-                    reader = csv.reader(f)
+                    reader = iter_csv_rows(f)
                     for row in reader:
                         # Check 12th value at index 11 (must be 0 or exists)
                         if len(row) >= 12 and int(row[11]) != 1:  # Changed to index 11
@@ -10202,7 +10245,7 @@ def process_season(directory, season):
             encoding = result['encoding'] if result['encoding'] else 'utf-8'  # Default to UTF-8 if detection fails
 
             with open(allraces, 'r', encoding=encoding, errors='ignore') as f:
-                reader = csv.reader(f)
+                reader = iter_csv_rows(f)
                 for rowrow in reader:
                     if len(rowrow) < 7:
                         continue
@@ -10951,7 +10994,7 @@ async def checkpoints(bot):
 
                 def parse_checkpoint_players(checkpoint_file_path, detected_encoding):
                     with open(checkpoint_file_path, 'r', encoding=detected_encoding, errors='ignore', newline='') as checkpoint_file:
-                        reader = csv.reader(checkpoint_file)
+                        reader = iter_csv_rows(checkpoint_file)
                         rows = list(reader)
 
                     if len(rows) <= 1:
@@ -11314,10 +11357,7 @@ async def race(bot):
                 totalpointsrace += int(row[3])
                 s_t_points += int(row[3])
 
-            with open(config.get_setting('allraces_file'), 'a', newline='', encoding='utf-8', errors='ignore') as f:
-                writer = csv.writer(f)
-                for row in racedata:
-                    writer.writerow(row)
+            append_csv_rows_safely(config.get_setting('allraces_file'), racedata)
 
             logger.info("Data synced: race results written to allraces file")
 
@@ -11325,7 +11365,7 @@ async def race(bot):
             points_by_player = {}
             wins_by_player = {}
             with open(config.get_setting('allraces_file'), 'r', encoding='utf-8', errors='ignore') as f:
-                reader = csv.reader(f)
+                reader = iter_csv_rows(f)
                 for row in reader:
                     if len(row) < 4:
                         continue
@@ -11353,7 +11393,7 @@ async def race(bot):
             if config.get_setting('MPL') == 'True':
                 checkpointdata = []
                 with open(config.get_setting('checkpoint_file'), 'r', encoding='utf-8', errors='ignore') as f:
-                    checkpointfile = csv.reader(f)
+                    checkpointfile = iter_csv_rows(f)
                     for row in checkpointfile:
                         checkpointdata.append(row)
 
@@ -11992,15 +12032,12 @@ async def royale(bot):
                     t_points += int(br_winner[4])
                     s_t_points += int(br_winner[4])
 
-                    with open(config.get_setting('allraces_file'), 'a', newline='', encoding='utf-8',
-                              errors='ignore') as f:
-                        writer = csv.writer(f)
-                        writer.writerows(brdata)
+                    append_csv_rows_safely(config.get_setting('allraces_file'), brdata)
 
                     race_counts = {row[1]: 0 for row in brdata}
 
                     with open(config.get_setting('allraces_file'), 'r', encoding='utf-8', errors='ignore') as f:
-                        reader = csv.reader(f)
+                        reader = iter_csv_rows(f)
                         for row in reader:
                             if len(row) >= 2 and row[1] in race_counts:
                                 race_counts[row[1]] += 1
@@ -12079,7 +12116,7 @@ async def royale(bot):
 
                     try:
                         with open(config.get_setting('allraces_file'), 'r', encoding='utf-8', errors='ignore') as f:
-                            reader = csv.reader(f)
+                            reader = iter_csv_rows(f)
                             for row in reader:
                                 if row[1] == winnersname.lower():
                                     winnertotalpoints += int(row[3])
