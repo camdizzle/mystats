@@ -198,6 +198,49 @@ def append_csv_rows_safely(file_path, rows):
         os.fsync(csv_file.fileno())
 
 
+def _settings_file_candidates():
+    filename = "settings.txt"
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        os.path.join(script_dir, filename),
+        os.path.join(os.getcwd(), filename),
+    ]
+
+    executable_path = getattr(sys, "executable", "")
+    if executable_path:
+        executable_dir = os.path.dirname(os.path.abspath(executable_path))
+        candidates.append(os.path.join(executable_dir, filename))
+
+    unique_candidates = []
+    seen = set()
+    for candidate in candidates:
+        normalized = os.path.normcase(os.path.abspath(candidate))
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        unique_candidates.append(candidate)
+
+    return unique_candidates
+
+
+def _resolve_settings_file_path():
+    for candidate in _settings_file_candidates():
+        if os.path.isfile(candidate):
+            return candidate
+
+    for candidate in _settings_file_candidates():
+        parent_dir = os.path.dirname(candidate) or "."
+        if os.access(parent_dir, os.W_OK):
+            return candidate
+
+    fallback_dir = os.path.join(os.path.expanduser("~"), ".mystats")
+    os.makedirs(fallback_dir, exist_ok=True)
+    return os.path.join(fallback_dir, "settings.txt")
+
+
+SETTINGS_FILE_PATH = _resolve_settings_file_path()
+
+
 
 SUPPORTED_UI_LANGUAGES = {'en', 'es', 'fr', 'de', 'pt', 'au'}
 
@@ -536,7 +579,7 @@ def force_exit_application():
 
 def get_initial_ui_theme():
     try:
-        with open("settings.txt", "r", encoding="utf-8", errors="ignore") as f:
+        with open(SETTINGS_FILE_PATH, "r", encoding="utf-8", errors="ignore") as f:
             for line in f:
                 if line.startswith("UI_THEME="):
                     theme_name = line.split("=", 1)[1].strip()
@@ -3433,7 +3476,7 @@ def _get_redirect_uri():
 
 # Function to start Flask server
 def _load_overlay_server_port(default_port=5000):
-    settings_path = 'settings.txt'
+    settings_path = SETTINGS_FILE_PATH
     try:
         with open(settings_path, 'r', encoding='utf-8', errors='ignore') as settings_file:
             for raw_line in settings_file:
@@ -7442,7 +7485,7 @@ def set_tilt_runtime_setting(key, value):
 
 class ConfigManager:
     def __init__(self):
-        self.settings_file = 'settings.txt'
+        self.settings_file = SETTINGS_FILE_PATH
         self.settings = {}
         self.transient_settings = {}
         self.persistent_keys = {'TWITCH_USERNAME', 'TWITCH_TOKEN', 'CHANNEL', 'chunk_alert', 'chunk_alert_value',
