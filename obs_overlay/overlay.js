@@ -2,14 +2,23 @@ const $ = id => document.getElementById(id);
 const leaderboard = $('leaderboard');
 const boardShell = document.querySelector('.board-shell');
 const splashScreen = $('splash-screen');
-const headerPills = [
-  $('stat-avg-today'),
-  $('stat-uniq-today'),
-  $('stat-races-today'),
-  $('stat-avg-season'),
-  $('stat-uniq-season'),
-  $('stat-races-season'),
-];
+const headerPillGroups = {
+  today: [
+    $('stat-avg-today'),
+    $('stat-uniq-today'),
+    $('stat-races-today'),
+  ],
+  season: [
+    $('stat-avg-season'),
+    $('stat-uniq-season'),
+    $('stat-races-season'),
+  ],
+  br: [
+    $('stat-br-avg-today'),
+    $('stat-br-racers-today'),
+    $('stat-br-total-today'),
+  ],
+};
 const fmt = n => new Intl.NumberFormat().format(n || 0);
 
 
@@ -29,6 +38,9 @@ const I18N = {
     'Avg Points Season': 'Promedio temporada',
     'All Racers Season': 'Todos temporada',
     'Total Races Season': 'Carreras temporada',
+    'Avg Pts Per BR': 'Promedio por BR',
+    'BR Racers Today': 'Jugadores BR hoy',
+    'Total BRs Today': 'BR totales hoy',
     'set a new world record!': 'logró un nuevo récord mundial!',
     'Beat previous by': 'Superó al anterior por',
     'Active': 'Activo',
@@ -46,6 +58,9 @@ const I18N = {
     'Avg Points Season': 'Average Points This Season',
     'All Racers Season': 'All Mates This Season',
     'Total Races Season': 'Total Seasonal Races, strewth',
+    'Avg Pts Per BR': 'Average BR Points Today',
+    'BR Racers Today': 'BR Mates Today',
+    'Total BRs Today': 'Total BRs Today, no worries',
     'set a new world record!': 'set a new world ripper record!',
     'Beat previous by': 'Beat the old mark by',
     'Active': 'Flat Out',
@@ -130,6 +145,7 @@ let refreshTimer = null;
 let pillRotationTimer = null;
 let currentViews = [];
 let activePillPage = 0;
+let currentPillMode = 'race';
 let leaderboardScrollTimer = null;
 let leaderboardScrollPauseUntil = 0;
 let leaderboardScrollRetryTimer = null;
@@ -393,21 +409,33 @@ function updateHeaderStats(s = {}) {
   setPillValue('stat-avg-season', s.avg_points_season);
   setPillValue('stat-uniq-season', s.unique_racers_season);
   setPillValue('stat-races-season', s.total_races_season);
+  setPillValue('stat-br-avg-today', s.br_avg_points_today);
+  setPillValue('stat-br-racers-today', s.br_racers_today);
+  setPillValue('stat-br-total-today', s.total_brs_today);
   renderPillPage();
 }
 
+function getPillPagesForMode() {
+  return currentPillMode === 'br'
+    ? [headerPillGroups.today, headerPillGroups.br]
+    : [headerPillGroups.today, headerPillGroups.season];
+}
+
 function renderPillPage() {
-  const pillPageSize = 3;
-  headerPills.forEach((pill, idx) => {
-    if (!pill) return;
-    const start = activePillPage * pillPageSize;
-    const end = start + pillPageSize;
-    pill.style.display = idx >= start && idx < end ? 'block' : 'none';
+  const allPills = [...headerPillGroups.today, ...headerPillGroups.season, ...headerPillGroups.br];
+  allPills.forEach((pill) => {
+    if (pill) pill.style.display = 'none';
+  });
+
+  const pages = getPillPagesForMode();
+  const activePage = pages[activePillPage] || pages[0] || [];
+  activePage.forEach((pill) => {
+    if (pill) pill.style.display = 'block';
   });
 }
 
 function rotatePills() {
-  const totalPages = Math.max(1, Math.ceil(headerPills.length / 3));
+  const totalPages = Math.max(1, getPillPagesForMode().length);
   if (totalPages <= 1) return;
   activePillPage = (activePillPage + 1) % totalPages;
   renderPillPage();
@@ -1055,6 +1083,13 @@ async function refresh() {
       currentResultsMode = raceType;
     }
 
+    const nextPillMode = currentResultsMode === 'br' ? 'br' : 'race';
+    if (nextPillMode !== currentPillMode) {
+      currentPillMode = nextPillMode;
+      activePillPage = 0;
+    }
+    renderPillPage();
+
     const overlayEvents = Array.isArray(p.overlay_events) ? p.overlay_events : [];
     const filteredViews = selectViewsForMode(normalizedViews, currentResultsMode);
     const modeViews = filteredViews.length ? filteredViews : normalizedViews;
@@ -1136,7 +1171,8 @@ startPillRotationTimer();
   if (title) title.textContent = t('WORLD RECORD!');
   const mapping = {
     'stat-avg-today':'Avg Points Today','stat-uniq-today':'All Racers Today','stat-races-today':'Total Races Today',
-    'stat-avg-season':'Avg Points Season','stat-uniq-season':'All Racers Season','stat-races-season':'Total Races Season'
+    'stat-avg-season':'Avg Points Season','stat-uniq-season':'All Racers Season','stat-races-season':'Total Races Season',
+    'stat-br-avg-today':'Avg Pts Per BR','stat-br-racers-today':'BR Racers Today','stat-br-total-today':'Total BRs Today'
   };
   Object.entries(mapping).forEach(([id,key]) => {
     const n = document.querySelector(`#${id} .pill-title`);
