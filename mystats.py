@@ -4624,7 +4624,6 @@ def _build_dashboard_race_trends_payload():
             'highest_volume_day': max_volume_day,
             'best_ppr_day': best_ppr_day,
         },
-        'analytics': analytics_payload,
     }
 
 
