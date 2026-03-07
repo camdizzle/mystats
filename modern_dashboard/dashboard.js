@@ -5,6 +5,11 @@ let raceDashboardFilter = 'both';
 let tiltSortBy = 'tilt_points';
 let tiltSortOrder = 'desc';
 let rivalsGuideCollapsed = false;
+let rivalsSortBy = 'closest';
+let rivalsSearchQuery = '';
+let rivalsGapPreset = 'all';
+let rivalsRowsSnapshot = [];
+let rivalsSettingsSnapshot = {};
 let mycyclePage = 1;
 let mycyclePageSize = 120;
 let mycycleQuery = '';
@@ -40,6 +45,14 @@ const I18N = {
     'Updated now': 'Actualizado ahora',
     'Updated': 'Actualizado',
     'Unable to load MyCycle data.': 'No se pudieron cargar los datos de MyCycle.',
+    'No rivals currently qualify. Try lowering Minimum Season Races or increasing Maximum Point Gap in Settings → Rivals.': 'No hay rivales que califiquen ahora. Baja Carreras mínimas o sube Brecha máxima en Ajustes → Rivals.',
+    'Current closest rivalry': 'Rivalidad más cercana actual',
+    'Rivals Highlights': 'Resumen de rivales',
+    'No rivalries found with current settings': 'No se encontraron rivalidades con la configuración actual',
+    'Closest Matchup': 'Enfrentamiento más parejo',
+    'Most One-Sided': 'Más desigual',
+    'point gap': 'brecha de puntos',
+    'Most One-Sided = largest point gap. Tie-breaker: larger race gap.': 'Más desigual = mayor brecha de puntos. Desempate: mayor brecha de carreras.',
   },
   au: {
     'Tracked Racers': 'Tracked Mates on the Track',
@@ -70,6 +83,14 @@ const I18N = {
     'Updated now': 'Updated just now, fresh as',
     'Updated': 'Updated, fresh off the barbie',
     'Unable to load MyCycle data.': 'Could not load MyCycle data, bit crook.',
+    'No rivals currently qualify. Try lowering Minimum Season Races or increasing Maximum Point Gap in Settings → Rivals.': 'No rivals qualify right now. Lower min races or lift max gap in Settings → Rivals, mate.',
+    'Current closest rivalry': 'Current closest rivalry',
+    'Rivals Highlights': 'Rivals Highlights',
+    'No rivalries found with current settings': 'No rivalries with current settings, mate',
+    'Closest Matchup': 'Closest Matchup',
+    'Most One-Sided': 'Most One-Sided',
+    'point gap': 'point gap',
+    'Most One-Sided = largest point gap. Tie-breaker: larger race gap.': 'Most One-Sided = biggest point gap. Tie-breaker: bigger race gap.',
   }
 };
 
@@ -508,11 +529,12 @@ function getRivalsOnboardingSteps(settings = {}) {
   const minRaces = Math.max(1, Number(settings?.min_races || 0) || 50);
   const maxGap = Math.max(0, Number(settings?.max_point_gap || 0) || 1500);
   const pairCount = Math.max(1, Number(settings?.pair_count || 0) || 25);
+  const hardCap = Math.max(1, Number(settings?.max_pairs || 0) || 200);
 
   return [
     `1) MyStats scans players with at least ${fmt(minRaces)} season races.`,
     `2) It compares point totals and keeps pairs within a ${fmt(maxGap)}-point gap.`,
-    `3) The dashboard ranks the ${fmt(Math.min(200, pairCount))} closest pairs (smaller gap = stronger rivalry).`,
+    `3) The dashboard ranks the ${fmt(Math.min(hardCap, pairCount))} closest pairs (smaller gap = stronger rivalry).`,
     '4) Use !rivals <name> for personal rivals, or !h2h <name1> <name2> for direct matchups in chat.',
   ];
 }
@@ -526,13 +548,13 @@ function renderRivalsOnboarding(settings = {}, rows = []) {
   stepsHost.innerHTML = steps.map((step) => `<li>${escapeHtml(step)}</li>`).join('');
 
   if (!rows.length) {
-    contextHost.textContent = 'No rivals currently qualify. Try lowering Minimum Season Races or increasing Maximum Point Gap in Settings → Rivals.';
+    contextHost.textContent = t('No rivals currently qualify. Try lowering Minimum Season Races or increasing Maximum Point Gap in Settings → Rivals.');
     return;
   }
 
   const closest = rows[0];
   const closestNames = `${closest.display_a || closest.user_a || 'Player A'} vs ${closest.display_b || closest.user_b || 'Player B'}`;
-  contextHost.textContent = `Current closest rivalry: ${closestNames} at ${fmt(closest.point_gap)} points apart.`;
+  contextHost.textContent = `${t('Current closest rivalry')}: ${closestNames} at ${fmt(closest.point_gap)} points apart.`;
 }
 
 function wireRivalsOnboardingToggle() {
@@ -585,7 +607,7 @@ function renderRivalsHighlights(rows = []) {
   if (!host) return;
 
   if (!rows.length) {
-    host.innerHTML = '<div class="highlight-card"><div class="highlight-title">Rivals Highlights</div><div class="highlight-main">No rivalries found with current settings</div></div>';
+    host.innerHTML = `<div class="highlight-card"><div class="highlight-title">${escapeHtml(t('Rivals Highlights'))}</div><div class="highlight-main">${escapeHtml(t('No rivalries found with current settings'))}</div></div>`;
     return;
   }
 
@@ -605,18 +627,126 @@ function renderRivalsHighlights(rows = []) {
   const oneSidedNames = `${mostOneSided.display_a || mostOneSided.user_a || '—'} vs ${mostOneSided.display_b || mostOneSided.user_b || '—'}`;
 
   host.innerHTML = [
-    `<div class="highlight-card"><div class="highlight-title">Closest Matchup</div><div class="highlight-main">${escapeHtml(closestNames)}</div><div class="highlight-detail">${escapeHtml(`${fmt(closest.point_gap)} point gap`)}</div></div>`,
-    `<div class="highlight-card"><div class="highlight-title">Most One-Sided</div><div class="highlight-main">${escapeHtml(oneSidedNames)}</div><div class="highlight-detail">${escapeHtml(`${fmt(mostOneSided.point_gap)} point gap`)}</div></div>`,
+    `<div class="highlight-card"><div class="highlight-title">${escapeHtml(t('Closest Matchup'))}</div><div class="highlight-main">${escapeHtml(closestNames)}</div><div class="highlight-detail">${escapeHtml(`${fmt(closest.point_gap)} ${t('point gap')}`)}</div></div>`,
+    `<div class="highlight-card" title="${escapeHtml(t('Most One-Sided = largest point gap. Tie-breaker: larger race gap.'))}"><div class="highlight-title">${escapeHtml(t('Most One-Sided'))}</div><div class="highlight-main">${escapeHtml(oneSidedNames)}</div><div class="highlight-detail">${escapeHtml(`${fmt(mostOneSided.point_gap)} ${t('point gap')}`)}</div></div>`,
   ].join('');
+}
+
+function getFilteredSortedRivalRows(rows = []) {
+  const trimmedQuery = rivalsSearchQuery.trim().toLowerCase();
+  const gapLimit = rivalsGapPreset === 'all' ? Number.POSITIVE_INFINITY : Number(rivalsGapPreset || 0);
+
+  const filtered = rows.filter((row) => {
+    const rowGap = Number(row.point_gap || 0);
+    if (Number.isFinite(gapLimit) && rowGap > gapLimit) return false;
+    if (!trimmedQuery) return true;
+    const nameA = String(row.display_a || row.user_a || '').toLowerCase();
+    const nameB = String(row.display_b || row.user_b || '').toLowerCase();
+    return nameA.includes(trimmedQuery) || nameB.includes(trimmedQuery);
+  });
+
+  const sorted = [...filtered].sort((a, b) => {
+    const pointsA = Number(a.points_a || 0);
+    const pointsB = Number(a.points_b || 0);
+    const racesA = Number(a.races_a || 0);
+    const racesB = Number(a.races_b || 0);
+    const gapA = Math.abs(pointsA - pointsB);
+
+    const pointsC = Number(b.points_a || 0);
+    const pointsD = Number(b.points_b || 0);
+    const racesC = Number(b.races_a || 0);
+    const racesD = Number(b.races_b || 0);
+    const gapB = Math.abs(pointsC - pointsD);
+
+    if (rivalsSortBy === 'widest') return gapB - gapA;
+    if (rivalsSortBy === 'most-races') return (racesC + racesD) - (racesA + racesB);
+    if (rivalsSortBy === 'best-ppr') {
+      const pprEdgeA = Math.abs((racesA > 0 ? pointsA / racesA : 0) - (racesB > 0 ? pointsB / racesB : 0));
+      const pprEdgeB = Math.abs((racesC > 0 ? pointsC / racesC : 0) - (racesD > 0 ? pointsD / racesD : 0));
+      return pprEdgeB - pprEdgeA;
+    }
+    if (rivalsSortBy === 'score') return Number(b.rivalry_score || 0) - Number(a.rivalry_score || 0);
+    return gapA - gapB;
+  });
+
+  return sorted;
+}
+
+function exportRivalsCsv() {
+  if (!rivalsRowsSnapshot.length) return;
+  const headers = ['rank', 'player_a', 'points_a', 'races_a', 'player_b', 'points_b', 'races_b', 'point_gap', 'recent_point_gap_30d', 'trend', 'rivalry_score'];
+  const lines = [headers.join(',')];
+  rivalsRowsSnapshot.forEach((row, idx) => {
+    lines.push([
+      idx + 1,
+      row.display_a || row.user_a || '',
+      Number(row.points_a || 0),
+      Number(row.races_a || 0),
+      row.display_b || row.user_b || '',
+      Number(row.points_b || 0),
+      Number(row.races_b || 0),
+      Number(row.point_gap || 0),
+      Number(row.recent_point_gap_30d || 0),
+      row.trend_direction || 'steady',
+      Number(row.rivalry_score || 0),
+    ].map((value) => `"${String(value).replace(/"/g, '""')}"`).join(','));
+  });
+
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `rivals_${new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-')}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function wireRivalsControls() {
+  const search = el('rivals-search');
+  const sort = el('rivals-sort');
+  const preset = el('rivals-preset');
+  const exportBtn = el('rivals-export');
+  if (!search || !sort || !preset || !exportBtn || search.dataset.wired === 'true') return;
+
+  search.dataset.wired = 'true';
+  sort.value = rivalsSortBy;
+  preset.value = rivalsGapPreset;
+
+  search.addEventListener('input', () => {
+    rivalsSearchQuery = search.value || '';
+    renderRivalsRows({ rivals: rivalsRowsSnapshot, settings: rivalsSettingsSnapshot });
+  });
+  sort.addEventListener('change', () => {
+    rivalsSortBy = sort.value || 'closest';
+    renderRivalsRows({ rivals: rivalsRowsSnapshot, settings: rivalsSettingsSnapshot });
+  });
+  preset.addEventListener('change', () => {
+    rivalsGapPreset = preset.value || 'all';
+    renderRivalsRows({ rivals: rivalsRowsSnapshot, settings: rivalsSettingsSnapshot });
+  });
+  exportBtn.addEventListener('click', exportRivalsCsv);
 }
 
 function renderRivalsRows(data) {
   const rowsHost = el('rivals-leaderboard');
   if (!rowsHost) return;
 
-  const rows = Array.isArray(data?.rivals) ? data.rivals : [];
+  const incomingRows = Array.isArray(data?.rivals) ? data.rivals : [];
+  rivalsSettingsSnapshot = data?.settings || rivalsSettingsSnapshot;
+  if (incomingRows.length) {
+    rivalsRowsSnapshot = incomingRows;
+  }
+  const rows = getFilteredSortedRivalRows(rivalsRowsSnapshot);
+  wireRivalsControls();
 
-  renderRivalsOnboarding(data?.settings?.rivals || {}, rows);
+  const rivalsSettings = {
+    ...(data?.settings?.rivals || {}),
+    max_pairs: Number(data?.settings?.rivals_limits?.max_pairs || 200),
+  };
+
+  renderRivalsOnboarding(rivalsSettings, rows);
   renderRivalsKpis(rows);
   renderRivalsHighlights(rows);
 

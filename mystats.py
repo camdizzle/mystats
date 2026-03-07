@@ -51,6 +51,7 @@ import tempfile
 import subprocess
 import warnings
 import html
+import unicodedata
 
 if sys.platform == "win32":
     import ctypes
@@ -1734,12 +1735,31 @@ def get_user_season_stats():
                         user_stats[username]['display_name'] = display_name
 
                     user_stats[username]['races'] += 1
+                    row_timestamp = None
+                    if row:
+                        try:
+                            row_timestamp = parser.parse(str(row[0]).strip())
+                            if row_timestamp.tzinfo is None:
+                                row_timestamp = row_timestamp.replace(tzinfo=timezone.utc)
+                            else:
+                                row_timestamp = row_timestamp.astimezone(timezone.utc)
+                        except Exception:
+                            row_timestamp = None
+
                     try:
                         points = int(row[3])
                     except (TypeError, ValueError):
                         points = 0
 
                     user_stats[username]['points'] += points
+                    if row_timestamp is not None:
+                        cutoff_30d = datetime.now(timezone.utc) - timedelta(days=30)
+                        if row_timestamp >= cutoff_30d:
+                            user_stats[username].setdefault('recent_races_30d', 0)
+                            user_stats[username].setdefault('recent_points_30d', 0)
+                            user_stats[username]['recent_races_30d'] += 1
+                            user_stats[username]['recent_points_30d'] += points
+
                     mode = row[4].strip().lower()
                     if mode == 'race' and points > user_stats[username]['race_hs']:
                         user_stats[username]['race_hs'] = points
@@ -1771,6 +1791,10 @@ def get_user_season_stats():
 
         if not user_stats[username].get('display_name'):
             user_stats[username]['display_name'] = tilt_stats.get('display_name') or username
+
+    for stats in user_stats.values():
+        stats.setdefault('recent_races_30d', 0)
+        stats.setdefault('recent_points_30d', 0)
 
     return user_stats
 
@@ -2027,62 +2051,201 @@ def open_quest_completion_window(parent_window):
 
 
 def get_rival_settings():
+    min_races = get_int_setting('rivals_min_races', 50)
+    max_gap = get_int_setting('rivals_max_point_gap', 1500)
+    pair_count = get_int_setting('rivals_pair_count', 25)
+
     return {
-        'min_races': max(1, get_int_setting('rivals_min_races', 50)),
-        'max_point_gap': max(0, get_int_setting('rivals_max_point_gap', 1500)),
-        'pair_count': max(1, get_int_setting('rivals_pair_count', 25)),
+        'min_races': max(1, min(min_races, RIVALS_MAX_MIN_RACES)),
+        'max_point_gap': max(0, min(max_gap, RIVALS_MAX_POINT_GAP)),
+        'pair_count': max(1, min(pair_count, RIVALS_MAX_PAIRS)),
     }
 
 
+def _normalize_user_lookup(value):
+    clean = unicodedata.normalize('NFKC', str(value or ''))
+    clean = re.sub(r'\s+', ' ', clean.strip().lstrip('@')).lower()
+    return clean
+
+
 def resolve_user_in_stats(user_stats, username):
-    lookup = (username or '').strip().lstrip('@').lower()
+    lookup = _normalize_user_lookup(username)
     if not lookup:
         return None
     if lookup in user_stats:
         return lookup
+
+    matches = []
     for uname, stats in user_stats.items():
-        if stats.get('display_name', '').strip().lower() == lookup:
-            return uname
+        if _normalize_user_lookup(stats.get('display_name', '')) == lookup:
+            matches.append(uname)
+
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        return {'ambiguous': True, 'matches': matches[:5]}
     return None
 
 
-def get_global_rivalries(limit=None):
-    user_stats = get_user_season_stats()
-    settings = get_rival_settings()
+def _build_rivalry_row(user_a, stats_a, user_b, stats_b):
+    points_a = stats_a.get('points', 0)
+    points_b = stats_b.get('points', 0)
+    races_a = stats_a.get('races', 0)
+    races_b = stats_b.get('races', 0)
+    gap = abs(points_a - points_b)
+    ppr_a = (points_a / races_a) if races_a else 0.0
+    ppr_b = (points_b / races_b) if races_b else 0.0
+    ppr_gap = abs(ppr_a - ppr_b)
+    race_gap = abs(races_a - races_b)
+    recent_gap = abs(stats_a.get('recent_points_30d', 0) - stats_b.get('recent_points_30d', 0))
+    trend_delta = gap - recent_gap
+    rivalry_score = (100000 - gap) + (5000 - race_gap) + int(max(0, 500 - (ppr_gap * 100))) + int(max(0, trend_delta))
 
+    return {
+        'user_a': user_a,
+        'display_a': stats_a.get('display_name') or user_a,
+        'points_a': points_a,
+        'races_a': races_a,
+        'recent_points_a_30d': stats_a.get('recent_points_30d', 0),
+        'user_b': user_b,
+        'display_b': stats_b.get('display_name') or user_b,
+        'points_b': points_b,
+        'races_b': races_b,
+        'recent_points_b_30d': stats_b.get('recent_points_30d', 0),
+        'point_gap': gap,
+        'race_gap': race_gap,
+        'ppr_gap': round(ppr_gap, 4),
+        'recent_point_gap_30d': recent_gap,
+        'trend_delta_30d': trend_delta,
+        'trend_direction': 'closing' if trend_delta > 0 else ('widening' if trend_delta < 0 else 'steady'),
+        'rivalry_score': rivalry_score,
+    }
+
+
+def _get_rivals_matrix(user_stats, settings):
     qualified = [
         (username, stats) for username, stats in user_stats.items()
         if stats.get('races', 0) >= settings['min_races'] and stats.get('points', 0) > 0
     ]
+    qualified.sort(key=lambda row: row[1].get('points', 0))
 
     rivalries = []
-    for i in range(len(qualified)):
-        user_a, stats_a = qualified[i]
+    for i, (user_a, stats_a) in enumerate(qualified):
+        points_a = stats_a.get('points', 0)
         for j in range(i + 1, len(qualified)):
             user_b, stats_b = qualified[j]
-            gap = abs(stats_a['points'] - stats_b['points'])
-            if gap <= settings['max_point_gap']:
-                rivalries.append({
-                    'user_a': user_a,
-                    'display_a': stats_a.get('display_name') or user_a,
-                    'points_a': stats_a.get('points', 0),
-                    'races_a': stats_a.get('races', 0),
-                    'user_b': user_b,
-                    'display_b': stats_b.get('display_name') or user_b,
-                    'points_b': stats_b.get('points', 0),
-                    'races_b': stats_b.get('races', 0),
-                    'point_gap': gap,
-                })
+            gap = stats_b.get('points', 0) - points_a
+            if gap > settings['max_point_gap']:
+                break
+            rivalries.append(_build_rivalry_row(user_a, stats_a, user_b, stats_b))
 
-    rivalries.sort(key=lambda row: (row['point_gap'], -(row['points_a'] + row['points_b'])))
+    rivalries.sort(key=lambda row: (row['point_gap'], -row['rivalry_score'], -(row['points_a'] + row['points_b'])))
+
+    by_user = defaultdict(list)
+    for row in rivalries:
+        by_user[row['user_a']].append({
+            'username': row['user_b'],
+            'display_name': row['display_b'],
+            'points': row['points_b'],
+            'races': row['races_b'],
+            'point_gap': row['point_gap'],
+            'rivalry_score': row['rivalry_score'],
+            'trend_direction': row['trend_direction'],
+            'recent_point_gap_30d': row['recent_point_gap_30d'],
+        })
+        by_user[row['user_b']].append({
+            'username': row['user_a'],
+            'display_name': row['display_a'],
+            'points': row['points_a'],
+            'races': row['races_a'],
+            'point_gap': row['point_gap'],
+            'rivalry_score': row['rivalry_score'],
+            'trend_direction': row['trend_direction'],
+            'recent_point_gap_30d': row['recent_point_gap_30d'],
+        })
+
+    for user_key in by_user:
+        by_user[user_key].sort(key=lambda row: (row['point_gap'], -row['rivalry_score'], -row['points']))
+
+    return {
+        'qualified_count': len(qualified),
+        'rivalries': rivalries,
+        'by_user': by_user,
+    }
+
+
+def _season_stats_fingerprint(user_stats):
+    players = len(user_stats)
+    races_total = sum(int(row.get('races', 0)) for row in user_stats.values())
+    points_total = sum(int(row.get('points', 0)) for row in user_stats.values())
+    recent_total = sum(int(row.get('recent_points_30d', 0)) for row in user_stats.values())
+    return (players, races_total, points_total, recent_total)
+
+
+def get_rivals_payload(user_stats=None, settings=None):
+    user_stats = user_stats or get_user_season_stats()
+    settings = settings or get_rival_settings()
+    key = (_season_stats_fingerprint(user_stats), settings['min_races'], settings['max_point_gap'], settings['pair_count'])
+
+    now_ts = time.time()
+    if _rivals_cache.get('payload') is not None and _rivals_cache.get('key') == key:
+        if (now_ts - float(_rivals_cache.get('created_at', 0.0))) <= RIVALS_CACHE_TTL_S:
+            return _rivals_cache['payload']
+
+    payload = _get_rivals_matrix(user_stats, settings)
+    _rivals_cache['created_at'] = now_ts
+    _rivals_cache['key'] = key
+    _rivals_cache['payload'] = payload
+    return payload
+
+
+def _track_rivals_metric(metric_name):
+    _rivals_command_metrics[metric_name] += 1
+
+
+def _is_rivals_command_on_cooldown(author_name):
+    now_ts = time.time()
+    if (now_ts - _rivals_cooldown_state.get('global_ts', 0.0)) < RIVALS_GLOBAL_COOLDOWN_S:
+        return True
+
+    key = _normalize_user_lookup(author_name) or 'unknown'
+    user_last = _rivals_cooldown_state['user_ts'].get(key, 0.0)
+    if (now_ts - user_last) < RIVALS_USER_COOLDOWN_S:
+        return True
+
+    _rivals_cooldown_state['global_ts'] = now_ts
+    _rivals_cooldown_state['user_ts'][key] = now_ts
+    return False
+
+
+def _resolve_user_or_error(user_stats, username):
+    user_key = resolve_user_in_stats(user_stats, username)
+    if isinstance(user_key, dict) and user_key.get('ambiguous'):
+        sample = ', '.join(format_user_tag(name) for name in user_key.get('matches', [])[:3])
+        return None, f"{format_user_tag(username)} matches multiple users ({sample}). Use exact @handle."
+    if user_key is None:
+        return None, f"Could not find {format_user_tag(username)} in season stats. Try exact @handle."
+    return user_key, None
+
+
+def get_global_rivalries(limit=None):
+    settings = get_rival_settings()
+    payload = get_rivals_payload(settings=settings)
     cap = limit if limit is not None else settings['pair_count']
-    return rivalries[:cap]
+    cap = max(1, min(int(cap), RIVALS_MAX_PAIRS))
+    return payload['rivalries'][:cap]
 
 
 def get_user_rivals(username, limit=5):
     user_stats = get_user_season_stats()
     settings = get_rival_settings()
     user_key = resolve_user_in_stats(user_stats, username)
+
+    if isinstance(user_key, dict) and user_key.get('ambiguous'):
+        return {
+            'ambiguous': True,
+            'matches': user_key.get('matches', []),
+        }
 
     if user_key is None:
         return None
@@ -2098,41 +2261,23 @@ def get_user_rivals(username, limit=5):
             'rivals': [],
         }
 
-    rivals = []
-    for other_key, other_stats in user_stats.items():
-        if other_key == user_key:
-            continue
-        if other_stats.get('races', 0) < settings['min_races']:
-            continue
-        if other_stats.get('points', 0) <= 0:
-            continue
-
-        gap = abs(base.get('points', 0) - other_stats.get('points', 0))
-        if gap > settings['max_point_gap']:
-            continue
-
-        rivals.append({
-            'username': other_key,
-            'display_name': other_stats.get('display_name') or other_key,
-            'points': other_stats.get('points', 0),
-            'races': other_stats.get('races', 0),
-            'point_gap': gap,
-        })
-
-    rivals.sort(key=lambda row: (row['point_gap'], -row['points']))
+    payload = get_rivals_payload(user_stats=user_stats, settings=settings)
+    rivals = payload['by_user'].get(user_key, [])
+    limit = max(1, min(int(limit), RIVALS_MAX_USER_RESULTS))
 
     return {
         'user': user_key,
         'display_name': base.get('display_name') or user_key,
         'races': base.get('races', 0),
         'points': base.get('points', 0),
+        'recent_points_30d': base.get('recent_points_30d', 0),
         'min_races_required': settings['min_races'],
         'rivals': rivals[:limit],
     }
 
 
 def open_rivalries_window(parent_window):
-    rivalries = get_global_rivalries(limit=200)
+    rivalries = get_global_rivalries(limit=RIVALS_MAX_PAIRS)
     if not rivalries:
         messagebox.showinfo("Rivals", "No rivalries found with current settings.")
         return
@@ -2198,6 +2343,25 @@ MYCYCLE_SAVE_RETRY_DELAY_S = 0.15
 _dashboard_main_cache = {'value': None, 'created_at': 0.0}
 _dashboard_main_cache_ttl_s = 5.0
 _mycycle_aggregate_cache = {}
+
+RIVALS_MAX_PAIRS = 200
+RIVALS_MAX_MIN_RACES = 10000
+RIVALS_MAX_POINT_GAP = 50000
+RIVALS_MAX_USER_RESULTS = 10
+RIVALS_CACHE_TTL_S = 8.0
+
+_rivals_cache = {
+    'created_at': 0.0,
+    'key': None,
+    'payload': None,
+}
+_rivals_command_metrics = defaultdict(int)
+_rivals_cooldown_state = {
+    'global_ts': 0.0,
+    'user_ts': {},
+}
+RIVALS_GLOBAL_COOLDOWN_S = 0.75
+RIVALS_USER_COOLDOWN_S = 5.0
 
 
 def _invalidate_dashboard_cache():
@@ -3921,7 +4085,7 @@ def _build_main_dashboard_payload():
             'targets': season_quest_targets,
         },
         'season_quest_targets': season_quest_targets,
-        'rivals': get_global_rivalries(limit=200),
+        'rivals': get_global_rivalries(limit=RIVALS_MAX_PAIRS),
         'races': get_race_dashboard_leaderboard(limit=250),
         'mycycle': {
             'session': mycycle_session or {},
@@ -3936,6 +4100,12 @@ def _build_main_dashboard_payload():
         'settings': {
             'language': get_ui_language(),
             'rivals': get_rival_settings(),
+            'rivals_limits': {
+                'max_pairs': RIVALS_MAX_PAIRS,
+                'max_min_races': RIVALS_MAX_MIN_RACES,
+                'max_point_gap': RIVALS_MAX_POINT_GAP,
+                'max_user_results': RIVALS_MAX_USER_RESULTS,
+            },
         },
         'analytics': analytics_payload,
         'race_trends': race_trends_payload,
@@ -5268,13 +5438,21 @@ def open_settings_window():
     rivals_pair_count_entry = ttk.Entry(rivals_tab, width=12, justify='center')
     rivals_pair_count_entry.grid(row=4, column=1, sticky="w", pady=(2, 4))
     rivals_pair_count_entry.insert(0, config.get_setting("rivals_pair_count") or "25")
+    ttk.Label(
+        rivals_tab,
+        text=(
+            f"Ranges: min races 1-{RIVALS_MAX_MIN_RACES:,}, max gap 0-{RIVALS_MAX_POINT_GAP:,}, "
+            f"pairs 1-{RIVALS_MAX_PAIRS:,}."
+        ),
+        style="Small.TLabel"
+    ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(0, 8))
 
-    ttk.Button(rivals_tab, text="View Rivalries", command=lambda: open_rivalries_window(settings_window)).grid(row=5, column=0, sticky="w", pady=(8, 0))
-    ttk.Label(rivals_tab, text="How Rivals works: only players above Minimum Season Races are considered.", style="Small.TLabel").grid(row=6, column=0, columnspan=2, sticky="w", pady=(10, 0))
-    ttk.Label(rivals_tab, text="Pairs qualify when their season points are within Maximum Point Gap, then closest gaps are ranked.", style="Small.TLabel").grid(row=7, column=0, columnspan=2, sticky="w", pady=(2, 0))
-    ttk.Label(rivals_tab, text="Chat helpers: !rivals <user> for personal rivals and !h2h <user1> <user2> for direct comparison.", style="Small.TLabel").grid(row=8, column=0, columnspan=2, sticky="w", pady=(6, 0))
-    ttk.Label(rivals_tab, text="Need a deeper breakdown? Open the Rivals dashboard tab for a guide and live rivalry context.", style="Small.TLabel").grid(row=9, column=0, columnspan=2, sticky="w", pady=(6, 0))
-    ttk.Button(rivals_tab, text="Open Rivals Dashboard", command=open_rivals_dashboard).grid(row=10, column=0, sticky="w", pady=(8, 0))
+    ttk.Button(rivals_tab, text="View Rivalries", command=lambda: open_rivalries_window(settings_window)).grid(row=6, column=0, sticky="w", pady=(8, 0))
+    ttk.Label(rivals_tab, text="How Rivals works: only players above Minimum Season Races are considered.", style="Small.TLabel").grid(row=7, column=0, columnspan=2, sticky="w", pady=(10, 0))
+    ttk.Label(rivals_tab, text="Pairs qualify when their season points are within Maximum Point Gap, then closest gaps are ranked.", style="Small.TLabel").grid(row=8, column=0, columnspan=2, sticky="w", pady=(2, 0))
+    ttk.Label(rivals_tab, text="Chat helpers: !rivals <user> [full] for personal rivals and !h2h <user1> <user2> for direct comparison.", style="Small.TLabel").grid(row=9, column=0, columnspan=2, sticky="w", pady=(6, 0))
+    ttk.Label(rivals_tab, text="Need a deeper breakdown? Open the Rivals dashboard tab for a guide and live rivalry context.", style="Small.TLabel").grid(row=10, column=0, columnspan=2, sticky="w", pady=(6, 0))
+    ttk.Button(rivals_tab, text="Open Rivals Dashboard", command=open_rivals_dashboard).grid(row=11, column=0, sticky="w", pady=(8, 0))
 
     # --- MyCycle tab ---
     ttk.Label(mycycle_tab, text="Track placement cycles (uses your configured min/max placements) and custom sessions", style="Small.TLabel").grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 8))
@@ -5716,6 +5894,13 @@ def open_settings_window():
     ttk.Button(footer, text=tr("Reset Defaults"), command=reset_settings_defaults).pack(side="left")
 
     def save_settings_and_close():
+        def _bounded_int(raw_value, default_value, min_value, max_value):
+            try:
+                parsed = int(str(raw_value).strip())
+            except (TypeError, ValueError):
+                parsed = default_value
+            return max(min_value, min(parsed, max_value))
+
         config.set_setting("CHANNEL", channel_entry.get(), persistent=True)
         selected_language_name = app_language_var.get()
         config.set_setting("app_language", app_language_name_to_code.get(selected_language_name, "en"), persistent=True)
@@ -5758,9 +5943,12 @@ def open_settings_window():
         config.set_setting("season_quest_target_tilt_tops", season_quest_tilt_tops_entry.get(), persistent=True)
         config.set_setting("season_quest_target_tilt_points", season_quest_tilt_points_entry.get(), persistent=True)
         config.set_setting("rivals_enabled", str(rivals_enabled_var.get()), persistent=True)
-        config.set_setting("rivals_min_races", rivals_min_races_entry.get(), persistent=True)
-        config.set_setting("rivals_max_point_gap", rivals_max_gap_entry.get(), persistent=True)
-        config.set_setting("rivals_pair_count", rivals_pair_count_entry.get(), persistent=True)
+        rivals_min_races = _bounded_int(rivals_min_races_entry.get(), 50, 1, RIVALS_MAX_MIN_RACES)
+        rivals_max_gap = _bounded_int(rivals_max_gap_entry.get(), 1500, 0, RIVALS_MAX_POINT_GAP)
+        rivals_pair_count = _bounded_int(rivals_pair_count_entry.get(), 25, 1, RIVALS_MAX_PAIRS)
+        config.set_setting("rivals_min_races", str(rivals_min_races), persistent=True)
+        config.set_setting("rivals_max_point_gap", str(rivals_max_gap), persistent=True)
+        config.set_setting("rivals_pair_count", str(rivals_pair_count), persistent=True)
         config.set_setting("mycycle_enabled", str(mycycle_enabled_var.get()), persistent=True)
         config.set_setting("mycycle_announcements_enabled", str(mycycle_announce_var.get()), persistent=True)
         config.set_setting("mycycle_include_br", str(mycycle_include_br_var.get()), persistent=True)
@@ -6290,7 +6478,7 @@ def refresh_main_leaderboards():
 
         if rivals_tree and rivals_tree.winfo_exists():
             rivals_tree.delete(*rivals_tree.get_children())
-            for idx, row in enumerate(get_global_rivalries(limit=200), start=1):
+            for idx, row in enumerate(get_global_rivalries(limit=RIVALS_MAX_PAIRS), start=1):
                 rivals_tree.insert("", "end", values=(
                     idx,
                     row.get('display_a') or '-',
@@ -9014,17 +9202,32 @@ class Bot(commands.Bot):
         return [f'!{cmd.name}' for cmd in self.commands.values() if cmd.name not in excluded_commands]
 
     @commands.command(name='rivals')
-    async def rivals_command(self, ctx, username: str = None, compare_username: str = None):
+    async def rivals_command(self, ctx, *args):
         if not is_chat_response_enabled("rivals_enabled"):
             return
 
+        if _is_rivals_command_on_cooldown(getattr(ctx.author, 'name', '')):
+            _track_rivals_metric('cooldown')
+            await self.send_command_response(ctx, "Rivals is cooling down. Please wait a few seconds before retrying.")
+            return
+
+        tokens = [str(arg).strip() for arg in args if str(arg).strip()]
+        username = tokens[0] if len(tokens) >= 1 else None
+        compare_username = tokens[1] if len(tokens) >= 2 else None
+        detail_token = tokens[2].lower() if len(tokens) >= 3 else ''
+        verbose_requested = detail_token in {'full', 'verbose', '--full', '--verbose'} or (compare_username and compare_username.lower() in {'full', 'verbose'})
+
+        if compare_username and compare_username.lower() in {'full', 'verbose'}:
+            compare_username = None
+
         if username and compare_username:
             user_stats = get_user_season_stats()
-            user_a_key = resolve_user_in_stats(user_stats, username)
-            user_b_key = resolve_user_in_stats(user_stats, compare_username)
+            user_a_key, err_a = _resolve_user_or_error(user_stats, username)
+            user_b_key, err_b = _resolve_user_or_error(user_stats, compare_username)
 
-            if user_a_key is None or user_b_key is None:
-                await self.send_command_response(ctx, "Could not find one or both users in season stats.")
+            if err_a or err_b:
+                _track_rivals_metric('pair_lookup_failed')
+                await self.send_command_response(ctx, err_a or err_b)
                 return
 
             stats_a = user_stats[user_a_key]
@@ -9038,38 +9241,56 @@ class Bot(commands.Bot):
 
             rivalry_status = "✅ Rivalry active" if are_rivals else "❌ Not a qualifying rivalry"
 
+            pair_row = _build_rivalry_row(user_a_key, stats_a, user_b_key, stats_b)
+            trend_text = "Trend: closing" if pair_row['trend_direction'] == 'closing' else ("Trend: widening" if pair_row['trend_direction'] == 'widening' else "Trend: steady")
+
+            _track_rivals_metric('pair_check')
             await self.send_command_response(ctx, 
                 f"Rivals Check • {format_user_tag(stats_a['display_name'])} vs {format_user_tag(stats_b['display_name'])} | "
                 f"Gap: ±{point_gap:,} pts | "
                 f"{format_user_tag(stats_a['display_name'])}: {stats_a.get('points', 0):,} pts, {stats_a.get('races', 0):,} races | "
                 f"{format_user_tag(stats_b['display_name'])}: {stats_b.get('points', 0):,} pts, {stats_b.get('races', 0):,} races | "
+                f"{trend_text} | Score: {pair_row['rivalry_score']:,} | "
                 f"{rivalry_status}"
             )
             return
 
         if username:
-            rival_data = get_user_rivals(username, limit=5)
+            limit = RIVALS_MAX_USER_RESULTS if verbose_requested else 5
+            rival_data = get_user_rivals(username, limit=limit)
             if rival_data is None:
-                await self.send_command_response(ctx, f"{format_user_tag(username)}: no season rival data found.")
+                _track_rivals_metric('user_lookup_failed')
+                await self.send_command_response(ctx, f"{format_user_tag(username)}: no season rival data found. Try exact @handle.")
+                return
+
+            if rival_data.get('ambiguous'):
+                _track_rivals_metric('user_lookup_ambiguous')
+                options = ', '.join(format_user_tag(name) for name in rival_data.get('matches', [])[:3])
+                await self.send_command_response(ctx, f"{format_user_tag(username)} matches multiple users ({options}). Use exact @handle.")
                 return
 
             if rival_data['races'] < rival_data['min_races_required']:
+                _track_rivals_metric('under_min_races')
                 await self.send_command_response(ctx, 
                     f"{format_user_tag(rival_data['display_name'])}: {rival_data['races']:,} races so far. "
-                    f"Need {rival_data['min_races_required']:,}+ races for rivals tracking."
+                    f"Need {rival_data['min_races_required']:,}+ races for rivals tracking. "
+                    f"Tip: lower Minimum Season Races in Settings → Rivals."
                 )
                 return
 
             if not rival_data['rivals']:
+                _track_rivals_metric('no_rivals_found')
                 await self.send_command_response(ctx, 
-                    f"{format_user_tag(rival_data['display_name'])}: no close rivals found within configured point gap."
+                    f"{format_user_tag(rival_data['display_name'])}: no close rivals found within configured point gap. "
+                    f"Tip: increase Maximum Point Gap in Settings → Rivals."
                 )
                 return
 
             entries = [
-                f"#{idx} {format_user_tag(row['display_name'])} (±{row['point_gap']:,}, {row['points']:,} pts)"
+                f"#{idx} {format_user_tag(row['display_name'])} (±{row['point_gap']:,}, {row['points']:,} pts, {row.get('trend_direction', 'steady')})"
                 for idx, row in enumerate(rival_data['rivals'], start=1)
             ]
+            _track_rivals_metric('user_rivals')
             await self.send_command_response(ctx, 
                 f"Rivals for {format_user_tag(rival_data['display_name'])}, {rival_data['points']:,} pts: " + " | ".join(entries)
             )
@@ -9077,13 +9298,15 @@ class Bot(commands.Bot):
 
         rivalries = get_global_rivalries(limit=5)
         if not rivalries:
+            _track_rivals_metric('global_empty')
             await self.send_command_response(ctx, "No rivalries found yet with current rival settings.")
             return
 
         entries = [
-            f"#{idx} {format_user_tag(row['display_a'])} vs {format_user_tag(row['display_b'])} (±{row['point_gap']:,})"
+            f"#{idx} {format_user_tag(row['display_a'])} vs {format_user_tag(row['display_b'])} (±{row['point_gap']:,}, {row.get('trend_direction', 'steady')})"
             for idx, row in enumerate(rivalries, start=1)
         ]
+        _track_rivals_metric('global_board')
         await self.send_command_response(ctx, "Rivalries Leaderboard: " + " | ".join(entries))
 
     @commands.command(name='h2h')
@@ -9093,11 +9316,11 @@ class Bot(commands.Bot):
             return
 
         user_stats = get_user_season_stats()
-        user_a_key = resolve_user_in_stats(user_stats, user_a)
-        user_b_key = resolve_user_in_stats(user_stats, user_b)
+        user_a_key, err_a = _resolve_user_or_error(user_stats, user_a)
+        user_b_key, err_b = _resolve_user_or_error(user_stats, user_b)
 
-        if user_a_key is None or user_b_key is None:
-            await self.send_command_response(ctx, "Could not find one or both users in season stats.")
+        if err_a or err_b:
+            await self.send_command_response(ctx, err_a or err_b)
             return
 
         stats_a = user_stats[user_a_key]
@@ -9105,6 +9328,7 @@ class Bot(commands.Bot):
 
         leader_name = stats_a['display_name'] if stats_a['points'] >= stats_b['points'] else stats_b['display_name']
         point_gap = abs(stats_a['points'] - stats_b['points'])
+        pair_row = _build_rivalry_row(user_a_key, stats_a, user_b_key, stats_b)
 
         await self.send_command_response(ctx, 
             f"⚔️ H2H {format_user_tag(stats_a['display_name'])} vs {format_user_tag(stats_b['display_name'])} | "
@@ -9112,6 +9336,8 @@ class Bot(commands.Bot):
             f"Races: {stats_a['races']:,}, {stats_b['races']:,} | "
             f"Race HS: {stats_a['race_hs']:,}, {stats_b['race_hs']:,} | "
             f"BR HS: {stats_a['br_hs']:,}, {stats_b['br_hs']:,} | "
+            f"30d Gap: {pair_row['recent_point_gap_30d']:,} | "
+            f"Score: {pair_row['rivalry_score']:,} | "
             f"Leader: {format_user_tag(leader_name)} by {point_gap:,}"
         )
 

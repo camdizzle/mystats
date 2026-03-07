@@ -101,10 +101,12 @@
         <div class="rivals-onboarding" id="rivals-onboarding">
           <div class="rivals-onboarding__header">
             <h3>How Rivals Works</h3>
-            <button class="rivals-onboarding__toggle" id="rivals-onboarding-toggle" type="button" aria-expanded="true">Hide guide</button>
+            <button class="rivals-onboarding__toggle" id="rivals-onboarding-toggle" type="button" aria-expanded="true" aria-controls="rivals-onboarding-content">Hide guide</button>
           </div>
-          <ol id="rivals-onboarding-steps" class="rivals-onboarding__steps"></ol>
-          <div id="rivals-onboarding-context" class="rivals-onboarding__context"></div>
+          <div id="rivals-onboarding-content">
+            <ol id="rivals-onboarding-steps" class="rivals-onboarding__steps"></ol>
+            <div id="rivals-onboarding-context" class="rivals-onboarding__context"></div>
+          </div>
         </div>
         <div id="rivals-kpis" class="kpis"></div>
         <div id="rivals-highlights" class="cycle-highlights"></div>
@@ -114,6 +116,23 @@
         <div class="panel-title-row">
           <h2>Rivals Leaderboard</h2>
           <span id="rivals-range-pill" class="range-pill">Closest gaps</span>
+        </div>
+        <div class="rivals-controls">
+          <input id="rivals-search" type="search" placeholder="Search player" aria-label="Search rival player" />
+          <select id="rivals-sort" aria-label="Sort rivalries">
+            <option value="closest">Closest gap</option>
+            <option value="widest">Biggest gap</option>
+            <option value="most-races">Most races</option>
+            <option value="best-ppr">Best PPR edge</option>
+            <option value="score">Highest rivalry score</option>
+          </select>
+          <select id="rivals-preset" aria-label="Rivalry gap preset">
+            <option value="all">All gaps</option>
+            <option value="100">Ultra close ≤100</option>
+            <option value="500">Competitive ≤500</option>
+            <option value="1500">Wide ≤1500</option>
+          </select>
+          <button id="rivals-export" type="button">Export CSV</button>
         </div>
         <div id="rivals-leaderboard" class="rows"></div>
       </article>
