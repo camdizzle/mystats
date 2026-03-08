@@ -21,6 +21,7 @@
       <button class="dashboard-nav-btn" data-view="tilt" type="button" role="tab" aria-selected="false" aria-controls="panel-tilt">Tilt Dashboard</button>
       <button class="dashboard-nav-btn" data-view="rivals" type="button" role="tab" aria-selected="false" aria-controls="panel-rivals">Rivals</button>
       <button class="dashboard-nav-btn" data-view="races" type="button" role="tab" aria-selected="false" aria-controls="panel-races">Race Dashboard</button>
+      <button class="dashboard-nav-btn" data-view="teams" type="button" role="tab" aria-selected="false" aria-controls="panel-teams">Teams</button>
       <button class="dashboard-nav-btn" data-view="trends" type="button" role="tab" aria-selected="false" aria-controls="panel-trends">Race/BR Trends</button>
     </section>
 
@@ -178,6 +179,27 @@
           <span id="races-range-pill" class="range-pill">Both modes</span>
         </div>
         <div id="races-leaderboard" class="rows"></div>
+      </article>
+    </section>
+
+    <section id="panel-teams" class="races-shell is-hidden" data-panel="teams" role="tabpanel">
+      <article class="summary-panel">
+        <div class="meta">MyTeams leaderboard snapshot</div>
+        <div class="race-type-filter" role="group" aria-label="Team leaderboard window">
+          <button class="mini-filter-btn mini-filter-btn--active" type="button" data-team-filter="season">Season</button>
+          <button class="mini-filter-btn" type="button" data-team-filter="weekly">Weekly</button>
+          <button class="mini-filter-btn" type="button" data-team-filter="daily">Daily</button>
+        </div>
+        <div id="teams-kpis" class="kpis"></div>
+        <div id="teams-highlights" class="cycle-highlights"></div>
+      </article>
+
+      <article class="leaderboard-panel">
+        <div class="panel-title-row">
+          <h2>MyTeams Leaderboard</h2>
+          <span id="teams-range-pill" class="range-pill">Season • Top 100</span>
+        </div>
+        <div id="teams-leaderboard" class="rows"></div>
       </article>
     </section>
 

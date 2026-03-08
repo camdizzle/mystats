@@ -2,6 +2,7 @@ const el = (id) => document.getElementById(id);
 
 let activeView = 'mycycle';
 let raceDashboardFilter = 'both';
+let teamLeaderboardFilter = 'season';
 let tiltSortBy = 'tilt_points';
 let tiltSortOrder = 'desc';
 let rivalsGuideCollapsed = false;
@@ -982,6 +983,99 @@ function renderRaceDashboardRows(data) {
 
 
 
+
+function getTeamRowsByFilter(data, filterMode = 'season') {
+  const teams = data?.teams || {};
+  if (filterMode === 'daily') return Array.isArray(teams.top_daily) ? teams.top_daily : [];
+  if (filterMode === 'weekly') return Array.isArray(teams.top_weekly) ? teams.top_weekly : [];
+  return Array.isArray(teams.top_season) ? teams.top_season : [];
+}
+
+function renderTeamsKpis(rows = []) {
+  const host = el('teams-kpis');
+  if (!host) return;
+
+  const recruiting = rows.filter((row) => Boolean(row?.recruiting)).length;
+  const avgPoints = rows.length
+    ? rows.reduce((acc, row) => acc + Number(row?.points || 0), 0) / rows.length
+    : 0;
+
+  host.innerHTML = [
+    { label: 'Tracked Teams', value: fmt(rows.length) },
+    { label: 'Recruiting Teams', value: fmt(recruiting) },
+    { label: 'Avg Team Points', value: fmt(Math.round(avgPoints)) },
+  ].map((kpi) => (
+    `<div class="kpi"><div class="kpi-label">${escapeHtml(kpi.label)}</div><div class="kpi-value">${escapeHtml(kpi.value)}</div></div>`
+  )).join('');
+}
+
+function renderTeamsHighlights(rows = []) {
+  const host = el('teams-highlights');
+  if (!host) return;
+  if (!rows.length) {
+    host.innerHTML = `<div class="empty">${escapeHtml('No team data yet.')}</div>`;
+    return;
+  }
+
+  const pointsLeader = rows[0];
+  const biggestTeam = rows.reduce((best, row) => {
+    if (!best) return row;
+    if (Number(row?.size || 0) !== Number(best?.size || 0)) return Number(row?.size || 0) > Number(best?.size || 0) ? row : best;
+    return Number(row?.points || 0) > Number(best?.points || 0) ? row : best;
+  }, null);
+
+  host.innerHTML = [
+    `<div class="highlight-card"><div class="highlight-title">Points Leader</div><div class="highlight-main">${escapeHtml(pointsLeader?.name || '—')}</div><div class="highlight-detail">${escapeHtml(`${fmt(pointsLeader?.points || 0)} pts`)}</div></div>`,
+    `<div class="highlight-card"><div class="highlight-title">Largest Team</div><div class="highlight-main">${escapeHtml(biggestTeam?.name || '—')}</div><div class="highlight-detail">${escapeHtml(`${fmt(biggestTeam?.size || 0)} members`)}</div></div>`,
+  ].join('');
+}
+
+function renderTeamsRows(data) {
+  const rowsHost = el('teams-leaderboard');
+  if (!rowsHost) return;
+
+  const rows = getTeamRowsByFilter(data, teamLeaderboardFilter);
+  renderTeamsKpis(rows);
+  renderTeamsHighlights(rows);
+
+  const label = teamLeaderboardFilter === 'daily' ? 'Daily' : (teamLeaderboardFilter === 'weekly' ? 'Weekly' : 'Season');
+  const rangePill = el('teams-range-pill');
+  if (rangePill) rangePill.textContent = `${label} • Top ${Math.min(100, rows.length)}`;
+
+  if (!rows.length) {
+    rowsHost.innerHTML = `<div class="empty">${escapeHtml('No teams found.')}</div>`;
+    return;
+  }
+
+  rowsHost.innerHTML = rows.slice(0, 100).map((row, idx) => `
+    <div class="row">
+      <div class="row-head">
+        <span class="rank">#${idx + 1}</span>
+        <span class="name">${escapeHtml(row?.name || '-')}</span>
+        <span class="stat">${escapeHtml(`${fmt(row?.points || 0)} pts`)}</span>
+      </div>
+      <div class="quest-metrics">
+        <span>Captain: ${escapeHtml(row?.captain || '—')}</span>
+        <span>Members: ${escapeHtml(fmt(row?.size || 0))}</span>
+        <span>Recruiting: ${escapeHtml(row?.recruiting ? 'Open' : 'Closed')}</span>
+        <span>Bonus: ${escapeHtml(row?.bonus_label || '—')}</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+function wireTeamFilterButtons() {
+  document.querySelectorAll('.mini-filter-btn[data-team-filter]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      teamLeaderboardFilter = btn.dataset.teamFilter || 'season';
+      document.querySelectorAll('.mini-filter-btn[data-team-filter]').forEach((candidate) => {
+        candidate.classList.toggle('mini-filter-btn--active', candidate.dataset.teamFilter === teamLeaderboardFilter);
+      });
+      refresh();
+    });
+  });
+}
+
 function buildAnalyticsGroupsMarkup(data) {
   const analytics = data?.analytics || {};
   const groups = analytics?.groups || {};
@@ -1247,7 +1341,7 @@ function wireTiltSortControls() {
 
 function getRequestedViewFromLocation() {
   const hashView = String(window.location.hash || '').replace('#', '').trim();
-  const validViews = new Set(['mycycle', 'season-quests', 'tilt', 'rivals', 'races', 'trends']);
+  const validViews = new Set(['mycycle', 'season-quests', 'tilt', 'rivals', 'races', 'teams', 'trends']);
   if (validViews.has(hashView)) return hashView;
 
   const viewFromQuery = new URLSearchParams(window.location.search).get('view');
@@ -1309,11 +1403,12 @@ async function refresh() {
     renderTiltRows(data);
     renderRivalsRows(data);
     renderRaceDashboardRows(data);
+    renderTeamsRows(data);
     renderRaceTrends(data);
   } catch (error) {
     console.error('dashboard refresh failed', error);
     const fallback = `<div class="empty">${escapeHtml(t('Unable to load MyStats data.'))}</div>`;
-    ['mycycle', 'season-quests', 'tilt-leaderboard', 'rivals-leaderboard', 'races-leaderboard', 'trend-charts'].forEach((id) => {
+    ['mycycle', 'season-quests', 'tilt-leaderboard', 'rivals-leaderboard', 'races-leaderboard', 'teams-leaderboard', 'trend-charts'].forEach((id) => {
       const node = el(id);
       if (node) node.innerHTML = fallback;
     });
@@ -1328,6 +1423,7 @@ if (requestedView) {
 refresh();
 wireViewTabs();
 wireRaceFilterButtons();
+wireTeamFilterButtons();
 wireTiltSortControls();
 wireSeasonControls();
 wireRivalsOnboardingToggle();

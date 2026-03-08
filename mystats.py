@@ -1520,11 +1520,13 @@ def _compute_team_bonus_races(channel_state, team_name, *, days=None):
     return count
 
 
-def _compute_team_sub_points(team):
+def _compute_team_subscriber_stats(team):
     member_meta = team.get('member_meta', {})
     if not isinstance(member_meta, dict):
-        return 0
-    total = 0
+        member_meta = {}
+
+    tier_points = 0
+    sub_count = 0
     for info in member_meta.values():
         if not isinstance(info, dict):
             continue
@@ -1532,8 +1534,27 @@ def _compute_team_sub_points(team):
             tier = int(info.get('sub_tier', 0))
         except (TypeError, ValueError):
             tier = 0
-        total += max(0, min(3, tier))
-    return total
+        normalized_tier = max(0, min(3, tier))
+        tier_points += normalized_tier
+        if normalized_tier > 0:
+            sub_count += 1
+
+    members = [team.get('captain')] + list(team.get('co_captains', [])) + list(team.get('members', []))
+    total_members = len([member for member in members if member])
+    coverage_pct = (sub_count / total_members * 100) if total_members > 0 else 0.0
+    estimated_team_bonus_pct = (sub_count / total_members * 10) if total_members > 0 else 0.0
+
+    return {
+        'tier_points': tier_points,
+        'sub_count': sub_count,
+        'total_members': total_members,
+        'coverage_pct': coverage_pct,
+        'estimated_team_bonus_pct': estimated_team_bonus_pct,
+    }
+
+
+def _compute_team_sub_points(team):
+    return _compute_team_subscriber_stats(team).get('tier_points', 0)
 
 
 def _random_overlay_team_emote():
@@ -5010,6 +5031,11 @@ def _build_main_dashboard_payload():
         'rivals': get_global_rivalries(limit=RIVALS_MAX_PAIRS),
         'races': get_race_dashboard_leaderboard(limit=250),
         'race_totals': get_race_event_totals(),
+        'teams': {
+            'top_daily': _build_team_leaderboard_rows(window='daily', limit=100),
+            'top_weekly': _build_team_leaderboard_rows(window='weekly', limit=100),
+            'top_season': _build_team_leaderboard_rows(window='season', limit=100),
+        },
         'mycycle': {
             'session': mycycle_session or {},
             'rows': mycycle_rows,
@@ -10739,7 +10765,12 @@ class Bot(commands.Bot):
         season_points = _compute_team_points(channel_state, team_name, window='season')
         daily_points = _compute_team_points(channel_state, team_name, window='daily')
         bonus_races = _compute_team_bonus_races(channel_state, team_name, days=1)
-        sub_points = _compute_team_sub_points(team)
+        sub_stats = _compute_team_subscriber_stats(team)
+        sub_points = sub_stats.get('tier_points', 0)
+        sub_count = sub_stats.get('sub_count', 0)
+        sub_total = sub_stats.get('total_members', 0)
+        sub_coverage = sub_stats.get('coverage_pct', 0.0)
+        est_sub_boost = sub_stats.get('estimated_team_bonus_pct', 0.0)
 
         leaderboard = []
         for candidate_name in channel_state.get('teams', {}):
@@ -10763,7 +10794,8 @@ class Bot(commands.Bot):
         icon = team.get('logo') or ':white_check_mark:'
         stats_line = (
             f"{team_name} | Rank: #{rank} | Pts: {season_points:,} (+{daily_points:,}) | "
-            f"SubPts: {sub_points} | {bonus_label} Bonus Races: {bonus_races} | "
+            f"SubPts: {sub_points} ({sub_count}/{sub_total}, {sub_coverage:.0f}% subs, ~+{est_sub_boost:.1f}% est) | "
+            f"{bonus_label} Bonus Races: {bonus_races} | "
             f"Kick: {kick_text} | Recruiting: {recruiting_text} | "
             f"{format_user_tag(lookup_name)} role: {role} | Capt: {captain_name} ({captain_tier_text})"
         )
