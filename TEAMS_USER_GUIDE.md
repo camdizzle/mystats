@@ -133,10 +133,8 @@ Buttons:
 
 ### Team info and standings
 
-- `!team [username]`
-  - Shows a user's team/role summary.
-- `!myteam`
-  - Detailed status for your team:
+- `!myteam [@username]`
+  - Detailed status for your team, or for the tagged user's team:
   - rank, season/daily points, sub points, active bonus label, bonus races, kick policy, recruiting state, captain + member list.
 - `!dailyteams`
   - Top 5 teams by today points.

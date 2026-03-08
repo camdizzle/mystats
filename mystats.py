@@ -1536,6 +1536,20 @@ def _compute_team_sub_points(team):
     return total
 
 
+def _random_overlay_team_emote():
+    raw_pool = str(config.get_setting('teams_overlay_emote_pool') or '').strip()
+    if raw_pool:
+        pool = [token.strip() for token in raw_pool.split(',') if token.strip()]
+    else:
+        pool = ['Kappa', 'PogChamp', 'LUL', 'HeyGuys', 'CoolCat']
+    return random.choice(pool) if pool else ':white_check_mark:'
+
+
+def _overlay_team_icon(team):
+    logo = str(team.get('logo') or '').strip()
+    return logo or _random_overlay_team_emote()
+
+
 def _build_team_leaderboard_rows(*, window='season', limit=10):
     if not _is_teams_enabled_flag():
         return []
@@ -1551,6 +1565,7 @@ def _build_team_leaderboard_rows(*, window='season', limit=10):
                 'members': list(team.get('members', [])),
                 'is_recruiting': bool(team.get('is_recruiting')),
                 'active_bonus_label': team.get('active_bonus_label') or '—',
+                'logo': team.get('logo'),
             }
             for team_name, team in channel_state.get('teams', {}).items()
             if isinstance(team, dict)
@@ -1570,6 +1585,7 @@ def _build_team_leaderboard_rows(*, window='season', limit=10):
             'size': 1 + len(team.get('co_captains', [])) + len(team.get('members', [])),
             'recruiting': bool(team.get('is_recruiting')),
             'bonus_label': team.get('active_bonus_label') or '—',
+            'icon': _overlay_team_icon(team),
         })
 
     rows.sort(key=lambda row: (-_safe_int(row.get('points')), str(row.get('name', '')).lower()))
@@ -6545,43 +6561,37 @@ def open_settings_window():
     ttk.Label(mycycle_tab, text="Tip: Primary session is shown first in leaderboard pagination across active sessions.", style="Small.TLabel").grid(row=8, column=0, columnspan=4, sticky="w", pady=(8, 0))
 
     # --- MyTeams tab ---
-    ttk.Label(teams_tab, text="Phase 1: Local channel teams • Phase 2: Global team federation", style="Small.TLabel").grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 8))
     teams_enabled_var = tk.BooleanVar(value=parse_boolean_token(config.get_setting("teams_enabled"), default=True))
-    ttk.Checkbutton(teams_tab, text="Enable MyTeams Commands", variable=teams_enabled_var).grid(row=1, column=0, sticky="w", pady=(0, 6), columnspan=2)
+    ttk.Checkbutton(teams_tab, text="Enable MyTeams Commands", variable=teams_enabled_var).grid(row=0, column=0, sticky="w", pady=(0, 6), columnspan=2)
 
-    ttk.Label(teams_tab, text="Rollout Phase").grid(row=2, column=0, sticky="w", pady=(0, 4))
-    teams_phase_var = tk.StringVar(value=config.get_setting("teams_phase") or "local")
-    ttk.Combobox(teams_tab, textvariable=teams_phase_var, values=["local", "global"], width=14, state="readonly").grid(row=2, column=1, sticky="w", pady=(0, 4))
-
-    ttk.Label(teams_tab, text="Points Counting Mode").grid(row=3, column=0, sticky="w", pady=(0, 4))
-    teams_points_mode_var = tk.StringVar(value=config.get_setting("teams_points_mode") or "season")
+    ttk.Label(teams_tab, text="Points Counting Mode").grid(row=1, column=0, sticky="w", pady=(0, 4))
+    teams_points_mode_var = tk.StringVar(value=config.get_setting("teams_points_mode") or "active")
     ttk.Combobox(
         teams_tab,
         textvariable=teams_points_mode_var,
         values=["season", "active"],
         width=14,
         state="readonly"
-    ).grid(row=3, column=1, sticky="w", pady=(0, 4))
-    ttk.Label(teams_tab, text="season = include full season points; active = count only after team created", style="Small.TLabel").grid(row=4, column=0, columnspan=4, sticky="w", pady=(0, 8))
+    ).grid(row=1, column=1, sticky="w", pady=(0, 4))
 
-    ttk.Label(teams_tab, text="Max Team Size").grid(row=5, column=0, sticky="w", pady=(0, 4))
+    ttk.Label(teams_tab, text="Max Team Size").grid(row=2, column=0, sticky="w", pady=(0, 4))
     teams_max_size_entry = ttk.Entry(teams_tab, width=12, justify='center')
-    teams_max_size_entry.grid(row=5, column=1, sticky="w", pady=(0, 4))
+    teams_max_size_entry.grid(row=2, column=1, sticky="w", pady=(0, 4))
     teams_max_size_entry.insert(0, config.get_setting("teams_max_size") or "25")
 
-    ttk.Label(teams_tab, text="Bonus Bits Threshold").grid(row=5, column=2, sticky="w", pady=(0, 4), padx=(8, 0))
+    ttk.Label(teams_tab, text="Bonus Bits Threshold").grid(row=2, column=2, sticky="w", pady=(0, 4), padx=(8, 0))
     teams_bonus_bits_threshold_entry = ttk.Entry(teams_tab, width=10, justify='center')
-    teams_bonus_bits_threshold_entry.grid(row=5, column=3, sticky="w", pady=(0, 4))
+    teams_bonus_bits_threshold_entry.grid(row=2, column=3, sticky="w", pady=(0, 4))
     teams_bonus_bits_threshold_entry.insert(0, config.get_setting("teams_bonus_bits_threshold") or "1000")
 
-    ttk.Label(teams_tab, text="Bonus Duration (min)").grid(row=6, column=2, sticky="w", pady=(0, 4), padx=(8, 0))
+    ttk.Label(teams_tab, text="Bonus Duration (min)").grid(row=3, column=2, sticky="w", pady=(0, 4), padx=(8, 0))
     teams_bonus_duration_entry = ttk.Entry(teams_tab, width=10, justify='center')
-    teams_bonus_duration_entry.grid(row=6, column=3, sticky="w", pady=(0, 4))
+    teams_bonus_duration_entry.grid(row=3, column=3, sticky="w", pady=(0, 4))
     teams_bonus_duration_entry.insert(0, config.get_setting("teams_bonus_duration_minutes") or "20")
 
-    ttk.Label(teams_tab, text="Bonus Weights 2x/3x/4x").grid(row=7, column=2, sticky="w", pady=(0, 4), padx=(8, 0))
+    ttk.Label(teams_tab, text="Bonus Weights 2x/3x/4x").grid(row=4, column=2, sticky="w", pady=(0, 4), padx=(8, 0))
     bonus_weights_frame = ttk.Frame(teams_tab, style="App.TFrame")
-    bonus_weights_frame.grid(row=7, column=3, sticky="w", pady=(0, 4))
+    bonus_weights_frame.grid(row=4, column=3, sticky="w", pady=(0, 4))
     teams_bonus_weight_2x_entry = ttk.Entry(bonus_weights_frame, width=4, justify='center')
     teams_bonus_weight_2x_entry.pack(side="left")
     teams_bonus_weight_2x_entry.insert(0, config.get_setting("teams_bonus_weight_2x") or "75")
@@ -6606,10 +6616,10 @@ def open_settings_window():
     ]:
         teams_tree.heading(key, text=label)
         teams_tree.column(key, width=width, anchor='center')
-    teams_tree.grid(row=8, column=0, columnspan=4, sticky="nsew", pady=(8, 4))
+    teams_tree.grid(row=5, column=0, columnspan=4, sticky="nsew", pady=(8, 4))
 
     teams_tab.grid_columnconfigure(3, weight=1)
-    teams_tab.grid_rowconfigure(8, weight=1)
+    teams_tab.grid_rowconfigure(5, weight=1)
 
     def refresh_teams_tree():
         for item in teams_tree.get_children():
@@ -6618,7 +6628,7 @@ def open_settings_window():
         with TEAM_DATA_LOCK:
             data = _load_team_data()
             channel_state = _get_channel_team_state(data, config.get_setting('CHANNEL'))
-            channel_state['settings']['points_mode'] = teams_points_mode_var.get() or 'season'
+            channel_state['settings']['points_mode'] = teams_points_mode_var.get() or 'active'
             try:
                 channel_state['settings']['max_team_size'] = max(2, int(teams_max_size_entry.get() or 25))
             except ValueError:
@@ -6645,6 +6655,40 @@ def open_settings_window():
         settings_window.clipboard_clear()
         settings_window.clipboard_append(name)
         messagebox.showinfo("MyTeams", f"Generated team name copied to clipboard:\n{name}", parent=settings_window)
+
+
+    def add_team_from_settings():
+        name = simpledialog.askstring("Create Team", "Team name:", parent=settings_window)
+        normalized_name = _normalize_team_name(name) if name else ''
+        if not normalized_name:
+            return
+
+        with TEAM_DATA_LOCK:
+            channel_name = config.get_setting('CHANNEL')
+            data = _load_team_data()
+            channel_state = _get_channel_team_state(data, channel_name)
+            taken = any(_normalize_team_name(existing).lower() == normalized_name.lower() for existing in channel_state.get('teams', {}))
+            if taken:
+                messagebox.showinfo("MyTeams", f"Team name '{normalized_name}' already exists.", parent=settings_window)
+                return
+            captain = _normalize_username(channel_name)
+            channel_state['teams'][normalized_name] = {
+                'captain': captain,
+                'co_captains': [],
+                'members': [],
+                'member_meta': {},
+                'logo': None,
+                'is_recruiting': False,
+                'inactive_days': None,
+                'bits_bank': 0,
+                'active_bonus': None,
+                'active_bonus_label': None,
+                'bonus_windows': [],
+                'created_at': datetime.now(timezone.utc).isoformat(),
+            }
+            _save_team_data(data)
+
+        refresh_teams_tree()
 
     def delete_selected_team():
         selected = teams_tree.selection()
@@ -6683,9 +6727,10 @@ def open_settings_window():
         refresh_teams_tree()
 
     teams_actions = ttk.Frame(teams_tab, style="App.TFrame")
-    teams_actions.grid(row=9, column=0, columnspan=4, sticky="w", pady=(4, 0))
+    teams_actions.grid(row=6, column=0, columnspan=4, sticky="w", pady=(4, 0))
     ttk.Button(teams_actions, text="Refresh", command=refresh_teams_tree).pack(side="left", padx=(0, 6))
     ttk.Button(teams_actions, text="Generate Team Name", command=generate_team_name_for_clipboard).pack(side="left", padx=(0, 6))
+    ttk.Button(teams_actions, text="Add Team", command=add_team_from_settings).pack(side="left", padx=(0, 6))
     ttk.Button(teams_actions, text="Toggle Recruiting", command=toggle_selected_team_recruiting).pack(side="left", padx=(0, 6))
     ttk.Button(teams_actions, text="Delete Team", command=delete_selected_team).pack(side="left", padx=(0, 6))
 
@@ -7085,7 +7130,6 @@ def open_settings_window():
         config.set_setting("mycycle_min_place", mycycle_min_place_entry.get(), persistent=True)
         config.set_setting("mycycle_max_place", mycycle_max_place_entry.get(), persistent=True)
         config.set_setting("teams_enabled", str(teams_enabled_var.get()), persistent=True)
-        config.set_setting("teams_phase", teams_phase_var.get(), persistent=True)
         config.set_setting("teams_points_mode", teams_points_mode_var.get(), persistent=True)
         config.set_setting("teams_max_size", teams_max_size_entry.get(), persistent=True)
         config.set_setting("teams_bonus_bits_threshold", teams_bonus_bits_threshold_entry.get(), persistent=True)
@@ -8168,7 +8212,7 @@ class ConfigManager:
                                 'mycycle_enabled', 'mycycle_announcements_enabled', 'mycycle_include_br',
                                 'mycycle_min_place', 'mycycle_max_place', 'mycycle_primary_session_id',
                                 'mycycle_cyclestats_rotation_index',
-                                'teams_enabled', 'teams_phase', 'teams_points_mode', 'teams_max_size',
+                                'teams_enabled', 'teams_points_mode', 'teams_max_size',
                                 'teams_bonus_bits_threshold', 'teams_bonus_duration_minutes',
                                 'teams_bonus_weight_2x', 'teams_bonus_weight_3x', 'teams_bonus_weight_4x',
                                 'overlay_rotation_seconds', 'overlay_refresh_seconds', 'overlay_theme',
@@ -8244,8 +8288,7 @@ class ConfigManager:
             'mycycle_max_place': '10',
             'mycycle_cyclestats_rotation_index': '0',
             'teams_enabled': 'True',
-            'teams_phase': 'local',
-            'teams_points_mode': 'season',
+            'teams_points_mode': 'active',
             'teams_max_size': '25',
             'teams_bonus_bits_threshold': '1000',
             'teams_bonus_duration_minutes': '20',
@@ -10041,7 +10084,7 @@ import copy
 class Bot(commands.Bot):
     TEAM_COMMAND_NAMES = {
         'createteam', 'invite', 'cocaptain', 'acceptteam', 'denyteam', 'kick', 'leave',
-        'team', 'myteam', 'logo', 'inactive', 'join', 'recruiting', 'dailyteams', 'weeklyteams',
+        'myteam', 'logo', 'inactive', 'join', 'recruiting', 'dailyteams', 'weeklyteams',
         'tcommands'
     }
 
@@ -10147,13 +10190,18 @@ class Bot(commands.Bot):
 
         await self._process_team_bits_bonus(message)
 
-        content = message.content.lower()
+        content = str(message.content or '')
+        lowered = content.lower()
 
-        if content.startswith('!') and not is_chat_response_enabled("chat_all_commands"):
+        if lowered.startswith('!') and not is_chat_response_enabled("chat_all_commands"):
             return
 
         new_message = copy.copy(message)
-        new_message.content = content
+        if content.startswith('!'):
+            command_token, separator, remainder = content.partition(' ')
+            new_message.content = f"{command_token.lower()}{separator}{remainder}" if separator else command_token.lower()
+        else:
+            new_message.content = content
         await self.handle_commands(new_message)
 
     async def shutdown(self):
@@ -10178,16 +10226,13 @@ class Bot(commands.Bot):
         return parse_boolean_token(config.get_setting("teams_enabled"), default=True)
 
     def _teams_phase(self):
-        phase = (config.get_setting("teams_phase") or "local").strip().lower()
-        if phase not in {"local", "global"}:
-            phase = "local"
-        return phase
+        return "local"
 
     async def _with_channel_team_state(self):
         with TEAM_DATA_LOCK:
             data = _load_team_data()
             channel_state = _get_channel_team_state(data, self.channel_name)
-            channel_state['settings']['points_mode'] = (config.get_setting("teams_points_mode") or "season").strip().lower()
+            channel_state['settings']['points_mode'] = (config.get_setting("teams_points_mode") or "active").strip().lower()
             try:
                 channel_state['settings']['max_team_size'] = max(2, int(config.get_setting("teams_max_size") or 25))
             except ValueError:
@@ -10260,13 +10305,56 @@ class Bot(commands.Bot):
 
         return _extract_subscriber_status(author)
 
+    def _resolve_member_sub_tier(self, author):
+        if not author:
+            return 0
+
+        fallback_tier = _extract_sub_tier(author)
+        user_id = str(getattr(author, 'id', '') or '')
+        broadcaster_id = str(getattr(self.channel, 'id', '') or '')
+        token = self.get_valid_token()
+        if not (user_id and broadcaster_id and token):
+            return fallback_tier
+
+        headers = {
+            'Authorization': f'Bearer {token}',
+            'Client-Id': CLIENT_ID,
+        }
+        params = {
+            'broadcaster_id': broadcaster_id,
+            'user_id': user_id,
+        }
+        try:
+            response = requests.get(
+                'https://api.twitch.tv/helix/subscriptions/user',
+                headers=headers,
+                params=params,
+                timeout=4,
+            )
+            if response.status_code != 200:
+                return fallback_tier
+            payload = response.json() if response.text else {}
+            rows = payload.get('data') if isinstance(payload, dict) else []
+            if not rows:
+                return 0
+            plan = str((rows[0] or {}).get('tier') or '').strip()
+            if plan == '3000':
+                return 3
+            if plan == '2000':
+                return 2
+            if plan == '1000':
+                return 1
+        except Exception:
+            return fallback_tier
+        return fallback_tier
+
     def _register_member_metadata(self, team, username, author=None):
         user_key = _normalize_username(username)
         if not user_key:
             return
         member_meta = team.setdefault('member_meta', {})
         existing = member_meta.get(user_key, {}) if isinstance(member_meta.get(user_key), dict) else {}
-        tier = _extract_sub_tier(author)
+        tier = self._resolve_member_sub_tier(author) if author else 0
         member_meta[user_key] = {
             'sub_tier': tier,
             'is_subscriber': bool(tier > 0),
@@ -10335,6 +10423,13 @@ class Bot(commands.Bot):
         bits_bank = int(team.get('bits_bank', 0)) + bits
         team['bits_bank'] = bits_bank
 
+        progress_pct = int(round((team['bits_bank'] / threshold) * 100)) if threshold > 0 else 0
+        pool_message = (
+            f"💠 {team_name} bits pool: {team['bits_bank']:,}/{threshold:,} "
+            f"({min(999, max(0, progress_pct))}%)"
+        )
+        enqueue_overlay_event('team_bits_pool', pool_message)
+
         activated_messages = []
         now = datetime.now(timezone.utc)
         active_bonus = self._current_team_bonus(team)
@@ -10377,10 +10472,6 @@ class Bot(commands.Bot):
             return
         if self._is_team_command_rate_limited(ctx.author.name, 'createteam'):
             return
-        if self._teams_phase() != 'local':
-            await self.send_command_response(ctx, "MyTeams are in global phase rollout. Use the MyTeams panel for linked setup.")
-            return
-
         creator = _normalize_username(ctx.author.name)
         if not self._is_verified_subscriber(ctx.author) and creator != self.channel_name:
             await self.send_command_response(ctx, "!createteam is subscriber-only right now.")
@@ -10606,34 +10697,20 @@ class Bot(commands.Bot):
         await self._save_channel_team_state(data)
         await self.send_command_response(ctx, f"{format_user_tag(actor)} left '{team_name}'.")
 
-    @commands.command(name='team')
-    async def team(self, ctx, username: str = None):
-        if not self._teams_feature_enabled():
-            return
-        lookup_user = _normalize_username(username or ctx.author.name)
-        data, channel_state = await self._with_channel_team_state()
-        team_name, role = self._resolve_user_active_team(channel_state, lookup_user)
-        if not team_name:
-            await self.send_command_response(ctx, f"{format_user_tag(lookup_user)} is not currently on a team.")
-            return
-        team = channel_state['teams'][team_name]
-        size = 1 + len(team.get('co_captains', [])) + len(team.get('members', []))
-        season_points = _compute_team_points(channel_state, team_name, window='season')
-        await self.send_command_response(ctx, f"Team {team_name} | {format_user_tag(lookup_user)} role: {role} | Members: {size} | Season: {season_points:,} pts")
-
     @commands.command(name='myteam')
-    async def myteam(self, ctx):
+    async def myteam(self, ctx, username: str = None):
         if not self._teams_feature_enabled():
             return
-        username = _normalize_username(ctx.author.name)
+        lookup_name = _normalize_username(username or ctx.author.name)
         data, channel_state = await self._with_channel_team_state()
-        team_name, role = _find_team_for_user(channel_state, username)
+        team_name, role = _find_team_for_user(channel_state, lookup_name)
         if not team_name:
-            await self.send_command_response(ctx, f"{format_user_tag(username)} is not currently on a team.")
+            await self.send_command_response(ctx, f"{format_user_tag(lookup_name)} is not currently on a team.")
             return
 
         team = channel_state['teams'][team_name]
-        self._register_member_metadata(team, username, ctx.author)
+        if lookup_name == _normalize_username(ctx.author.name):
+            self._register_member_metadata(team, lookup_name, ctx.author)
         active_bonus = self._current_team_bonus(team)
 
         season_points = _compute_team_points(channel_state, team_name, window='season')
@@ -10661,24 +10738,21 @@ class Bot(commands.Bot):
         bonus_label = f"⚡{active_bonus.get('multiplier', 0)}x" if active_bonus else "⚡0"
 
         icon = team.get('logo') or ':white_check_mark:'
-        head_line = icon
         stats_line = (
             f"{team_name} | Rank: #{rank} | Pts: {season_points:,} (+{daily_points:,}) | "
             f"SubPts: {sub_points} | {bonus_label} Bonus Races: {bonus_races} | "
             f"Kick: {kick_text} | Recruiting: {recruiting_text} | "
-            f"Capt: {captain_name} ({captain_tier_text})"
+            f"{format_user_tag(lookup_name)} role: {role} | Capt: {captain_name} ({captain_tier_text})"
         )
-        members_prefix = f"{team_name} Members [{len(members)}/{max_size}]: "
+        members_prefix = f"{icon} {stats_line} | Members [{len(members)}/{max_size}]: "
         member_chunks = chunked_join_messages(
             members_prefix,
-            f"{team_name} Members cont: ",
+            f"{team_name} cont: ",
             members,
             separator=', ',
             max_length=480,
         )
         await self._save_channel_team_state(data)
-        await self.send_command_response(ctx, head_line)
-        await self.send_command_response(ctx, stats_line)
         for chunk in member_chunks:
             await self.send_command_response(ctx, chunk)
 

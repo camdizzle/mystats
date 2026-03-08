@@ -744,7 +744,11 @@ function renderCombinedRows(views) {
         return `<li class="leaderboard-row leaderboard-row--event"><span class="row-rank">EVENT</span><span>${escapeHtml(r.name || '')}</span><span>${escapeHtml(eventType)}</span></li>`;
       }
       const emote = settings.showMedals ? getPlacementEmote(r.placement) : '';
-      const decoratedName = emote ? `${emote} ${r.name}` : r.name;
+      const isTeamView = String(view?.id || '').startsWith('teams-');
+      const teamIcon = isTeamView ? String(r?.icon || '').trim() : '';
+      const decoratedName = teamIcon
+        ? `${teamIcon} ${r.name}`
+        : (emote ? `${emote} ${r.name}` : r.name);
       const podiumClass = rowIndex < 3 ? ` leaderboard-row--podium-${rowIndex + 1}` : '';
       const recordClass = isRecordRaceView ? ' leaderboard-row--record-race' : '';
       return `<li class="leaderboard-row${podiumClass}${recordClass}"><span class="row-rank">#${escapeHtml(r.placement)}</span><span>${escapeHtml(decoratedName)}</span><span>${fmt(r.points)} pts</span></li>`;
