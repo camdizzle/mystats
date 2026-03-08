@@ -16,15 +16,16 @@
     </header>
 
     <section class="dashboard-nav" role="tablist" aria-label="Dashboard views">
-      <button class="dashboard-nav-btn dashboard-nav-btn--active" data-view="mycycle" type="button">MyCycle</button>
-      <button class="dashboard-nav-btn" data-view="season-quests" type="button">Season Quests</button>
-      <button class="dashboard-nav-btn" data-view="tilt" type="button">Tilt Dashboard</button>
-      <button class="dashboard-nav-btn" data-view="teams" type="button">MyTeams</button>
-      <button class="dashboard-nav-btn" data-view="rivals" type="button">Rivals</button>
-      <button class="dashboard-nav-btn" data-view="races" type="button">Race Dashboard</button>
+      <button class="dashboard-nav-btn dashboard-nav-btn--active" data-view="mycycle" type="button" role="tab" aria-selected="true" aria-controls="panel-mycycle">MyCycle</button>
+      <button class="dashboard-nav-btn" data-view="season-quests" type="button" role="tab" aria-selected="false" aria-controls="panel-season-quests">Season Quests</button>
+      <button class="dashboard-nav-btn" data-view="tilt" type="button" role="tab" aria-selected="false" aria-controls="panel-tilt">Tilt Dashboard</button>
+      <button class="dashboard-nav-btn" data-view="rivals" type="button" role="tab" aria-selected="false" aria-controls="panel-rivals">Rivals</button>
+      <button class="dashboard-nav-btn" data-view="teams" type="button"  role="tab" aria-selected="false" aria-controls="panel-teams">MyTeams</button>
+      <button class="dashboard-nav-btn" data-view="races" type="button" role="tab" aria-selected="false" aria-controls="panel-races">Race Dashboard</button>
+      <button class="dashboard-nav-btn" data-view="trends" type="button" role="tab" aria-selected="false" aria-controls="panel-trends">Race/BR Trends</button>
     </section>
 
-    <section class="mycycle-shell" data-panel="mycycle">
+    <section id="panel-mycycle" class="mycycle-shell" data-panel="mycycle" role="tabpanel">
       <article class="summary-panel">
         <div id="mycycle-meta" class="meta"></div>
         <div id="summary-kpis" class="kpis"></div>
@@ -44,7 +45,7 @@
       </article>
     </section>
 
-    <section class="season-shell is-hidden" data-panel="season-quests">
+    <section id="panel-season-quests" class="season-shell is-hidden" data-panel="season-quests" role="tabpanel">
       <article class="summary-panel">
         <div class="meta">Season Quests overview</div>
         <div id="season-kpis" class="kpis"></div>
@@ -54,13 +55,37 @@
       <article class="leaderboard-panel">
         <div class="panel-title-row">
           <h2>Season Quest Leaderboard</h2>
-          <span id="season-range-pill" class="range-pill">Top 100</span>
+          <div class="tilt-sort-controls">
+            <label for="season-query" class="sr-only">Search season quests</label>
+            <input id="season-query" class="sort-select" type="search" placeholder="Search racer">
+            <label for="season-sort-by" class="sr-only">Sort season leaderboard by</label>
+            <select id="season-sort-by" class="sort-select">
+              <option value="completed">Completed</option>
+              <option value="points">Points</option>
+              <option value="races">Races</option>
+              <option value="race_hs">Race HS</option>
+              <option value="br_hs">BR HS</option>
+              <option value="tilt_points">Tilt Points</option>
+              <option value="name">Name</option>
+            </select>
+            <label for="season-sort-order" class="sr-only">Sort order</label>
+            <select id="season-sort-order" class="sort-select">
+              <option value="desc">Desc</option>
+              <option value="asc">Asc</option>
+            </select>
+            <span id="season-range-pill" class="range-pill">Top 100</span>
+          </div>
         </div>
         <div id="season-quests" class="rows"></div>
+        <div class="pagination-controls" id="season-pagination-controls">
+          <button type="button" class="mini-filter-btn" id="season-prev-page">Previous</button>
+          <span class="range-pill" id="season-page-info">Page 1</span>
+          <button type="button" class="mini-filter-btn" id="season-next-page">Next</button>
+        </div>
       </article>
     </section>
 
-    <section class="tilt-shell is-hidden" data-panel="tilt">
+    <section id="panel-tilt" class="tilt-shell is-hidden" data-panel="tilt" role="tabpanel">
       <article class="summary-panel">
         <div class="meta">Tilt Dashboard pulse</div>
         <div id="tilt-kpis" class="kpis"></div>
@@ -115,16 +140,18 @@
       </article>
     </section>
 
-    <section class="rivals-shell is-hidden" data-panel="rivals">
+    <section id="panel-rivals" class="rivals-shell is-hidden" data-panel="rivals" role="tabpanel">
       <article class="summary-panel">
         <div class="meta">Rivals snapshot</div>
         <div class="rivals-onboarding" id="rivals-onboarding">
           <div class="rivals-onboarding__header">
             <h3>How Rivals Works</h3>
-            <button class="rivals-onboarding__toggle" id="rivals-onboarding-toggle" type="button" aria-expanded="true">Hide guide</button>
+            <button class="rivals-onboarding__toggle" id="rivals-onboarding-toggle" type="button" aria-expanded="true" aria-controls="rivals-onboarding-content">Hide guide</button>
           </div>
-          <ol id="rivals-onboarding-steps" class="rivals-onboarding__steps"></ol>
-          <div id="rivals-onboarding-context" class="rivals-onboarding__context"></div>
+          <div id="rivals-onboarding-content">
+            <ol id="rivals-onboarding-steps" class="rivals-onboarding__steps"></ol>
+            <div id="rivals-onboarding-context" class="rivals-onboarding__context"></div>
+          </div>
         </div>
         <div id="rivals-kpis" class="kpis"></div>
         <div id="rivals-highlights" class="cycle-highlights"></div>
@@ -135,10 +162,27 @@
           <h2>Rivals Leaderboard</h2>
           <span id="rivals-range-pill" class="range-pill">Closest gaps</span>
         </div>
+        <div class="rivals-controls">
+          <input id="rivals-search" type="search" placeholder="Search player" aria-label="Search rival player" />
+          <select id="rivals-sort" aria-label="Sort rivalries">
+            <option value="closest">Closest gap</option>
+            <option value="widest">Biggest gap</option>
+            <option value="most-races">Most races</option>
+            <option value="best-ppr">Best PPR edge</option>
+            <option value="score">Highest rivalry score</option>
+          </select>
+          <select id="rivals-preset" aria-label="Rivalry gap preset">
+            <option value="all">All gaps</option>
+            <option value="100">Ultra close ≤100</option>
+            <option value="500">Competitive ≤500</option>
+            <option value="1500">Wide ≤1500</option>
+          </select>
+          <button id="rivals-export" type="button">Export CSV</button>
+        </div>
         <div id="rivals-leaderboard" class="rows"></div>
       </article>
     </section>
-    <section class="races-shell is-hidden" data-panel="races">
+    <section id="panel-races" class="races-shell is-hidden" data-panel="races" role="tabpanel">
       <article class="summary-panel">
         <div class="meta">Race + BR snapshot</div>
         <div class="race-type-filter" role="group" aria-label="Race type filter">
@@ -159,6 +203,15 @@
       </article>
     </section>
 
+    <section id="panel-trends" class="trends-shell is-hidden" data-panel="trends" role="tabpanel">
+      <article class="analytics-panel">
+        <div class="panel-title-row">
+          <h2>Race/BR Trend Charts</h2>
+          <span id="trends-range-pill" class="range-pill">Trend analytics</span>
+        </div>
+        <div id="trend-charts" class="analytics-groups"></div>
+      </article>
+    </section>
 
   </main>
   <script src="/dashboard/dashboard.js"></script>

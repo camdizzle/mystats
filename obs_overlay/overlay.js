@@ -2,14 +2,23 @@ const $ = id => document.getElementById(id);
 const leaderboard = $('leaderboard');
 const boardShell = document.querySelector('.board-shell');
 const splashScreen = $('splash-screen');
-const headerPills = [
-  $('stat-avg-today'),
-  $('stat-uniq-today'),
-  $('stat-races-today'),
-  $('stat-avg-season'),
-  $('stat-uniq-season'),
-  $('stat-races-season'),
-];
+const headerPillGroups = {
+  today: [
+    $('stat-avg-today'),
+    $('stat-uniq-today'),
+    $('stat-races-today'),
+  ],
+  season: [
+    $('stat-avg-season'),
+    $('stat-uniq-season'),
+    $('stat-races-season'),
+  ],
+  br: [
+    $('stat-br-avg-today'),
+    $('stat-br-racers-today'),
+    $('stat-br-total-today'),
+  ],
+};
 const fmt = n => new Intl.NumberFormat().format(n || 0);
 
 
@@ -29,6 +38,9 @@ const I18N = {
     'Avg Points Season': 'Promedio temporada',
     'All Racers Season': 'Todos temporada',
     'Total Races Season': 'Carreras temporada',
+    'Avg Pts Per BR': 'Promedio por BR',
+    'BR Racers Today': 'Jugadores BR hoy',
+    'Total BRs Today': 'BR totales hoy',
     'set a new world record!': 'logró un nuevo récord mundial!',
     'Beat previous by': 'Superó al anterior por',
     'Active': 'Activo',
@@ -46,6 +58,9 @@ const I18N = {
     'Avg Points Season': 'Average Points This Season',
     'All Racers Season': 'All Mates This Season',
     'Total Races Season': 'Total Seasonal Races, strewth',
+    'Avg Pts Per BR': 'Average BR Points Today',
+    'BR Racers Today': 'BR Mates Today',
+    'Total BRs Today': 'Total BRs Today, no worries',
     'set a new world record!': 'set a new world ripper record!',
     'Beat previous by': 'Beat the old mark by',
     'Active': 'Flat Out',
@@ -102,6 +117,18 @@ const defaultSettings = {
   showMedals: true,
   compactRows: false,
   horizontalLayout: false,
+  horizontalFeedSeason: true,
+  horizontalFeedToday: true,
+  horizontalFeedRacesSeason: true,
+  horizontalFeedBrsSeason: true,
+  horizontalFeedRacesToday: true,
+  horizontalFeedBrsToday: true,
+  horizontalFeedPreviousRace: true,
+  horizontalFeedEvents: true,
+  horizontalFeedTiltCurrent: true,
+  horizontalFeedTiltToday: true,
+  horizontalFeedTiltSeason: true,
+  horizontalFeedTiltLastRun: true,
 };
 
 const themes = {
@@ -118,6 +145,7 @@ let refreshTimer = null;
 let pillRotationTimer = null;
 let currentViews = [];
 let activePillPage = 0;
+let currentPillMode = 'race';
 let leaderboardScrollTimer = null;
 let leaderboardScrollPauseUntil = 0;
 let leaderboardScrollRetryTimer = null;
@@ -134,15 +162,22 @@ let overlayEventActive = false;
 let overlayEventTimeout = null;
 let queuedRaceTop3 = null;
 let overlayEventQueue = [];
+let narrativeEventQueue = [];
 let lastOverlayEventId = 0;
 let hasHydratedOverlayEvents = false;
 let currentResultsMode = '';
+let currentSceneMode = 'pre-game';
+let lastSceneMode = '';
+let lastSplashAtMs = 0;
+let cycleCountSinceSplash = 0;
 const splashAnimationDurationMs = 9000;
 const splashPostAnimationHoldMs = 1000;
 const splashDurationMs = splashAnimationDurationMs + splashPostAnimationHoldMs;
 const recordOverlayDurationMs = 5000;
 const top3ShowDurationMs = 10000;
 const eventOverlayDurationMs = 6500;
+const minCyclesBetweenSplash = 5;
+const minMsBetweenSplashes = 90000;
 
 const recordOverlay = $('record-overlay');
 const recordOverlayMessage = $('record-overlay-message');
@@ -197,9 +232,64 @@ function showEventOverlay(eventPayload = {}) {
   overlayEventActive = true;
 }
 
+function resolveSceneMode(payload = {}, overlayMode = '') {
+  if (overlayMode === 'tilt') return 'tilt';
+
+  const recentRace = payload?.recent_race_top3 || {};
+  const raceRows = Array.isArray(recentRace?.rows) ? recentRace.rows : [];
+  const raceType = normalizeRaceType(recentRace?.race_type);
+  const isRecentRace = Boolean(recentRace?.race_timestamp || recentRace?.race_key);
+
+  if (!raceRows.length) return 'pre-game';
+  if (isRecentRace && raceType === 'br') return 'br';
+  if (isRecentRace && raceType === 'race') return 'race';
+  return 'post-race';
+}
+
+function shouldShowSplashInterstitial() {
+  if (settings.horizontalLayout) return false;
+  if (overlayEventQueue.length || narrativeEventQueue.length || queuedRaceTop3) return false;
+  if (cycleCountSinceSplash < minCyclesBetweenSplash) return false;
+  return (Date.now() - lastSplashAtMs) >= minMsBetweenSplashes;
+}
+
+function maybeShowCycleInterstitial() {
+  if (settings.horizontalLayout) {
+    leaderboardScrollPauseUntil = Date.now() + 800;
+    return;
+  }
+
+  cycleCountSinceSplash += 1;
+  processOverlayPresentationQueue();
+
+  if (top3IsShowing || overlayEventActive) return;
+
+  if (shouldShowSplashInterstitial()) {
+    lastSplashAtMs = Date.now();
+    cycleCountSinceSplash = 0;
+    showSplashView();
+    return;
+  }
+
+  leaderboardScrollPauseUntil = Date.now() + 900;
+}
+
 function processOverlayPresentationQueue() {
   if (settings.horizontalLayout) return;
   if (top3IsShowing || overlayEventActive) return;
+
+  if (narrativeEventQueue.length) {
+    const nextNarrative = narrativeEventQueue.shift();
+    showEventOverlay(nextNarrative);
+    if (overlayEventTimeout) clearTimeout(overlayEventTimeout);
+    overlayEventTimeout = setTimeout(() => {
+      hideEventOverlay();
+      showLeaderboardView();
+      ensureLeaderboardAutoScroll();
+      processOverlayPresentationQueue();
+    }, eventOverlayDurationMs);
+    return;
+  }
 
   if (overlayEventQueue.length) {
     const nextEvent = overlayEventQueue.shift();
@@ -221,12 +311,23 @@ function processOverlayPresentationQueue() {
   }
 }
 
+function queueNarrativeEvent(eventPayload = {}) {
+  if (settings.horizontalLayout) return;
+  const message = String(eventPayload?.message || '').trim();
+  if (!message) return;
+
+  narrativeEventQueue.push({
+    id: Number(eventPayload?.id || 0),
+    type: String(eventPayload?.type || 'narrative').trim() || 'narrative',
+    message,
+  });
+}
+
 function queueOverlayEvent(eventPayload = {}) {
   if (settings.horizontalLayout) return;
   const message = String(eventPayload?.message || '').trim();
   if (!message) return;
   overlayEventQueue.push(eventPayload);
-  processOverlayPresentationQueue();
 }
 
 function queueTop3Overlay(top3View = {}) {
@@ -308,21 +409,33 @@ function updateHeaderStats(s = {}) {
   setPillValue('stat-avg-season', s.avg_points_season);
   setPillValue('stat-uniq-season', s.unique_racers_season);
   setPillValue('stat-races-season', s.total_races_season);
+  setPillValue('stat-br-avg-today', s.br_avg_points_today);
+  setPillValue('stat-br-racers-today', s.br_racers_today);
+  setPillValue('stat-br-total-today', s.total_brs_today);
   renderPillPage();
 }
 
+function getPillPagesForMode() {
+  return currentPillMode === 'br'
+    ? [headerPillGroups.today, headerPillGroups.br]
+    : [headerPillGroups.today, headerPillGroups.season];
+}
+
 function renderPillPage() {
-  const pillPageSize = 3;
-  headerPills.forEach((pill, idx) => {
-    if (!pill) return;
-    const start = activePillPage * pillPageSize;
-    const end = start + pillPageSize;
-    pill.style.display = idx >= start && idx < end ? 'block' : 'none';
+  const allPills = [...headerPillGroups.today, ...headerPillGroups.season, ...headerPillGroups.br];
+  allPills.forEach((pill) => {
+    if (pill) pill.style.display = 'none';
+  });
+
+  const pages = getPillPagesForMode();
+  const activePage = pages[activePillPage] || pages[0] || [];
+  activePage.forEach((pill) => {
+    if (pill) pill.style.display = 'block';
   });
 }
 
 function rotatePills() {
-  const totalPages = Math.max(1, Math.ceil(headerPills.length / 3));
+  const totalPages = Math.max(1, getPillPagesForMode().length);
   if (totalPages <= 1) return;
   activePillPage = (activePillPage + 1) % totalPages;
   renderPillPage();
@@ -373,6 +486,7 @@ function showSplashView(force = false) {
   cycleRestartTimer = setTimeout(() => {
     lastRenderedViewsKey = '';
     renderCombinedRows(currentViews);
+    processOverlayPresentationQueue();
   }, splashDurationMs);
 }
 
@@ -475,6 +589,8 @@ function startLeaderboardAutoScroll() {
     leaderboard.scrollTop = 0;
     leaderboard.scrollLeft = 0;
 
+    maybeShowCycleInterstitial();
+
     leaderboardScrollRetryTimer = setTimeout(() => {
       startLeaderboardAutoScroll();
     }, 600);
@@ -516,7 +632,7 @@ function startLeaderboardAutoScroll() {
       leaderboard.scrollTop = currentMax;
 
       if (hasReachedEndOfStackedViews()) {
-        showSplashView();
+        maybeShowCycleInterstitial();
       } else {
         leaderboardScrollPauseUntil = Date.now() + 800;
       }
@@ -623,6 +739,10 @@ function renderCombinedRows(views) {
     const isRecordRaceView = String(view?.id || '').toLowerCase() === 'previous' && view?.is_record_race;
 
     const rowMarkup = rows.map((r, rowIndex) => {
+      if (r?.is_ticker_event) {
+        const eventType = String(r?.event_type || 'event').replace(/[_-]+/g, ' ').toUpperCase();
+        return `<li class="leaderboard-row leaderboard-row--event"><span class="row-rank">EVENT</span><span>${escapeHtml(r.name || '')}</span><span>${escapeHtml(eventType)}</span></li>`;
+      }
       const emote = settings.showMedals ? getPlacementEmote(r.placement) : '';
       const decoratedName = emote ? `${emote} ${r.name}` : r.name;
       const podiumClass = rowIndex < 3 ? ` leaderboard-row--podium-${rowIndex + 1}` : '';
@@ -685,6 +805,44 @@ function renderCombinedRows(views) {
   setTimeout(ensureLeaderboardAutoScroll, 0);
 }
 
+function filterViewsForHorizontalFeed(views = [], overlayEvents = []) {
+  const enabledById = {
+    season: settings.horizontalFeedSeason,
+    today: settings.horizontalFeedToday,
+    'races-season': settings.horizontalFeedRacesSeason,
+    'brs-season': settings.horizontalFeedBrsSeason,
+    'races-today': settings.horizontalFeedRacesToday,
+    'brs-today': settings.horizontalFeedBrsToday,
+    previous: settings.horizontalFeedPreviousRace,
+    'tilt-current': settings.horizontalFeedTiltCurrent,
+    'tilt-today': settings.horizontalFeedTiltToday,
+    'tilt-season': settings.horizontalFeedTiltSeason,
+    'tilt-last-run': settings.horizontalFeedTiltLastRun,
+  };
+
+  const selectedViews = (Array.isArray(views) ? views : []).filter((view) => {
+    const viewId = String(view?.id || '');
+    if (!(viewId in enabledById)) return true;
+    return Boolean(enabledById[viewId]);
+  });
+
+  if (settings.horizontalFeedEvents && Array.isArray(overlayEvents) && overlayEvents.length) {
+    selectedViews.push({
+      id: 'overlay-events',
+      title: 'Ticker Events',
+      rows: overlayEvents.slice(-20).map((eventItem, index) => ({
+        placement: index + 1,
+        name: eventItem?.message || '',
+        points: 0,
+        is_ticker_event: true,
+        event_type: eventItem?.type || 'event',
+      })),
+    });
+  }
+
+  return selectedViews;
+}
+
 function ensureLeaderboardAutoScroll() {
   if (top3IsShowing) return;
   if (!leaderboard) return;
@@ -724,6 +882,18 @@ function applyServerSettings(raw = {}) {
     showMedals: String(raw.show_medals).toLowerCase() !== 'false',
     compactRows: String(raw.compact_rows).toLowerCase() === 'true',
     horizontalLayout: String(raw.horizontal_layout).toLowerCase() === 'true',
+    horizontalFeedSeason: String(raw.horizontal_feed_season).toLowerCase() !== 'false',
+    horizontalFeedToday: String(raw.horizontal_feed_today).toLowerCase() !== 'false',
+    horizontalFeedRacesSeason: String(raw.horizontal_feed_races_season).toLowerCase() !== 'false',
+    horizontalFeedBrsSeason: String(raw.horizontal_feed_brs_season).toLowerCase() !== 'false',
+    horizontalFeedRacesToday: String(raw.horizontal_feed_races_today).toLowerCase() !== 'false',
+    horizontalFeedBrsToday: String(raw.horizontal_feed_brs_today).toLowerCase() !== 'false',
+    horizontalFeedPreviousRace: String(raw.horizontal_feed_previous_race).toLowerCase() !== 'false',
+    horizontalFeedEvents: String(raw.horizontal_feed_events).toLowerCase() !== 'false',
+    horizontalFeedTiltCurrent: String(raw.horizontal_feed_tilt_current).toLowerCase() !== 'false',
+    horizontalFeedTiltToday: String(raw.horizontal_feed_tilt_today).toLowerCase() !== 'false',
+    horizontalFeedTiltSeason: String(raw.horizontal_feed_tilt_season).toLowerCase() !== 'false',
+    horizontalFeedTiltLastRun: String(raw.horizontal_feed_tilt_last_run).toLowerCase() !== 'false',
   };
 
   const rotationChanged = next.rotationSeconds !== settings.rotationSeconds;
@@ -746,7 +916,7 @@ function syncViews(views = []) {
   }
 
   const renderableViews = getRenderableViews(currentViews);
-  const nextRenderKey = `${settings.showMedals}::${settings.horizontalLayout}::${getViewsRenderKey(renderableViews)}`;
+  const nextRenderKey = `${settings.showMedals}::${settings.horizontalLayout}::${settings.horizontalFeedSeason}::${settings.horizontalFeedToday}::${settings.horizontalFeedRacesSeason}::${settings.horizontalFeedBrsSeason}::${settings.horizontalFeedRacesToday}::${settings.horizontalFeedBrsToday}::${settings.horizontalFeedPreviousRace}::${settings.horizontalFeedEvents}::${settings.horizontalFeedTiltCurrent}::${settings.horizontalFeedTiltToday}::${settings.horizontalFeedTiltSeason}::${settings.horizontalFeedTiltLastRun}::${getViewsRenderKey(renderableViews)}`;
 
   if (nextRenderKey === lastRenderedViewsKey) {
     updateBoardTitleFromScroll();
@@ -759,11 +929,77 @@ function syncViews(views = []) {
   ensureLeaderboardAutoScroll();
 }
 
+function normalizeOverlayMode(value) {
+  const mode = String(value || '').trim().toLowerCase();
+  if (mode === 'tilt' || mode === 'race' || mode === 'br' || mode === 'pre-game' || mode === 'post-race') return mode;
+  return '';
+}
+
 function normalizeRaceType(value) {
   const type = String(value || '').trim().toLowerCase();
   if (type === 'br' || type === 'battle royale' || type === 'royale') return 'br';
   if (type === 'race') return 'race';
   return '';
+}
+
+
+function buildHorizontalTiltViews(tiltPayload = {}) {
+  const views = [];
+  const currentRun = tiltPayload?.current_run || {};
+  const currentRows = Array.isArray(currentRun?.standings) ? currentRun.standings : [];
+  if (currentRows.length) {
+    views.push({
+      id: 'tilt-current',
+      title: `Tilt Current Run • L${Number(currentRun?.level || 0)}`,
+      rows: currentRows.slice(0, 10).map((row, index) => ({
+        placement: index + 1,
+        name: row?.name || 'Unknown',
+        points: Number(row?.points || 0),
+      })),
+    });
+  }
+
+  const todayRows = Array.isArray(tiltPayload?.today_standings) ? tiltPayload.today_standings : [];
+  if (todayRows.length) {
+    views.push({
+      id: 'tilt-today',
+      title: 'Tilt Top 10 Today',
+      rows: todayRows.slice(0, 10).map((row, index) => ({
+        placement: index + 1,
+        name: row?.name || 'Unknown',
+        points: Number(row?.points || 0),
+      })),
+    });
+  }
+
+  const seasonRows = Array.isArray(tiltPayload?.season_standings) ? tiltPayload.season_standings : [];
+  if (seasonRows.length) {
+    views.push({
+      id: 'tilt-season',
+      title: 'Tilt Top 10 Season',
+      rows: seasonRows.slice(0, 10).map((row, index) => ({
+        placement: index + 1,
+        name: row?.name || 'Unknown',
+        points: Number(row?.points || 0),
+      })),
+    });
+  }
+
+  const lastRun = tiltPayload?.last_run || {};
+  const lastRunRows = Array.isArray(lastRun?.standings) ? lastRun.standings : [];
+  if (lastRunRows.length) {
+    views.push({
+      id: 'tilt-last-run',
+      title: `Tilt Last Run${lastRun?.run_id ? ` • ${String(lastRun.run_id).slice(0, 6)}` : ''}`,
+      rows: lastRunRows.slice(0, 10).map((row, index) => ({
+        placement: index + 1,
+        name: row?.name || 'Unknown',
+        points: Number(row?.points || 0),
+      })),
+    });
+  }
+
+  return views;
 }
 
 function selectViewsForMode(views = [], mode = '') {
@@ -781,12 +1017,51 @@ function selectViewsForMode(views = [], mode = '') {
 
 async function refresh() {
   try {
-    const r = await fetch('/api/overlay/top3', { cache: 'no-store' });
-    const p = await r.json();
+    const r = await fetch('/api/overlay', { cache: 'no-store' });
+    const payload = await r.json();
+    const overlayMode = normalizeOverlayMode(payload?.active_mode);
+    const racePayload = payload?.top3 || payload;
+    const resolvedSceneMode = resolveSceneMode(racePayload, overlayMode);
+    currentSceneMode = overlayMode === 'tilt' ? 'tilt' : resolvedSceneMode;
 
-    currentLanguage = (p?.settings?.language || 'en').toLowerCase();
+    if (currentSceneMode !== lastSceneMode) {
+      const prettyScene = String(currentSceneMode || 'race').replace(/[-_]+/g, ' ');
+      queueNarrativeEvent({
+        type: 'scene mode',
+        message: `Scene mode: ${prettyScene.toUpperCase()}`,
+      });
+      lastSceneMode = currentSceneMode;
+    }
+
+    currentLanguage = (racePayload?.settings?.language || 'en').toLowerCase();
+    applyServerSettings(racePayload.settings || {});
+
+    if (overlayMode === 'tilt' && !settings.horizontalLayout) {
+      window.location.replace('/overlay');
+      return;
+    }
+
+    if (overlayMode === 'tilt' && settings.horizontalLayout) {
+      const tiltPayload = payload?.tilt || {};
+      $('overlay-title').textContent = t(tiltPayload?.title || 'MyStats Tilt Run Tracker');
+      updateHeaderStats({
+        avg_points_today: tiltPayload?.current_run?.run_points || 0,
+        unique_racers_today: Array.isArray(tiltPayload?.current_run?.standings) ? tiltPayload.current_run.standings.length : 0,
+        total_races_today: tiltPayload?.current_run?.level || 0,
+        avg_points_season: tiltPayload?.current_run?.best_run_xp_today || 0,
+        unique_racers_season: Array.isArray(tiltPayload?.season_standings) ? tiltPayload.season_standings.length : 0,
+        total_races_season: tiltPayload?.current_run?.total_xp_today || 0,
+      });
+
+      const overlayEvents = Array.isArray(racePayload?.overlay_events) ? racePayload.overlay_events : [];
+      const tiltViews = buildHorizontalTiltViews(tiltPayload);
+      const viewsToRender = filterViewsForHorizontalFeed(tiltViews, overlayEvents);
+      syncViews(viewsToRender);
+      return;
+    }
+
+    const p = racePayload;
     $('overlay-title').textContent = t(p.title || 'MyStats Live Results');
-    applyServerSettings(p.settings || {});
     updateHeaderStats(p.header_stats || {});
     const shouldShowPreviousRace = Array.isArray(p.top10_previous_race)
       && p.top10_previous_race.length;
@@ -802,14 +1077,27 @@ async function refresh() {
         ];
 
     const raceType = normalizeRaceType(p?.recent_race_top3?.race_type);
-    if (raceType) {
+    if (overlayMode === 'race' || overlayMode === 'br') {
+      currentResultsMode = overlayMode;
+    } else if (raceType) {
       currentResultsMode = raceType;
     }
 
-    const filteredViews = selectViewsForMode(normalizedViews, currentResultsMode);
-    syncViews(filteredViews.length ? filteredViews : normalizedViews);
+    const nextPillMode = currentResultsMode === 'br' ? 'br' : 'race';
+    if (nextPillMode !== currentPillMode) {
+      currentPillMode = nextPillMode;
+      activePillPage = 0;
+    }
+    renderPillPage();
 
     const overlayEvents = Array.isArray(p.overlay_events) ? p.overlay_events : [];
+    const filteredViews = selectViewsForMode(normalizedViews, currentResultsMode);
+    const modeViews = filteredViews.length ? filteredViews : normalizedViews;
+    const viewsToRender = settings.horizontalLayout
+      ? filterViewsForHorizontalFeed(modeViews, overlayEvents)
+      : modeViews;
+    syncViews(viewsToRender);
+
     if (!hasHydratedOverlayEvents) {
       hasHydratedOverlayEvents = true;
       const maxHydratedEventId = overlayEvents.reduce((maxId, eventItem) => {
@@ -836,6 +1124,16 @@ async function refresh() {
 
     if (raceKey && raceKey !== lastRaceKey) {
       lastRaceKey = raceKey;
+      const firstPlace = Array.isArray(p?.recent_race_top3?.rows)
+        ? p.recent_race_top3.rows.find((row) => Number(row?.placement) === 1)
+        : null;
+      if (firstPlace?.name) {
+        const raceKind = normalizeRaceType(p?.recent_race_top3?.race_type);
+        queueNarrativeEvent({
+          type: raceKind === 'br' ? 'br winner' : 'race winner',
+          message: `${firstPlace.name} won with ${fmt(firstPlace.points)} points`,
+        });
+      }
       queueTop3Overlay(p.recent_race_top3);
     }
   } catch (error) {
@@ -873,7 +1171,8 @@ startPillRotationTimer();
   if (title) title.textContent = t('WORLD RECORD!');
   const mapping = {
     'stat-avg-today':'Avg Points Today','stat-uniq-today':'All Racers Today','stat-races-today':'Total Races Today',
-    'stat-avg-season':'Avg Points Season','stat-uniq-season':'All Racers Season','stat-races-season':'Total Races Season'
+    'stat-avg-season':'Avg Points Season','stat-uniq-season':'All Racers Season','stat-races-season':'Total Races Season',
+    'stat-br-avg-today':'Avg Pts Per BR','stat-br-racers-today':'BR Racers Today','stat-br-total-today':'Total BRs Today'
   };
   Object.entries(mapping).forEach(([id,key]) => {
     const n = document.querySelector(`#${id} .pill-title`);

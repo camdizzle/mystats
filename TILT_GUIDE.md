@@ -68,6 +68,7 @@ PlayerA Stats | Today: 2,450 pts, 3 deaths | Season: 41,220 pts, 58 deaths | Las
   - last run XP
   - today XP
   - season XP
+  - lifetime XP
 
 **Sample output**
 ```text
@@ -90,7 +91,7 @@ Top Tiltees: (1) PlayerA 22 tops, 41,220 points, (2) PlayerB 18 tops, 36,100 poi
 
 **Sample output**
 ```text
-Top 10 Tilees by Tilt Points: (1) PlayerA 41,220 points, (2) PlayerB 36,100 points, (3) PlayerC 29,880 points.
+Top 10 Tiltees by Tilt Points: (1) PlayerA 41,220 points, (2) PlayerB 36,100 points, (3) PlayerC 29,880 points.
 ```
 
 ### `!tiltsurvivors`
@@ -150,7 +151,9 @@ Multiplier schedule:
 
 ### 4) Lifetime expertise anchor + increment
 
-- `adjusted_total_xp = parsed_total_xp_from_level_state + lifetime_base_xp`
+- `adjusted_total_xp` is normalized so baseline isn't double-counted:
+  - if parsed total already includes the baseline, use parsed total as-is
+  - otherwise add `lifetime_base_xp`
 - `lifetime_expertise_working = max(previous_lifetime_expertise, adjusted_total_xp)`
 - `lifetime_expertise_new = lifetime_expertise_working + earned_xp`
 

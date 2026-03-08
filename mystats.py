@@ -53,6 +53,7 @@ import subprocess
 import warnings
 import html
 import hashlib
+import unicodedata
 
 if sys.platform == "win32":
     import ctypes
@@ -79,7 +80,7 @@ except ImportError:
     ToastNotifier = None
 
 # Global Variables
-version = '6.1.0'
+version = '6.2.0'
 text_widget = None
 bot = None
 BOT_SHOULD_RUN = True
@@ -89,6 +90,58 @@ HAS_TTKBOOTSTRAP = ttkbootstrap_module is not None
 DEFAULT_UI_THEME = "darkly"
 app_style = None
 season_quest_tree = None
+
+SEASON_QUEST_DEFINITIONS = [
+    {
+        'id': 'races',
+        'label': 'Season Races',
+        'target_key': 'season_quest_target_races',
+        'legacy_complete_key': 'season_quest_complete_races',
+        'message': "🎯 Season Quest Complete: {name} finished {value:,} / {target:,} season races!",
+    },
+    {
+        'id': 'points',
+        'label': 'Season Points',
+        'target_key': 'season_quest_target_points',
+        'legacy_complete_key': 'season_quest_complete_points',
+        'message': "🎯 Season Quest Complete: {name} earned {value:,} / {target:,} season points!",
+    },
+    {
+        'id': 'race_hs',
+        'label': 'Race High Score',
+        'target_key': 'season_quest_target_race_hs',
+        'legacy_complete_key': 'season_quest_complete_race_hs',
+        'message': "🎯 Season Quest Complete: {name} reached race high score {value:,} (target {target:,})!",
+    },
+    {
+        'id': 'br_hs',
+        'label': 'BR High Score',
+        'target_key': 'season_quest_target_br_hs',
+        'legacy_complete_key': 'season_quest_complete_br_hs',
+        'message': "🎯 Season Quest Complete: {name} reached BR high score {value:,} (target {target:,})!",
+    },
+    {
+        'id': 'tilt_levels',
+        'label': 'Tilt Levels',
+        'target_key': 'season_quest_target_tilt_levels',
+        'legacy_complete_key': 'season_quest_complete_tilt_levels',
+        'message': "🎯 Season Quest Complete: {name} participated in {value:,} / {target:,} tilt levels!",
+    },
+    {
+        'id': 'tilt_tops',
+        'label': 'Top Tiltees',
+        'target_key': 'season_quest_target_tilt_tops',
+        'legacy_complete_key': 'season_quest_complete_tilt_tops',
+        'message': "🎯 Season Quest Complete: {name} got {value:,} / {target:,} top-tiltee finishes!",
+    },
+    {
+        'id': 'tilt_points',
+        'label': 'Tilt Points',
+        'target_key': 'season_quest_target_tilt_points',
+        'legacy_complete_key': 'season_quest_complete_tilt_points',
+        'message': "🎯 Season Quest Complete: {name} earned {value:,} / {target:,} tilt points!",
+    },
+]
 rivals_tree = None
 mycycle_tree = None
 mycycle_session_label = None
@@ -111,11 +164,85 @@ TRAY_MINIMIZE_TOAST_MESSAGE = (
     "The app is running in the system tray. Double-click the icon to reopen."
 )
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s"
-)
 logger = logging.getLogger("mystats")
+logger.propagate = False  # All output goes strictly to the log file, not the console
+
+# Log errors and milestones (INFO and above) to mystats.log only
+_log_file_handler = logging.FileHandler("mystats.log", encoding="utf-8")
+_log_file_handler.setLevel(logging.INFO)
+_log_file_handler.setFormatter(
+    logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+)
+logger.addHandler(_log_file_handler)
+logger.setLevel(logging.INFO)
+
+_RAW_CSV_READER = csv.reader
+
+
+def _sanitize_csv_lines(file_obj):
+    """Yield text lines with embedded NUL bytes removed."""
+    for line in file_obj:
+        if "\x00" in line:
+            line = line.replace("\x00", "")
+        yield line
+
+
+def iter_csv_rows(file_obj, **reader_kwargs):
+    """Safely iterate CSV rows from a text file-like object."""
+    return _RAW_CSV_READER(_sanitize_csv_lines(file_obj), **reader_kwargs)
+
+def append_csv_rows_safely(file_path, rows):
+    """Append rows to CSV and force data to disk to reduce partial-write corruption."""
+    with open(file_path, "a", newline="", encoding="utf-8", errors="ignore") as csv_file:
+        writer = csv.writer(csv_file)
+        writer.writerows(rows)
+        csv_file.flush()
+        os.fsync(csv_file.fileno())
+
+
+def _settings_file_candidates():
+    filename = "settings.txt"
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        os.path.join(script_dir, filename),
+        os.path.join(os.getcwd(), filename),
+    ]
+
+    executable_path = getattr(sys, "executable", "")
+    if executable_path:
+        executable_dir = os.path.dirname(os.path.abspath(executable_path))
+        candidates.append(os.path.join(executable_dir, filename))
+
+    unique_candidates = []
+    seen = set()
+    for candidate in candidates:
+        normalized = os.path.normcase(os.path.abspath(candidate))
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        unique_candidates.append(candidate)
+
+    return unique_candidates
+
+
+def _resolve_settings_file_path():
+    for candidate in _settings_file_candidates():
+        if os.path.isfile(candidate):
+            return candidate
+
+    for candidate in _settings_file_candidates():
+        parent_dir = os.path.dirname(candidate) or "."
+        if os.access(parent_dir, os.W_OK):
+            return candidate
+
+    fallback_dir = os.path.join(os.path.expanduser("~"), ".mystats")
+    os.makedirs(fallback_dir, exist_ok=True)
+    return os.path.join(fallback_dir, "settings.txt")
+
+
+SETTINGS_FILE_PATH = _resolve_settings_file_path()
+
+
 
 TEAM_DATA_FILE = "teams_data.json"
 TEAM_DATA_LOCK = threading.Lock()
@@ -268,8 +395,15 @@ def get_placement_emote(place):
     return {1: "🥇", 2: "🥈", 3: "🥉"}.get(place, "")
 
 
+def show_leaderboard_medal_emotes():
+    config_manager = globals().get('config')
+    if config_manager is None:
+        return True
+    return str(config_manager.get_setting('chat_leaderboard_show_medals') or 'True') == 'True'
+
+
 def format_ranked_label(place):
-    emote = get_placement_emote(place)
+    emote = get_placement_emote(place) if show_leaderboard_medal_emotes() else ""
     return f"{emote} {place}." if emote else f"{place}."
 
 
@@ -452,7 +586,7 @@ def force_exit_application():
 
 def get_initial_ui_theme():
     try:
-        with open("settings.txt", "r", encoding="utf-8", errors="ignore") as f:
+        with open(SETTINGS_FILE_PATH, "r", encoding="utf-8", errors="ignore") as f:
             for line in f:
                 if line.startswith("UI_THEME="):
                     theme_name = line.split("=", 1)[1].strip()
@@ -596,6 +730,7 @@ def fetch_pixelbypixel_leaderboard(statistic_name):
         "https://pixelbypixel.studio/api/leaderboards"
         f"?offset=0&statisticName={statistic_name}&seasonNumber={season_number}"
     )
+    logger.info("API call: leaderboards (statistic=%s, season=%s)", statistic_name, season_number)
     response = requests.get(api_url, timeout=15)
     response.raise_for_status()
 
@@ -666,7 +801,7 @@ def safe_read_csv_rows(path, retries=5, retry_delay=0.5):
             result = chardet.detect(raw_data)
             encoding = result['encoding'] if result['encoding'] else 'utf-8'
             decoded = raw_data.decode(encoding, errors='ignore')
-            return list(csv.reader(io.StringIO(decoded)))
+            return list(iter_csv_rows(io.StringIO(decoded)))
         except Exception:
             time.sleep(retry_delay)
 
@@ -1687,6 +1822,7 @@ def format_competitive_raid_top_three(entries):
 
 
 def fetch_competitions_payload(timeout=20):
+    logger.info("API call: competitions")
     response = requests.get("https://pixelbypixel.studio/api/competitions", timeout=timeout)
     response.raise_for_status()
     return response.json()
@@ -1701,6 +1837,7 @@ def fetch_competitions_history_payload(timeout=20):
     last_error = None
     for history_url in history_urls:
         try:
+            logger.info("API call: competition history (%s)", history_url)
             response = requests.get(history_url, timeout=timeout)
             response.raise_for_status()
             return response.json()
@@ -2091,7 +2228,7 @@ def get_tilt_xp_totals_from_results_files(target_date=None):
             encoding = result['encoding'] if result['encoding'] else 'utf-8'
 
             with open(tilts_file, 'r', encoding=encoding, errors='ignore') as f:
-                reader = csv.reader(f)
+                reader = iter_csv_rows(f)
                 for row in reader:
                     parsed = parse_tilt_result_row(row)
                     if parsed is None:
@@ -2117,7 +2254,7 @@ def get_tilt_xp_totals_from_results_files(target_date=None):
         except FileNotFoundError:
             continue
         except Exception as e:
-            print(e)
+            logger.error("Unexpected error", exc_info=True)
 
     season_xp = int(sum(math.floor(count * get_tilt_multiplier(level)) for (_, level), count in level_survivors.items()))
     day_xp = int(sum(math.floor(count * get_tilt_multiplier(level)) for (_, level), count in level_survivors_by_day.items()))
@@ -2171,6 +2308,7 @@ def write_tilt_output_files(values):
                 fp.write(str(value))
         except Exception as e:
             logger.warning(f"Failed writing tilt output file '{filename}': {e}")
+    logger.info("Data synced: tilt output files updated")
 
 
 def get_tilt_best_floor_level_num(setting_key):
@@ -2219,84 +2357,119 @@ def _get_season_quest_completer_name():
     return 'The streamer'
 
 
+def _season_quest_value_map(tilt_totals=None):
+    if tilt_totals is None:
+        tilt_totals, _ = get_tilt_season_stats()
+    return {
+        'races': get_int_setting('totalcountseason', 0),
+        'points': get_int_setting('totalpointsseason', 0),
+        'race_hs': get_int_setting('race_hs_season', 0),
+        'br_hs': get_int_setting('br_hs_season', 0),
+        'tilt_levels': tilt_totals.get('levels', 0),
+        'tilt_tops': tilt_totals.get('top_tiltees', 0),
+        'tilt_points': tilt_totals.get('points', 0),
+    }
+
+
+def _get_season_scope_key():
+    raw_season = str(config.get_setting('season') or '').strip().lower()
+    normalized = ''.join(ch for ch in raw_season if ch.isalnum() or ch in ('-', '_'))
+    return normalized or 'default'
+
+
+def _load_season_quest_completion_state():
+    raw_state = config.get_setting('season_quest_completion_state') or '{}'
+    try:
+        parsed = json.loads(raw_state)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        parsed = {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _save_season_quest_completion_state(state):
+    serialized = json.dumps(state, separators=(',', ':'), sort_keys=True)
+    config.set_setting('season_quest_completion_state', serialized, persistent=True)
+
+
+def _is_season_quest_complete(quest_definition, season_key, state):
+    season_state = state.get(season_key, {})
+    if not isinstance(season_state, dict):
+        season_state = {}
+    if season_state.get(quest_definition['id']) is True:
+        return True
+
+    legacy_flag = str(config.get_setting(quest_definition['legacy_complete_key']) or 'False').lower() == 'true'
+    if legacy_flag:
+        season_state[quest_definition['id']] = True
+        state[season_key] = season_state
+        return True
+    return False
+
+
 def get_season_quest_updates():
     if not is_chat_response_enabled("season_quests_enabled"):
         return []
 
     tilt_totals, _ = get_tilt_season_stats()
-
-    quest_definitions = [
-        {
-            'target_key': 'season_quest_target_races',
-            'complete_key': 'season_quest_complete_races',
-            'value': get_int_setting('totalcountseason', 0),
-            'message': "🎯 Season Quest Complete: {name} finished {value:,} / {target:,} season races!"
-        },
-        {
-            'target_key': 'season_quest_target_points',
-            'complete_key': 'season_quest_complete_points',
-            'value': get_int_setting('totalpointsseason', 0),
-            'message': "🎯 Season Quest Complete: {name} earned {value:,} / {target:,} season points!"
-        },
-        {
-            'target_key': 'season_quest_target_race_hs',
-            'complete_key': 'season_quest_complete_race_hs',
-            'value': get_int_setting('race_hs_season', 0),
-            'message': "🎯 Season Quest Complete: {name} reached race high score {value:,} (target {target:,})!"
-        },
-        {
-            'target_key': 'season_quest_target_br_hs',
-            'complete_key': 'season_quest_complete_br_hs',
-            'value': get_int_setting('br_hs_season', 0),
-            'message': "🎯 Season Quest Complete: {name} reached BR high score {value:,} (target {target:,})!"
-        },
-        {
-            'target_key': 'season_quest_target_tilt_levels',
-            'complete_key': 'season_quest_complete_tilt_levels',
-            'value': tilt_totals['levels'],
-            'message': "🎯 Season Quest Complete: {name} participated in {value:,} / {target:,} tilt levels!"
-        },
-        {
-            'target_key': 'season_quest_target_tilt_tops',
-            'complete_key': 'season_quest_complete_tilt_tops',
-            'value': tilt_totals['top_tiltees'],
-            'message': "🎯 Season Quest Complete: {name} got {value:,} / {target:,} top-tiltee finishes!"
-        },
-        {
-            'target_key': 'season_quest_target_tilt_points',
-            'complete_key': 'season_quest_complete_tilt_points',
-            'value': tilt_totals['points'],
-            'message': "🎯 Season Quest Complete: {name} earned {value:,} / {target:,} tilt points!"
-        },
-    ]
+    value_map = _season_quest_value_map(tilt_totals)
+    completion_state = _load_season_quest_completion_state()
+    season_key = _get_season_scope_key()
 
     quest_messages = []
     completer_name = _get_season_quest_completer_name()
+    state_updated = False
 
-    for quest in quest_definitions:
+    for quest in SEASON_QUEST_DEFINITIONS:
         target_value = get_int_setting(quest['target_key'], 0)
-        already_complete = str(config.get_setting(quest['complete_key']) or 'False').lower() == 'true'
+        already_complete = _is_season_quest_complete(quest, season_key, completion_state)
 
         if target_value <= 0 or already_complete:
             continue
 
-        if quest['value'] >= target_value:
-            config.set_setting(quest['complete_key'], 'True', persistent=True)
-            quest_messages.append(quest['message'].format(name=completer_name, value=quest['value'], target=target_value))
+        current_value = value_map.get(quest['id'], 0)
+        if current_value >= target_value:
+            season_state = completion_state.setdefault(season_key, {})
+            if not isinstance(season_state, dict):
+                season_state = {}
+                completion_state[season_key] = season_state
+            season_state[quest['id']] = True
+            config.set_setting(quest['legacy_complete_key'], 'True', persistent=True)
+            quest_messages.append(quest['message'].format(name=completer_name, value=current_value, target=target_value))
+            state_updated = True
+
+    if state_updated:
+        _save_season_quest_completion_state(completion_state)
 
     return quest_messages
 
 
 def get_season_quest_targets():
     return {
-        'races': get_int_setting('season_quest_target_races', 0),
-        'points': get_int_setting('season_quest_target_points', 0),
-        'race_hs': get_int_setting('season_quest_target_race_hs', 0),
-        'br_hs': get_int_setting('season_quest_target_br_hs', 0),
-        'tilt_levels': get_int_setting('season_quest_target_tilt_levels', 0),
-        'tilt_tops': get_int_setting('season_quest_target_tilt_tops', 0),
-        'tilt_points': get_int_setting('season_quest_target_tilt_points', 0),
+        quest['id']: get_int_setting(quest['target_key'], 0)
+        for quest in SEASON_QUEST_DEFINITIONS
     }
+
+
+
+def _build_files_signature(file_paths):
+    signature_parts = []
+    for file_path in sorted(file_paths):
+        try:
+            stat = os.stat(file_path)
+            signature_parts.append((os.path.abspath(file_path), int(stat.st_mtime_ns), int(stat.st_size)))
+        except OSError:
+            continue
+    return tuple(signature_parts)
+
+
+def _load_csv_rows_with_detection(csv_path):
+    with open(csv_path, 'rb') as f:
+        raw_data = f.read()
+    result = chardet.detect(raw_data)
+    encoding = result['encoding'] if result['encoding'] else 'utf-8'
+    with open(csv_path, 'r', encoding=encoding, errors='ignore') as f:
+        for row in iter_csv_rows(f):
+            yield row
 
 
 def get_tilt_season_stats():
@@ -2307,99 +2480,124 @@ def get_tilt_season_stats():
     if not directory:
         return totals, user_stats
 
-    for tilt_results in glob.glob(os.path.join(directory, "tilts_*.csv")):
+    tilt_files = glob.glob(os.path.join(directory, "tilts_*.csv"))
+    signature = _build_files_signature(tilt_files)
+    if _tilt_season_stats_cache.get('signature') == signature:
+        return copy.deepcopy(_tilt_season_stats_cache.get('value'))
+
+    for tilt_results in tilt_files:
         try:
-            with open(tilt_results, 'rb') as f:
-                raw_data = f.read()
-            result = chardet.detect(raw_data)
-            encoding = result['encoding'] if result['encoding'] else 'utf-8'
+            for row in _load_csv_rows_with_detection(tilt_results):
+                detail = parse_tilt_result_detail(row)
+                if detail is None:
+                    continue
 
-            with open(tilt_results, 'r', encoding=encoding, errors='ignore') as f:
-                reader = csv.reader(f)
-                for row in reader:
-                    detail = parse_tilt_result_detail(row)
-                    if detail is None:
-                        continue
+                username = detail['username'].strip().lower()
+                if not username:
+                    continue
 
-                    username = detail['username'].strip().lower()
-                    if not username:
-                        continue
+                if username not in user_stats:
+                    user_stats[username] = {
+                        'display_name': detail['username'].strip() or username,
+                        'tilt_levels': 0,
+                        'tilt_top_tiltee': 0,
+                        'tilt_points': 0,
+                    }
 
-                    if username not in user_stats:
-                        user_stats[username] = {
-                            'display_name': detail['username'].strip() or username,
-                            'tilt_levels': 0,
-                            'tilt_top_tiltee': 0,
-                            'tilt_points': 0,
-                        }
+                user_stats[username]['tilt_levels'] += 1
+                user_stats[username]['tilt_points'] += detail['points']
+                totals['levels'] += 1
+                totals['points'] += detail['points']
 
-                    user_stats[username]['tilt_levels'] += 1
-                    user_stats[username]['tilt_points'] += detail['points']
-                    totals['levels'] += 1
-                    totals['points'] += detail['points']
-
-                    if detail['is_top_tiltee']:
-                        user_stats[username]['tilt_top_tiltee'] += 1
-                        totals['top_tiltees'] += 1
+                if detail['is_top_tiltee']:
+                    user_stats[username]['tilt_top_tiltee'] += 1
+                    totals['top_tiltees'] += 1
         except FileNotFoundError:
             continue
-        except Exception as e:
-            print(f"Error reading tilt stats from {tilt_results}: {e}")
+        except Exception:
+            logger.error("Error reading tilt stats from %s", tilt_results, exc_info=True)
 
+    _tilt_season_stats_cache['signature'] = signature
+    _tilt_season_stats_cache['value'] = (copy.deepcopy(totals), copy.deepcopy(user_stats))
     return totals, user_stats
 
 
 def get_user_season_stats():
     user_stats = {}
-    for allraces in glob.glob(os.path.join(config.get_setting('directory'), "allraces_*.csv")):
+    data_dir = config.get_setting('directory')
+    if not data_dir:
+        return {}
+
+    allraces_files = glob.glob(os.path.join(data_dir, "allraces_*.csv"))
+    tilt_files = glob.glob(os.path.join(data_dir, "tilts_*.csv"))
+    signature = (
+        _build_files_signature(allraces_files),
+        _build_files_signature(tilt_files),
+    )
+    if _user_season_stats_cache.get('signature') == signature:
+        return copy.deepcopy(_user_season_stats_cache.get('value'))
+
+    cutoff_30d = datetime.now(timezone.utc) - timedelta(days=30)
+
+    for allraces in allraces_files:
         try:
-            with open(allraces, 'rb') as f:
-                raw_data = f.read()
-            result = chardet.detect(raw_data)
-            encoding = result['encoding'] if result['encoding'] else 'utf-8'
+            for row in _load_csv_rows_with_detection(allraces):
+                if len(row) < 5:
+                    continue
+                username = row[1].strip().lower()
+                display_name = row[2].strip() if len(row) > 2 else username
+                if not username:
+                    continue
 
-            with open(allraces, 'r', encoding=encoding, errors='ignore') as f:
-                reader = csv.reader(f)
-                for row in reader:
-                    if len(row) < 5:
-                        continue
-                    username = row[1].strip().lower()
-                    display_name = row[2].strip() if len(row) > 2 else username
-                    if not username:
-                        continue
+                if username not in user_stats:
+                    user_stats[username] = {
+                        'display_name': display_name or username,
+                        'races': 0,
+                        'points': 0,
+                        'race_hs': 0,
+                        'br_hs': 0,
+                        'tilt_levels': 0,
+                        'tilt_top_tiltee': 0,
+                        'tilt_points': 0,
+                    }
 
-                    if username not in user_stats:
-                        user_stats[username] = {
-                            'display_name': display_name or username,
-                            'races': 0,
-                            'points': 0,
-                            'race_hs': 0,
-                            'br_hs': 0,
-                            'tilt_levels': 0,
-                            'tilt_top_tiltee': 0,
-                            'tilt_points': 0,
-                        }
+                if display_name:
+                    user_stats[username]['display_name'] = display_name
 
-                    if display_name:
-                        user_stats[username]['display_name'] = display_name
-
-                    user_stats[username]['races'] += 1
+                user_stats[username]['races'] += 1
+                row_timestamp = None
+                if row:
                     try:
-                        points = int(row[3])
-                    except (TypeError, ValueError):
-                        points = 0
+                        row_timestamp = parser.parse(str(row[0]).strip())
+                        if row_timestamp.tzinfo is None:
+                            row_timestamp = row_timestamp.replace(tzinfo=timezone.utc)
+                        else:
+                            row_timestamp = row_timestamp.astimezone(timezone.utc)
+                    except Exception:
+                        row_timestamp = None
 
-                    user_stats[username]['points'] += points
-                    mode = row[4].strip().lower()
-                    if mode == 'race' and points > user_stats[username]['race_hs']:
-                        user_stats[username]['race_hs'] = points
-                    elif mode == 'br' and points > user_stats[username]['br_hs']:
-                        user_stats[username]['br_hs'] = points
+                try:
+                    points = int(row[3])
+                except (TypeError, ValueError):
+                    points = 0
+
+                user_stats[username]['points'] += points
+                if row_timestamp is not None and row_timestamp >= cutoff_30d:
+                    user_stats[username].setdefault('recent_races_30d', 0)
+                    user_stats[username].setdefault('recent_points_30d', 0)
+                    user_stats[username]['recent_races_30d'] += 1
+                    user_stats[username]['recent_points_30d'] += points
+
+                mode = row[4].strip().lower()
+                if mode == 'race' and points > user_stats[username]['race_hs']:
+                    user_stats[username]['race_hs'] = points
+                elif mode == 'br' and points > user_stats[username]['br_hs']:
+                    user_stats[username]['br_hs'] = points
 
         except FileNotFoundError:
             continue
-        except Exception as e:
-            print(f"Error reading season stats from {allraces}: {e}")
+        except Exception:
+            logger.error("Error reading season stats from %s", allraces, exc_info=True)
 
     _, tilt_user_stats = get_tilt_season_stats()
     for username, tilt_stats in tilt_user_stats.items():
@@ -2422,6 +2620,12 @@ def get_user_season_stats():
         if not user_stats[username].get('display_name'):
             user_stats[username]['display_name'] = tilt_stats.get('display_name') or username
 
+    for stats in user_stats.values():
+        stats.setdefault('recent_races_30d', 0)
+        stats.setdefault('recent_points_30d', 0)
+
+    _user_season_stats_cache['signature'] = signature
+    _user_season_stats_cache['value'] = copy.deepcopy(user_stats)
     return user_stats
 
 
@@ -2446,14 +2650,18 @@ def get_user_quest_progress(username):
 
     targets = get_season_quest_targets()
     stats = user_stats[target_username]
+    stat_value_map = {
+        'races': stats['races'],
+        'points': stats['points'],
+        'race_hs': stats['race_hs'],
+        'br_hs': stats['br_hs'],
+        'tilt_levels': stats.get('tilt_levels', 0),
+        'tilt_tops': stats.get('tilt_top_tiltee', 0),
+        'tilt_points': stats.get('tilt_points', 0),
+    }
     quest_rows = [
-        ("Season Races", stats['races'], targets['races']),
-        ("Season Points", stats['points'], targets['points']),
-        ("Race High Score", stats['race_hs'], targets['race_hs']),
-        ("BR High Score", stats['br_hs'], targets['br_hs']),
-        ("Tilt Levels", stats['tilt_levels'], targets['tilt_levels']),
-        ("Top Tiltees", stats['tilt_top_tiltee'], targets['tilt_tops']),
-        ("Tilt Points", stats['tilt_points'], targets['tilt_points']),
+        (quest['label'], stat_value_map.get(quest['id'], 0), targets.get(quest['id'], 0))
+        for quest in SEASON_QUEST_DEFINITIONS
     ]
 
     completed = 0
@@ -2522,9 +2730,11 @@ def get_quest_completion_leaderboard(limit=100):
             'tilt_levels': stats.get('tilt_levels', 0),
             'tilt_top_tiltee': stats.get('tilt_top_tiltee', 0),
             'tilt_points': stats.get('tilt_points', 0),
+            'recent_points_30d': stats.get('recent_points_30d', 0),
+            'recent_races_30d': stats.get('recent_races_30d', 0),
         })
 
-    leaderboard.sort(key=lambda row: (row['completed'], row['points'], row['races']), reverse=True)
+    leaderboard.sort(key=lambda row: (row['completed'], (row['completed'] / row['active_quests']) if row['active_quests'] else 0.0, row.get('recent_points_30d', 0), row['points'], row['races']), reverse=True)
     return leaderboard[:limit]
 
 
@@ -2542,7 +2752,7 @@ def get_race_dashboard_leaderboard(limit=250):
             encoding = result['encoding'] if result['encoding'] else 'utf-8'
 
             with open(allraces, 'r', encoding=encoding, errors='ignore') as f:
-                reader = csv.reader(f)
+                reader = iter_csv_rows(f)
                 for row in reader:
                     if len(row) < 5:
                         continue
@@ -2586,7 +2796,7 @@ def get_race_dashboard_leaderboard(limit=250):
         except FileNotFoundError:
             continue
         except Exception as e:
-            print(f"Error reading race dashboard data from {allraces}: {e}")
+            logger.error("Error reading race dashboard data from %s", allraces, exc_info=True)
 
     leaderboard = []
     for row in stats_by_user.values():
@@ -2715,62 +2925,201 @@ def open_quest_completion_window(parent_window):
 
 
 def get_rival_settings():
+    min_races = get_int_setting('rivals_min_races', 50)
+    max_gap = get_int_setting('rivals_max_point_gap', 1500)
+    pair_count = get_int_setting('rivals_pair_count', 25)
+
     return {
-        'min_races': max(1, get_int_setting('rivals_min_races', 50)),
-        'max_point_gap': max(0, get_int_setting('rivals_max_point_gap', 1500)),
-        'pair_count': max(1, get_int_setting('rivals_pair_count', 25)),
+        'min_races': max(1, min(min_races, RIVALS_MAX_MIN_RACES)),
+        'max_point_gap': max(0, min(max_gap, RIVALS_MAX_POINT_GAP)),
+        'pair_count': max(1, min(pair_count, RIVALS_MAX_PAIRS)),
     }
 
 
+def _normalize_user_lookup(value):
+    clean = unicodedata.normalize('NFKC', str(value or ''))
+    clean = re.sub(r'\s+', ' ', clean.strip().lstrip('@')).lower()
+    return clean
+
+
 def resolve_user_in_stats(user_stats, username):
-    lookup = (username or '').strip().lstrip('@').lower()
+    lookup = _normalize_user_lookup(username)
     if not lookup:
         return None
     if lookup in user_stats:
         return lookup
+
+    matches = []
     for uname, stats in user_stats.items():
-        if stats.get('display_name', '').strip().lower() == lookup:
-            return uname
+        if _normalize_user_lookup(stats.get('display_name', '')) == lookup:
+            matches.append(uname)
+
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        return {'ambiguous': True, 'matches': matches[:5]}
     return None
 
 
-def get_global_rivalries(limit=None):
-    user_stats = get_user_season_stats()
-    settings = get_rival_settings()
+def _build_rivalry_row(user_a, stats_a, user_b, stats_b):
+    points_a = stats_a.get('points', 0)
+    points_b = stats_b.get('points', 0)
+    races_a = stats_a.get('races', 0)
+    races_b = stats_b.get('races', 0)
+    gap = abs(points_a - points_b)
+    ppr_a = (points_a / races_a) if races_a else 0.0
+    ppr_b = (points_b / races_b) if races_b else 0.0
+    ppr_gap = abs(ppr_a - ppr_b)
+    race_gap = abs(races_a - races_b)
+    recent_gap = abs(stats_a.get('recent_points_30d', 0) - stats_b.get('recent_points_30d', 0))
+    trend_delta = gap - recent_gap
+    rivalry_score = (100000 - gap) + (5000 - race_gap) + int(max(0, 500 - (ppr_gap * 100))) + int(max(0, trend_delta))
 
+    return {
+        'user_a': user_a,
+        'display_a': stats_a.get('display_name') or user_a,
+        'points_a': points_a,
+        'races_a': races_a,
+        'recent_points_a_30d': stats_a.get('recent_points_30d', 0),
+        'user_b': user_b,
+        'display_b': stats_b.get('display_name') or user_b,
+        'points_b': points_b,
+        'races_b': races_b,
+        'recent_points_b_30d': stats_b.get('recent_points_30d', 0),
+        'point_gap': gap,
+        'race_gap': race_gap,
+        'ppr_gap': round(ppr_gap, 4),
+        'recent_point_gap_30d': recent_gap,
+        'trend_delta_30d': trend_delta,
+        'trend_direction': 'closing' if trend_delta > 0 else ('widening' if trend_delta < 0 else 'steady'),
+        'rivalry_score': rivalry_score,
+    }
+
+
+def _get_rivals_matrix(user_stats, settings):
     qualified = [
         (username, stats) for username, stats in user_stats.items()
         if stats.get('races', 0) >= settings['min_races'] and stats.get('points', 0) > 0
     ]
+    qualified.sort(key=lambda row: row[1].get('points', 0))
 
     rivalries = []
-    for i in range(len(qualified)):
-        user_a, stats_a = qualified[i]
+    for i, (user_a, stats_a) in enumerate(qualified):
+        points_a = stats_a.get('points', 0)
         for j in range(i + 1, len(qualified)):
             user_b, stats_b = qualified[j]
-            gap = abs(stats_a['points'] - stats_b['points'])
-            if gap <= settings['max_point_gap']:
-                rivalries.append({
-                    'user_a': user_a,
-                    'display_a': stats_a.get('display_name') or user_a,
-                    'points_a': stats_a.get('points', 0),
-                    'races_a': stats_a.get('races', 0),
-                    'user_b': user_b,
-                    'display_b': stats_b.get('display_name') or user_b,
-                    'points_b': stats_b.get('points', 0),
-                    'races_b': stats_b.get('races', 0),
-                    'point_gap': gap,
-                })
+            gap = stats_b.get('points', 0) - points_a
+            if gap > settings['max_point_gap']:
+                break
+            rivalries.append(_build_rivalry_row(user_a, stats_a, user_b, stats_b))
 
-    rivalries.sort(key=lambda row: (row['point_gap'], -(row['points_a'] + row['points_b'])))
+    rivalries.sort(key=lambda row: (row['point_gap'], -row['rivalry_score'], -(row['points_a'] + row['points_b'])))
+
+    by_user = defaultdict(list)
+    for row in rivalries:
+        by_user[row['user_a']].append({
+            'username': row['user_b'],
+            'display_name': row['display_b'],
+            'points': row['points_b'],
+            'races': row['races_b'],
+            'point_gap': row['point_gap'],
+            'rivalry_score': row['rivalry_score'],
+            'trend_direction': row['trend_direction'],
+            'recent_point_gap_30d': row['recent_point_gap_30d'],
+        })
+        by_user[row['user_b']].append({
+            'username': row['user_a'],
+            'display_name': row['display_a'],
+            'points': row['points_a'],
+            'races': row['races_a'],
+            'point_gap': row['point_gap'],
+            'rivalry_score': row['rivalry_score'],
+            'trend_direction': row['trend_direction'],
+            'recent_point_gap_30d': row['recent_point_gap_30d'],
+        })
+
+    for user_key in by_user:
+        by_user[user_key].sort(key=lambda row: (row['point_gap'], -row['rivalry_score'], -row['points']))
+
+    return {
+        'qualified_count': len(qualified),
+        'rivalries': rivalries,
+        'by_user': by_user,
+    }
+
+
+def _season_stats_fingerprint(user_stats):
+    players = len(user_stats)
+    races_total = sum(int(row.get('races', 0)) for row in user_stats.values())
+    points_total = sum(int(row.get('points', 0)) for row in user_stats.values())
+    recent_total = sum(int(row.get('recent_points_30d', 0)) for row in user_stats.values())
+    return (players, races_total, points_total, recent_total)
+
+
+def get_rivals_payload(user_stats=None, settings=None):
+    user_stats = user_stats or get_user_season_stats()
+    settings = settings or get_rival_settings()
+    key = (_season_stats_fingerprint(user_stats), settings['min_races'], settings['max_point_gap'], settings['pair_count'])
+
+    now_ts = time.time()
+    if _rivals_cache.get('payload') is not None and _rivals_cache.get('key') == key:
+        if (now_ts - float(_rivals_cache.get('created_at', 0.0))) <= RIVALS_CACHE_TTL_S:
+            return _rivals_cache['payload']
+
+    payload = _get_rivals_matrix(user_stats, settings)
+    _rivals_cache['created_at'] = now_ts
+    _rivals_cache['key'] = key
+    _rivals_cache['payload'] = payload
+    return payload
+
+
+def _track_rivals_metric(metric_name):
+    _rivals_command_metrics[metric_name] += 1
+
+
+def _is_rivals_command_on_cooldown(author_name):
+    now_ts = time.time()
+    if (now_ts - _rivals_cooldown_state.get('global_ts', 0.0)) < RIVALS_GLOBAL_COOLDOWN_S:
+        return True
+
+    key = _normalize_user_lookup(author_name) or 'unknown'
+    user_last = _rivals_cooldown_state['user_ts'].get(key, 0.0)
+    if (now_ts - user_last) < RIVALS_USER_COOLDOWN_S:
+        return True
+
+    _rivals_cooldown_state['global_ts'] = now_ts
+    _rivals_cooldown_state['user_ts'][key] = now_ts
+    return False
+
+
+def _resolve_user_or_error(user_stats, username):
+    user_key = resolve_user_in_stats(user_stats, username)
+    if isinstance(user_key, dict) and user_key.get('ambiguous'):
+        sample = ', '.join(format_user_tag(name) for name in user_key.get('matches', [])[:3])
+        return None, f"{format_user_tag(username)} matches multiple users ({sample}). Use exact @handle."
+    if user_key is None:
+        return None, f"Could not find {format_user_tag(username)} in season stats. Try exact @handle."
+    return user_key, None
+
+
+def get_global_rivalries(limit=None):
+    settings = get_rival_settings()
+    payload = get_rivals_payload(settings=settings)
     cap = limit if limit is not None else settings['pair_count']
-    return rivalries[:cap]
+    cap = max(1, min(int(cap), RIVALS_MAX_PAIRS))
+    return payload['rivalries'][:cap]
 
 
 def get_user_rivals(username, limit=5):
     user_stats = get_user_season_stats()
     settings = get_rival_settings()
     user_key = resolve_user_in_stats(user_stats, username)
+
+    if isinstance(user_key, dict) and user_key.get('ambiguous'):
+        return {
+            'ambiguous': True,
+            'matches': user_key.get('matches', []),
+        }
 
     if user_key is None:
         return None
@@ -2786,41 +3135,23 @@ def get_user_rivals(username, limit=5):
             'rivals': [],
         }
 
-    rivals = []
-    for other_key, other_stats in user_stats.items():
-        if other_key == user_key:
-            continue
-        if other_stats.get('races', 0) < settings['min_races']:
-            continue
-        if other_stats.get('points', 0) <= 0:
-            continue
-
-        gap = abs(base.get('points', 0) - other_stats.get('points', 0))
-        if gap > settings['max_point_gap']:
-            continue
-
-        rivals.append({
-            'username': other_key,
-            'display_name': other_stats.get('display_name') or other_key,
-            'points': other_stats.get('points', 0),
-            'races': other_stats.get('races', 0),
-            'point_gap': gap,
-        })
-
-    rivals.sort(key=lambda row: (row['point_gap'], -row['points']))
+    payload = get_rivals_payload(user_stats=user_stats, settings=settings)
+    rivals = payload['by_user'].get(user_key, [])
+    limit = max(1, min(int(limit), RIVALS_MAX_USER_RESULTS))
 
     return {
         'user': user_key,
         'display_name': base.get('display_name') or user_key,
         'races': base.get('races', 0),
         'points': base.get('points', 0),
+        'recent_points_30d': base.get('recent_points_30d', 0),
         'min_races_required': settings['min_races'],
         'rivals': rivals[:limit],
     }
 
 
 def open_rivalries_window(parent_window):
-    rivalries = get_global_rivalries(limit=200)
+    rivalries = get_global_rivalries(limit=RIVALS_MAX_PAIRS)
     if not rivalries:
         messagebox.showinfo("Rivals", "No rivalries found with current settings.")
         return
@@ -2878,6 +3209,42 @@ def open_rivalries_window(parent_window):
 MYCYCLE_FILE_NAME = "mycycle_data.json"
 MYCYCLE_SESSION_PREFIX = "season_"
 MYCYCLE_LOCK = threading.Lock()
+MYCYCLE_SCHEMA_VERSION = 2
+MYCYCLE_HISTORY_MAX = 50
+MYCYCLE_SAVE_RETRIES = 3
+MYCYCLE_SAVE_RETRY_DELAY_S = 0.15
+
+_dashboard_main_cache = {'value': None, 'created_at': 0.0}
+_dashboard_main_cache_ttl_s = 5.0
+_mycycle_aggregate_cache = {}
+_tilt_season_stats_cache = {'signature': None, 'value': ({'levels': 0, 'top_tiltees': 0, 'points': 0}, {})}
+_user_season_stats_cache = {'signature': None, 'value': {}}
+
+RIVALS_MAX_PAIRS = 200
+RIVALS_MAX_MIN_RACES = 10000
+RIVALS_MAX_POINT_GAP = 50000
+RIVALS_MAX_USER_RESULTS = 10
+RIVALS_CACHE_TTL_S = 8.0
+
+_rivals_cache = {
+    'created_at': 0.0,
+    'key': None,
+    'payload': None,
+}
+_rivals_command_metrics = defaultdict(int)
+_rivals_cooldown_state = {
+    'global_ts': 0.0,
+    'user_ts': {},
+}
+RIVALS_GLOBAL_COOLDOWN_S = 0.75
+RIVALS_USER_COOLDOWN_S = 5.0
+
+
+def _invalidate_dashboard_cache():
+    _dashboard_main_cache['value'] = None
+    _dashboard_main_cache['created_at'] = 0.0
+    _tilt_season_stats_cache['signature'] = None
+    _user_season_stats_cache['signature'] = None
 
 
 def _mycycle_file_path():
@@ -2887,6 +3254,57 @@ def _mycycle_file_path():
 
 def _empty_placement_counts(min_place, max_place):
     return {str(i): 0 for i in range(min_place, max_place + 1)}
+
+
+def _normalize_mycycle_username(value):
+    return (value or '').strip().lower().lstrip('@')
+
+
+def _mycycle_leaderboard_sort_key(row):
+    cycles = int(row.get('cycles_completed', 0) or 0)
+    progress_hits = int(row.get('progress_hits', 0) or 0)
+    total_races = int(row.get('total_races', 0) or 0)
+    current_cycle_races = int(row.get('current_cycle_races', 0) or 0)
+    avg = (total_races / max(1, cycles)) if cycles else float('inf')
+    return (-cycles, -progress_hits, avg, current_cycle_races, total_races)
+
+
+def _mycycle_now_iso(value=None):
+    timestamp = value or get_internal_adjusted_time()
+    return timestamp.replace(microsecond=0).isoformat()
+
+
+def _mycycle_now_iso_utc():
+    try:
+        _, _, _, adjusted_time = time_manager.get_adjusted_time()
+        if adjusted_time is not None:
+            return _mycycle_now_iso(adjusted_time)
+    except Exception:
+        logger.error("Falling back to system time for MyCycle timestamp generation.", exc_info=True)
+    return _mycycle_now_iso(get_internal_adjusted_time())
+
+
+def _parse_mycycle_timestamp(value):
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+
+    text = str(value).strip()
+    if not text:
+        return None
+
+    for fmt in ('%Y-%m-%d %H:%M:%S',):
+        try:
+            return datetime.strptime(text, fmt)
+        except (TypeError, ValueError):
+            continue
+
+    try:
+        normalized = text.replace('Z', '+00:00')
+        return datetime.fromisoformat(normalized)
+    except (TypeError, ValueError):
+        return None
 
 
 def get_mycycle_settings():
@@ -2908,13 +3326,69 @@ def load_mycycle_data():
     try:
         with open(path, 'r', encoding='utf-8') as f:
             data = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        data = {'version': 1, 'sessions': {}}
+    except FileNotFoundError:
+        data = {'version': MYCYCLE_SCHEMA_VERSION, 'sessions': {}}
+    except json.JSONDecodeError:
+        try:
+            backup_path = f"{path}.corrupt.{int(time.time())}.bak"
+            os.replace(path, backup_path)
+            logger.error("MyCycle data was corrupted and has been moved to backup: %s", backup_path)
+        except Exception:
+            logger.error("MyCycle data was corrupted and could not be backed up.", exc_info=True)
+        data = {'version': MYCYCLE_SCHEMA_VERSION, 'sessions': {}}
 
     if not isinstance(data, dict):
-        data = {'version': 1, 'sessions': {}}
-    data.setdefault('version', 1)
+        data = {'version': MYCYCLE_SCHEMA_VERSION, 'sessions': {}}
+    changed = False
+    if data.get('version') != MYCYCLE_SCHEMA_VERSION:
+        changed = True
+    data.setdefault('version', MYCYCLE_SCHEMA_VERSION)
     data.setdefault('sessions', {})
+
+    sessions = data.get('sessions', {}) if isinstance(data.get('sessions', {}), dict) else {}
+    data['sessions'] = sessions
+    for sid, session in list(sessions.items()):
+        if not isinstance(session, dict):
+            sessions[sid] = {'id': sid, 'name': str(sid), 'active': True, 'is_default': False, 'stats': {}}
+            session = sessions[sid]
+            changed = True
+
+        session.setdefault('id', sid)
+        session.setdefault('name', str(sid))
+        session.setdefault('active', True)
+        session.setdefault('is_default', False)
+        if 'stats' not in session and isinstance(session.get('users'), dict):
+            session['stats'] = session.get('users', {})
+            changed = True
+        stats = session.setdefault('stats', {})
+        if not isinstance(stats, dict):
+            session['stats'] = {}
+            stats = session['stats']
+            changed = True
+
+        normalized = {}
+        for username, record in list(stats.items()):
+            uname = _normalize_mycycle_username(username)
+            if not uname:
+                changed = True
+                continue
+            if not isinstance(record, dict):
+                record = {}
+                changed = True
+            record.setdefault('display_name', uname)
+            record.setdefault('history', [])
+            if 'cycle_history' in record and not record.get('history'):
+                record['history'] = record.get('cycle_history')
+                changed = True
+            normalized[uname] = record
+            if uname != username:
+                changed = True
+        if normalized != stats:
+            session['stats'] = normalized
+            changed = True
+
+    data['version'] = MYCYCLE_SCHEMA_VERSION
+    data['_changed'] = changed
     return data
 
 
@@ -2922,16 +3396,26 @@ def save_mycycle_data(data):
     path = _mycycle_file_path()
     os.makedirs(os.path.dirname(path), exist_ok=True)
     temp_file = f"{path}.tmp"
+    payload = dict(data or {})
+    payload.pop('_changed', None)
     with open(temp_file, 'w', encoding='utf-8') as f:
-        json.dump(data, f, indent=2)
-    os.replace(temp_file, path)
+        json.dump(payload, f, indent=2)
+    for attempt in range(MYCYCLE_SAVE_RETRIES):
+        try:
+            os.replace(temp_file, path)
+            return
+        except OSError:
+            if attempt >= MYCYCLE_SAVE_RETRIES - 1:
+                raise
+            time.sleep(MYCYCLE_SAVE_RETRY_DELAY_S)
 
 
 def ensure_default_mycycle_session(data):
     season = str(config.get_setting('season') or 'unknown')
     session_id = f"{MYCYCLE_SESSION_PREFIX}{season}"
-    now_text = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    now_text = _mycycle_now_iso_utc()
     sessions = data.setdefault('sessions', {})
+    changed = False
     if session_id not in sessions:
         sessions[session_id] = {
             'id': session_id,
@@ -2943,27 +3427,27 @@ def ensure_default_mycycle_session(data):
             'created_by': 'system',
             'stats': {},
         }
+        changed = True
 
     primary_session_id = config.get_setting('mycycle_primary_session_id')
     if (not primary_session_id or
             (str(primary_session_id).startswith(MYCYCLE_SESSION_PREFIX) and primary_session_id != session_id)):
         config.set_setting('mycycle_primary_session_id', session_id, persistent=True)
-    return session_id
+    return session_id, changed
 
 
 def get_mycycle_sessions(include_inactive=True):
     with MYCYCLE_LOCK:
         data = load_mycycle_data()
-        default_id = ensure_default_mycycle_session(data)
-        save_mycycle_data(data)
+        migrated = bool(data.pop('_changed', False))
+        default_id, changed = ensure_default_mycycle_session(data)
+        if changed or migrated:
+            save_mycycle_data(data)
     sessions = list(data.get('sessions', {}).values())
 
     def _session_sort_key(session):
         created_at = session.get('created_at') or ""
-        try:
-            created_dt = datetime.strptime(created_at, '%Y-%m-%d %H:%M:%S')
-        except (TypeError, ValueError):
-            created_dt = datetime.min
+        created_dt = _parse_mycycle_timestamp(created_at) or datetime.min
         return created_dt
 
     sessions.sort(key=_session_sort_key, reverse=True)
@@ -2991,8 +3475,9 @@ def _get_mycycle_home_session_ids():
 def create_mycycle_session(session_name, created_by='streamer'):
     with MYCYCLE_LOCK:
         data = load_mycycle_data()
-        ensure_default_mycycle_session(data)
-        now_text = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        _ = data.pop('_changed', False)
+        _, _ = ensure_default_mycycle_session(data)
+        now_text = _mycycle_now_iso_utc()
         season = str(config.get_setting('season') or 'unknown')
         session_id = f"custom_{uuid.uuid4().hex[:8]}"
         data['sessions'][session_id] = {
@@ -3006,12 +3491,14 @@ def create_mycycle_session(session_name, created_by='streamer'):
             'stats': {},
         }
         save_mycycle_data(data)
+        _invalidate_dashboard_cache()
     return session_id
 
 
 def delete_mycycle_session(session_id):
     with MYCYCLE_LOCK:
         data = load_mycycle_data()
+        _ = data.pop('_changed', False)
         target = data.get('sessions', {}).get(session_id)
         if not target:
             return False, "Session not found."
@@ -3022,10 +3509,11 @@ def delete_mycycle_session(session_id):
 
         primary_session_id = config.get_setting('mycycle_primary_session_id')
         if primary_session_id == session_id:
-            fallback_id = ensure_default_mycycle_session(data)
+            fallback_id, _ = ensure_default_mycycle_session(data)
             config.set_setting('mycycle_primary_session_id', fallback_id, persistent=True)
 
         save_mycycle_data(data)
+        _invalidate_dashboard_cache()
     return True, "Deleted"
 
 
@@ -3033,12 +3521,13 @@ def _resolve_session_id(data):
     primary_id = config.get_setting('mycycle_primary_session_id')
     sessions = data.get('sessions', {})
     if primary_id and primary_id in sessions:
-        return primary_id
-    return ensure_default_mycycle_session(data)
+        return primary_id, False
+    fallback_id, changed = ensure_default_mycycle_session(data)
+    return fallback_id, changed
 
 
 def _resolve_user_in_session(session_stats, username):
-    lookup = (username or '').strip().lower().lstrip('@')
+    lookup = _normalize_mycycle_username(username)
     if not lookup:
         return None
     if lookup in session_stats:
@@ -3059,11 +3548,16 @@ def _ensure_user_cycle_record(session, username, display_name, min_place, max_pl
             'current_hits': [],
             'cycles_completed': 0,
             'total_races': 0,
+            'race_races': 0,
+            'br_races': 0,
             'current_cycle_races': 0,
+            'current_cycle_race_races': 0,
+            'current_cycle_br_races': 0,
             'last_cycle_races': 0,
             'fastest_cycle_races': 0,
             'slowest_cycle_races': 0,
             'last_cycle_completed_at': None,
+            'history': [],
         }
         stats[username] = user_record
 
@@ -3073,11 +3567,16 @@ def _ensure_user_cycle_record(session, username, display_name, min_place, max_pl
     user_record.setdefault('current_hits', [])
     user_record.setdefault('cycles_completed', 0)
     user_record.setdefault('total_races', 0)
+    user_record.setdefault('race_races', 0)
+    user_record.setdefault('br_races', 0)
     user_record.setdefault('current_cycle_races', 0)
+    user_record.setdefault('current_cycle_race_races', 0)
+    user_record.setdefault('current_cycle_br_races', 0)
     user_record.setdefault('last_cycle_races', 0)
     user_record.setdefault('fastest_cycle_races', 0)
     user_record.setdefault('slowest_cycle_races', 0)
     user_record.setdefault('last_cycle_completed_at', None)
+    user_record.setdefault('history', [])
 
     if display_name:
         user_record['display_name'] = display_name
@@ -3092,12 +3591,16 @@ def update_mycycle_with_race_rows(racedata):
     completion_events = []
     with MYCYCLE_LOCK:
         data = load_mycycle_data()
-        ensure_default_mycycle_session(data)
-        session_id = _resolve_session_id(data)
+        migrated = bool(data.pop('_changed', False))
+        _, changed = ensure_default_mycycle_session(data)
+        changed = changed or migrated
+        session_id, resolved_changed = _resolve_session_id(data)
+        changed = changed or resolved_changed
         session = data.get('sessions', {}).get(session_id)
 
         if session is None or not session.get('active', True):
-            save_mycycle_data(data)
+            if changed:
+                save_mycycle_data(data)
             return completion_events
 
         for row in racedata:
@@ -3107,7 +3610,7 @@ def update_mycycle_with_race_rows(racedata):
             if race_type != 'Race' and not (settings['include_br'] and race_type == 'BR'):
                 continue
 
-            username = (row[1] or '').strip().lower()
+            username = _normalize_mycycle_username(row[1] if len(row) > 1 else '')
             if not username:
                 continue
 
@@ -3121,6 +3624,12 @@ def update_mycycle_with_race_rows(racedata):
 
             user_record['total_races'] += 1
             user_record['current_cycle_races'] += 1
+            if race_type == 'BR':
+                user_record['br_races'] += 1
+                user_record['current_cycle_br_races'] += 1
+            else:
+                user_record['race_races'] += 1
+                user_record['current_cycle_race_races'] += 1
 
             if placement < settings['min_place'] or placement > settings['max_place']:
                 continue
@@ -3142,7 +3651,16 @@ def update_mycycle_with_race_rows(racedata):
                     user_record['fastest_cycle_races'] = completed_in_races
                 if slowest <= 0 or completed_in_races > slowest:
                     user_record['slowest_cycle_races'] = completed_in_races
-                user_record['last_cycle_completed_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                user_record['last_cycle_completed_at'] = _mycycle_now_iso_utc()
+                history = user_record.get('history') if isinstance(user_record.get('history'), list) else []
+                history.append({
+                    'completed_at': user_record['last_cycle_completed_at'],
+                    'races_used': completed_in_races,
+                    'race_races': int(user_record.get('current_cycle_race_races', 0) or 0),
+                    'br_races': int(user_record.get('current_cycle_br_races', 0) or 0),
+                    'session_id': session.get('id'),
+                })
+                user_record['history'] = history[-MYCYCLE_HISTORY_MAX:]
                 completion_events.append({
                     'session_name': session.get('name', 'Unknown Session'),
                     'username': username,
@@ -3152,16 +3670,25 @@ def update_mycycle_with_race_rows(racedata):
                 })
                 user_record['current_hits'] = []
                 user_record['current_cycle_races'] = 0
+                user_record['current_cycle_race_races'] = 0
+                user_record['current_cycle_br_races'] = 0
 
         save_mycycle_data(data)
+        _invalidate_dashboard_cache()
     return completion_events
 
 
 def get_mycycle_progress(username=None, session_id=None):
     with MYCYCLE_LOCK:
         data = load_mycycle_data()
-        resolved_session_id = session_id if session_id in data.get('sessions', {}) else _resolve_session_id(data)
-        save_mycycle_data(data)
+        migrated = bool(data.pop('_changed', False))
+        changed = False
+        if session_id in data.get('sessions', {}):
+            resolved_session_id = session_id
+        else:
+            resolved_session_id, changed = _resolve_session_id(data)
+        if changed or migrated:
+            save_mycycle_data(data)
 
     session = data['sessions'].get(resolved_session_id, {})
     stats = session.get('stats', {})
@@ -3189,6 +3716,8 @@ def get_mycycle_leaderboard(limit=200, session_id=None):
         marks_top, marks_bottom = _format_mycycle_placement_marks(hits, placement_range)
         progress_total = settings['max_place'] - settings['min_place'] + 1
         progress_hits = len(hits)
+        completed_at = row.get('last_cycle_completed_at')
+        completed_dt = _parse_mycycle_timestamp(completed_at)
         leaderboard.append({
             'username': username,
             'display_name': row.get('display_name') or username,
@@ -3201,18 +3730,56 @@ def get_mycycle_leaderboard(limit=200, session_id=None):
             'placement_hits': sorted(hits),
             'missing_places': missing_places,
             'current_cycle_races': int(row.get('current_cycle_races', 0)),
+            'current_cycle_race_races': int(row.get('current_cycle_race_races', 0)),
+            'current_cycle_br_races': int(row.get('current_cycle_br_races', 0)),
             'last_cycle_races': int(row.get('last_cycle_races', 0)),
-            'last_cycle_completed_at': row.get('last_cycle_completed_at'),
+            'total_races': int(row.get('total_races', 0)),
+            'race_races': int(row.get('race_races', 0)),
+            'br_races': int(row.get('br_races', 0)),
+            'last_cycle_completed_at': completed_at,
+            'last_cycle_completed_at_iso': completed_dt.isoformat() if completed_dt else None,
+            'last_cycle_completed_at_epoch': int(completed_dt.timestamp()) if completed_dt else None,
         })
-    leaderboard.sort(key=lambda r: (-r['cycles_completed'], -r['progress_hits'], r['current_cycle_races']))
+    leaderboard.sort(key=_mycycle_leaderboard_sort_key)
     return session, leaderboard[:limit]
+
+
+def get_next_mycycle_candidates(limit=10, session_id=None):
+    session, leaderboard = get_mycycle_leaderboard(limit=5000, session_id=session_id)
+    candidates = []
+
+    for row in leaderboard:
+        missing_places = list(row.get('missing_places', []))
+        if not missing_places:
+            continue
+
+        candidates.append({
+            'display_name': row.get('display_name') or row.get('username') or 'Unknown',
+            'next_cycle_number': int(row.get('cycles_completed', 0) or 0) + 1,
+            'missing_positions': missing_places,
+            'missing_count': len(missing_places),
+            'current_cycle_races': int(row.get('current_cycle_races', 0) or 0),
+            'progress_hits': int(row.get('progress_hits', 0) or 0),
+        })
+
+    candidates.sort(
+        key=lambda row: (
+            row['missing_count'],
+            -row['current_cycle_races'],
+            -row['progress_hits'],
+            row['display_name'].lower(),
+        )
+    )
+    return session, candidates[:max(1, limit)]
 
 
 def get_mycycle_cycle_stats(session_query=None):
     with MYCYCLE_LOCK:
         data = load_mycycle_data()
-        default_id = ensure_default_mycycle_session(data)
-        save_mycycle_data(data)
+        migrated = bool(data.pop('_changed', False))
+        default_id, changed = ensure_default_mycycle_session(data)
+        if changed or migrated:
+            save_mycycle_data(data)
 
     sessions = data.get('sessions', {})
     selected_session_ids = []
@@ -3490,6 +4057,7 @@ async def send_chat_message(channel, message, category=None, apply_delay=False):
 
     try:
         await channel.send(translate_chat_message(message))
+        logger.info("Chat message sent (category=%s)", category)
         return True
     except Exception as e:
         logger.exception(f"Failed to send chat message ({category}): {e}")
@@ -3638,7 +4206,7 @@ def _get_redirect_uri():
 
 # Function to start Flask server
 def _load_overlay_server_port(default_port=5000):
-    settings_path = 'settings.txt'
+    settings_path = SETTINGS_FILE_PATH
     try:
         with open(settings_path, 'r', encoding='utf-8', errors='ignore') as settings_file:
             for raw_line in settings_file:
@@ -3674,6 +4242,24 @@ def _safe_int(value):
         return 0
 
 
+def normalize_overlay_mode(value):
+    mode = str(value or '').strip().lower()
+    if mode in ('pre-game', 'race', 'br', 'tilt', 'post-race'):
+        return mode
+    return 'race'
+
+
+def set_overlay_mode(mode):
+    config.set_setting('overlay_active_mode', normalize_overlay_mode(mode), persistent=False)
+
+
+def get_overlay_mode():
+    current_run_id = str(config.get_setting('tilt_current_run_id') or '').strip()
+    if current_run_id:
+        return 'tilt'
+    return normalize_overlay_mode(config.get_setting('overlay_active_mode'))
+
+
 def _is_first_place_row(row):
     if not row:
         return False
@@ -3691,7 +4277,7 @@ def _build_overlay_header_stats(data_dir):
     for allraces in glob.glob(os.path.join(data_dir, "allraces_*.csv")):
         try:
             with open(allraces, 'r', encoding='utf-8', errors='ignore') as f:
-                for row in csv.reader(f):
+                for row in iter_csv_rows(f):
                     if len(row) < 5:
                         continue
                     racer = (row[2] or '').strip() or (row[1] or '').strip()
@@ -3713,11 +4299,15 @@ def _build_overlay_header_stats(data_dir):
     today_entries = 0
     today_races = 0
     today_unique = set()
+    today_br_points = 0
+    today_br_entries = 0
+    today_br_unique = set()
+    today_brs = 0
     today_file = config.get_setting('allraces_file')
     if today_file:
         try:
             with open(today_file, 'r', encoding='utf-8', errors='ignore') as f:
-                for row in csv.reader(f):
+                for row in iter_csv_rows(f):
                     if len(row) < 5:
                         continue
                     racer = (row[2] or '').strip() or (row[1] or '').strip()
@@ -3728,10 +4318,17 @@ def _build_overlay_header_stats(data_dir):
                         continue
                     if not racer:
                         continue
+                    race_mode = str(row[4] or '').strip().lower()
                     today_points += points
                     today_entries += 1
                     if _is_first_place_row(row):
                         today_races += 1
+                    if race_mode == 'br':
+                        today_br_points += points
+                        today_br_entries += 1
+                        today_br_unique.add(racer.lower())
+                        if _is_first_place_row(row):
+                            today_brs += 1
         except Exception:
             pass
 
@@ -3742,6 +4339,9 @@ def _build_overlay_header_stats(data_dir):
         'unique_racers_season': len(season_unique),
         'total_races_today': today_races,
         'total_races_season': season_races,
+        'br_avg_points_today': round((today_br_points / today_br_entries), 2) if today_br_entries else 0,
+        'br_racers_today': len(today_br_unique),
+        'total_brs_today': today_brs,
     }
 
 
@@ -3755,6 +4355,18 @@ def _build_overlay_settings_payload():
         'show_medals': str(config.get_setting('overlay_show_medals') or 'True'),
         'compact_rows': str(config.get_setting('overlay_compact_rows') or 'False'),
         'horizontal_layout': str(config.get_setting('overlay_horizontal_layout') or 'False'),
+        'horizontal_feed_season': str(config.get_setting('overlay_horizontal_feed_season') or 'True'),
+        'horizontal_feed_today': str(config.get_setting('overlay_horizontal_feed_today') or 'True'),
+        'horizontal_feed_races_season': str(config.get_setting('overlay_horizontal_feed_races_season') or 'True'),
+        'horizontal_feed_brs_season': str(config.get_setting('overlay_horizontal_feed_brs_season') or 'True'),
+        'horizontal_feed_races_today': str(config.get_setting('overlay_horizontal_feed_races_today') or 'True'),
+        'horizontal_feed_brs_today': str(config.get_setting('overlay_horizontal_feed_brs_today') or 'True'),
+        'horizontal_feed_previous_race': str(config.get_setting('overlay_horizontal_feed_previous_race') or 'True'),
+        'horizontal_feed_events': str(config.get_setting('overlay_horizontal_feed_events') or 'True'),
+        'horizontal_feed_tilt_current': str(config.get_setting('overlay_horizontal_feed_tilt_current') or 'True'),
+        'horizontal_feed_tilt_today': str(config.get_setting('overlay_horizontal_feed_tilt_today') or 'True'),
+        'horizontal_feed_tilt_season': str(config.get_setting('overlay_horizontal_feed_tilt_season') or 'True'),
+        'horizontal_feed_tilt_last_run': str(config.get_setting('overlay_horizontal_feed_tilt_last_run') or 'True'),
         'tilt_theme': (config.get_setting('tilt_overlay_theme') or config.get_setting('overlay_theme') or 'midnight').strip().lower(),
         'tilt_scroll_step_px': _safe_int(config.get_setting('tilt_scroll_step_px') or 1) or 1,
         'tilt_scroll_interval_ms': _safe_int(config.get_setting('tilt_scroll_interval_ms') or 40) or 40,
@@ -3793,11 +4405,12 @@ def _parse_overlay_timestamp(value):
 
 def _overlay_now_for_timestamp(race_time):
     """Return a comparable now() for naive or timezone-aware timestamps."""
+    internal_now = get_internal_adjusted_time()
     if race_time is None:
-        return datetime.now()
+        return internal_now
     if race_time.tzinfo is None:
-        return datetime.now()
-    return datetime.now(race_time.tzinfo)
+        return internal_now.replace(tzinfo=None)
+    return internal_now.astimezone(race_time.tzinfo)
 
 
 def _overlay_display_name(*candidates):
@@ -3825,7 +4438,7 @@ def _overlay_points_top10_filtered(file_paths, race_type_filter=None):
             continue
         try:
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                for row in csv.reader(f):
+                for row in iter_csv_rows(f):
                     if len(row) < 5:
                         continue
                     race_type = (row[4] or '').strip().lower() if len(row) >= 5 else ''
@@ -3860,7 +4473,7 @@ def _overlay_event_log():
 
 
 def enqueue_overlay_event(event_type, message):
-    now_iso = datetime.now().isoformat(timespec='seconds')
+    now_iso = get_internal_now_iso(timespec='seconds')
     next_id = _safe_int(config.get_setting('overlay_event_counter') or 0) + 1
     config.set_setting('overlay_event_counter', str(next_id), persistent=False)
 
@@ -3911,7 +4524,7 @@ def _overlay_recent_race_payload(race_file):
 
     try:
         with open(race_file, 'r', encoding='utf-8', errors='ignore') as f:
-            for row in csv.reader(f):
+            for row in iter_csv_rows(f):
                 if len(row) < 4:
                     continue
 
@@ -3996,7 +4609,7 @@ def _overlay_recent_race_payload(race_file):
             is_recent = False
     elif os.path.isfile(race_file):
         try:
-            is_recent = (datetime.now() - datetime.fromtimestamp(os.path.getmtime(race_file))).total_seconds() <= 600
+            is_recent = (_overlay_now_for_timestamp(None) - datetime.fromtimestamp(os.path.getmtime(race_file))).total_seconds() <= 600
         except Exception:
             is_recent = False
 
@@ -4075,7 +4688,7 @@ def _build_overlay_top3_payload():
         })
 
     return {
-        'updated_at': datetime.now().isoformat(timespec='seconds'),
+        'updated_at': get_internal_now_iso(timespec='seconds'),
         'title': 'MyStats Live Results',
         'views': views,
         'recent_race_top3': {
@@ -4084,6 +4697,7 @@ def _build_overlay_top3_payload():
             'race_key': recent_race['race_key'],
             'race_type': recent_race['race_type'],
             'race_timestamp': recent_race['race_timestamp'],
+            'is_recent': recent_race['is_recent'],
             'is_record_race': recent_race['is_record_race'],
             'record_holder_name': recent_race['record_holder_name'],
             'record_delta_seconds': recent_race['record_delta_seconds'],
@@ -4111,6 +4725,58 @@ def _build_tilt_overlay_payload():
     if not isinstance(run_ledger, dict):
         run_ledger = {}
 
+    run_deaths_ledger = parse_json_setting('tilt_run_deaths_ledger', {})
+    if not isinstance(run_deaths_ledger, dict):
+        run_deaths_ledger = {}
+
+    def build_tilt_today_standings():
+        directory = config.get_setting('directory')
+        if not directory:
+            return []
+
+        todays_file = os.path.join(directory, f"tilts_{get_internal_adjusted_time().strftime('%Y-%m-%d')}.csv")
+        if not os.path.isfile(todays_file):
+            return []
+
+        totals = {}
+        try:
+            with open(todays_file, 'rb') as f:
+                raw_data = f.read()
+            result = chardet.detect(raw_data)
+            encoding = result['encoding'] if result and result.get('encoding') else 'utf-8'
+
+            with open(todays_file, 'r', encoding=encoding, errors='ignore') as f:
+                for row in iter_csv_rows(f):
+                    detail = parse_tilt_result_detail(row)
+                    if detail is None:
+                        continue
+                    username = str(detail.get('username') or '').strip().lower()
+                    if not username:
+                        continue
+                    if username not in totals:
+                        totals[username] = {
+                            'name': str(detail.get('username') or username).strip() or username,
+                            'points': 0,
+                            'deaths': 0,
+                        }
+                    totals[username]['points'] += _safe_int(detail.get('points', 0))
+        except Exception:
+            return []
+
+        ranked = sorted(
+            totals.values(),
+            key=lambda row: (-_safe_int(row.get('points', 0)), str(row.get('name', '')).lower()),
+        )[:10]
+
+        return [
+            {
+                'name': row.get('name') or 'Unknown',
+                'points': _safe_int(row.get('points', 0)),
+                'deaths': _safe_int(row.get('deaths', 0)),
+            }
+            for row in ranked
+        ]
+
     sorted_run = sorted(
         (
             (str(name), _safe_int(points))
@@ -4127,6 +4793,7 @@ def _build_tilt_overlay_payload():
             {
                 'name': (stats.get('display_name') or username),
                 'points': _safe_int(stats.get('tilt_points', 0)),
+                'deaths': _safe_int(stats.get('tilt_deaths', 0)),
                 'levels': _safe_int(stats.get('tilt_levels', 0)),
                 'top_tiltee': _safe_int(stats.get('tilt_top_tiltee', 0)),
             }
@@ -4152,7 +4819,11 @@ def _build_tilt_overlay_payload():
         fallback = last_run_summary.get('standings')
         if isinstance(fallback, list):
             display_standings = [
-                (str(item.get('name') or 'Unknown'), _safe_int(item.get('points', 0)))
+                (
+                    str(item.get('name') or 'Unknown'),
+                    _safe_int(item.get('points', 0)),
+                    _safe_int(item.get('deaths', item.get('death_count', item.get('run_deaths', 0)))),
+                )
                 for item in fallback if isinstance(item, dict)
             ]
 
@@ -4172,7 +4843,19 @@ def _build_tilt_overlay_payload():
         'total_deaths_today': get_int_setting('tilt_total_deaths_today', 0),
         'lifetime_expertise': get_int_setting('tilt_lifetime_expertise', 0),
         'leader': {'name': display_standings[0][0], 'points': display_standings[0][1]} if display_standings else None,
-        'standings': [{'name': name, 'points': points} for name, points in display_standings],
+        'standings': [
+            {
+                'name': name,
+                'points': points,
+                'deaths': _safe_int(deaths if len(entry) > 2 else run_deaths_ledger.get(name, 0)),
+            }
+            for entry in display_standings
+            for name, points, deaths in [(
+                str(entry[0]) if isinstance(entry, (list, tuple)) and len(entry) > 0 else 'Unknown',
+                _safe_int(entry[1]) if isinstance(entry, (list, tuple)) and len(entry) > 1 else 0,
+                _safe_int(entry[2]) if isinstance(entry, (list, tuple)) and len(entry) > 2 else 0,
+            )]
+        ],
     }
 
     level_completion = parse_json_setting('tilt_level_completion_overlay', {})
@@ -4189,7 +4872,7 @@ def _build_tilt_overlay_payload():
     settings_payload['theme'] = settings_payload.get('tilt_theme') or settings_payload.get('theme') or 'midnight'
 
     payload = {
-        'updated_at': datetime.now().isoformat(timespec='seconds'),
+        'updated_at': get_internal_now_iso(timespec='seconds'),
         'title': 'MyStats Tilt Run Tracker',
         'settings': settings_payload,
         'current_run': current_summary,
@@ -4198,29 +4881,59 @@ def _build_tilt_overlay_payload():
         'run_completion': run_completion,
         'run_completion_event_id': run_completion_event_id,
         'season_standings': season_standings,
+        'today_standings': build_tilt_today_standings(),
         'suppress_initial_recaps': True,
     }
     return payload
 
 
+def _build_unified_overlay_payload():
+    top3_payload = _build_overlay_top3_payload()
+    active_mode = get_overlay_mode()
+
+    if active_mode != 'tilt':
+        recent_race = top3_payload.get('recent_race_top3') or {}
+        has_rows = bool(recent_race.get('rows'))
+        race_type = str(recent_race.get('race_type') or '').strip().lower()
+        is_recent = bool(recent_race.get('is_recent'))
+
+        if not has_rows:
+            active_mode = 'pre-game'
+        elif is_recent and race_type in ('br', 'battle royale', 'royale'):
+            active_mode = 'br'
+        elif is_recent:
+            active_mode = 'race'
+        else:
+            active_mode = 'post-race'
+
+    return {
+        'updated_at': get_internal_now_iso(timespec='seconds'),
+        'active_mode': active_mode,
+        'top3': top3_payload,
+        'tilt': _build_tilt_overlay_payload(),
+    }
+
+
 @app.route('/overlay')
 def overlay_page():
+    horizontal_layout_enabled = str(config.get_setting('overlay_horizontal_layout') or 'False') == 'True'
+    overlay_file = 'index.html' if horizontal_layout_enabled else ('tilt.html' if get_overlay_mode() == 'tilt' else 'index.html')
+
     for candidate in _overlay_dir_candidates():
-        index_file = os.path.join(candidate, 'index.html')
+        index_file = os.path.join(candidate, overlay_file)
         if os.path.isfile(index_file):
-            return send_from_directory(candidate, 'index.html')
+            return send_from_directory(candidate, overlay_file)
 
     return (f"Overlay files not found. Checked: {', '.join(_overlay_dir_candidates())}", 404)
 
 
 @app.route('/overlay/tilt')
 def overlay_tilt_page():
-    for candidate in _overlay_dir_candidates():
-        index_file = os.path.join(candidate, 'tilt.html')
-        if os.path.isfile(index_file):
-            return send_from_directory(candidate, 'tilt.html')
-
-    return (f"Tilt overlay files not found. Checked: {', '.join(_overlay_dir_candidates())}", 404)
+    return (
+        "for tilt overlay, use /overlay instead. Tilt overlay will appear after first completed level.",
+        200,
+        {'Content-Type': 'text/plain; charset=utf-8'},
+    )
 
 
 @app.route('/overlay/<path:filename>')
@@ -4239,8 +4952,645 @@ def overlay_settings():
 
 @app.route('/api/overlay/top3')
 def overlay_top3():
-    return jsonify(_build_overlay_top3_payload())
+    payload = _build_overlay_top3_payload()
+    payload['active_mode'] = get_overlay_mode()
+    return jsonify(payload)
 
+
+@app.route('/api/overlay/tilt')
+def overlay_tilt_payload():
+    payload = _build_tilt_overlay_payload()
+    payload['active_mode'] = get_overlay_mode()
+    return jsonify(payload)
+
+
+@app.route('/api/overlay')
+def overlay_unified_payload():
+    return jsonify(_build_unified_overlay_payload())
+
+
+def _build_main_dashboard_payload():
+    now_ts = time.time()
+    cached = _dashboard_main_cache.get('value')
+    if cached is not None and (now_ts - float(_dashboard_main_cache.get('created_at', 0.0))) <= _dashboard_main_cache_ttl_s:
+        return cached
+
+    mycycle_session_ids, _ = _get_mycycle_home_session_ids()
+    active_session_id = mycycle_session_ids[0] if mycycle_session_ids else None
+    mycycle_session, mycycle_rows = get_mycycle_leaderboard(limit=250, session_id=active_session_id)
+
+    season_quest_rows = get_quest_completion_leaderboard(limit=100)
+    season_quest_targets = get_season_quest_targets()
+    tilt_totals, tilt_users = get_tilt_season_stats()
+    analytics_payload = _build_dashboard_analytics_payload(mycycle_rows, tilt_totals, tilt_users)
+    race_trends_payload = _build_dashboard_race_trends_payload()
+
+    payload = {
+        'updated_at': get_internal_now_iso(timespec='seconds'),
+        'season_quests': {
+            'rows': season_quest_rows,
+            'targets': season_quest_targets,
+        },
+        'rivals': get_global_rivalries(limit=RIVALS_MAX_PAIRS),
+        'races': get_race_dashboard_leaderboard(limit=250),
+        'mycycle': {
+            'session': mycycle_session or {},
+            'rows': mycycle_rows,
+            'settings': get_mycycle_settings(),
+        },
+        'tilt': {
+            'totals': tilt_totals,
+            'deaths_today': get_int_setting('tilt_total_deaths_today', 0),
+            'participants': len(tilt_users),
+        },
+        'settings': {
+            'language': get_ui_language(),
+            'rivals': get_rival_settings(),
+            'rivals_limits': {
+                'max_pairs': RIVALS_MAX_PAIRS,
+                'max_min_races': RIVALS_MAX_MIN_RACES,
+                'max_point_gap': RIVALS_MAX_POINT_GAP,
+                'max_user_results': RIVALS_MAX_USER_RESULTS,
+            },
+        },
+        'analytics': analytics_payload,
+        'race_trends': race_trends_payload,
+    }
+    _dashboard_main_cache['value'] = payload
+    _dashboard_main_cache['created_at'] = now_ts
+    return payload
+
+
+def _collect_results_season_directories(current_dir):
+    current = os.path.abspath(current_dir or '')
+    if not current or not os.path.isdir(current):
+        return [], False
+
+    def has_allraces_csv(path):
+        return bool(glob.glob(os.path.join(path, 'allraces_*.csv')))
+
+    discovered = []
+    parent = os.path.dirname(current)
+    if parent and os.path.isdir(parent):
+        for name in sorted(os.listdir(parent)):
+            candidate = os.path.join(parent, name)
+            if os.path.isdir(candidate) and has_allraces_csv(candidate):
+                discovered.append(candidate)
+
+    if current not in discovered and has_allraces_csv(current):
+        discovered.append(current)
+
+    if not discovered:
+        nested = [
+            os.path.join(current, name)
+            for name in sorted(os.listdir(current))
+            if os.path.isdir(os.path.join(current, name)) and has_allraces_csv(os.path.join(current, name))
+        ]
+        if nested:
+            discovered = nested
+
+    normalized = []
+    for item in discovered:
+        abspath = os.path.abspath(item)
+        if abspath not in normalized:
+            normalized.append(abspath)
+
+    has_prior = len(normalized) > 1
+    return normalized, has_prior
+
+
+def _safe_float(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _aggregate_mode_from_directories(directories):
+    mode_template = {
+        'events': 0,
+        'points': 0,
+        'wins': 0,
+        'high_score': 0,
+        'unique_racers': set(),
+        'users': defaultdict(lambda: {'events': 0, 'points': 0}),
+    }
+    mode_stats = {
+        'combined': copy.deepcopy(mode_template),
+        'race': copy.deepcopy(mode_template),
+        'br': copy.deepcopy(mode_template),
+    }
+
+    for directory in directories:
+        for allraces_file in glob.glob(os.path.join(directory, 'allraces_*.csv')):
+            try:
+                with open(allraces_file, 'r', encoding='utf-8', errors='ignore') as f:
+                    reader = iter_csv_rows(f)
+                    for row in reader:
+                        if len(row) < 5:
+                            continue
+
+                        mode = str(row[4] or '').strip().lower()
+                        if mode not in ('race', 'br'):
+                            continue
+
+                        username = str(row[1] or '').strip().lower()
+                        display_name = str(row[2] or '').strip() or username
+                        if not username:
+                            continue
+
+                        points = _safe_int(row[3])
+                        place_digits = ''.join(ch for ch in str(row[0] or '') if ch.isdigit())
+                        placement = _safe_int(place_digits)
+
+                        for key in ('combined', mode):
+                            bucket = mode_stats[key]
+                            bucket['events'] += 1
+                            bucket['points'] += points
+                            bucket['high_score'] = max(bucket['high_score'], points)
+                            if placement == 1:
+                                bucket['wins'] += 1
+                            bucket['unique_racers'].add(display_name or username)
+                            bucket['users'][username]['events'] += 1
+                            bucket['users'][username]['points'] += points
+            except Exception:
+                continue
+
+    def finalize(bucket):
+        events = int(bucket['events'])
+        points = int(bucket['points'])
+        wins = int(bucket['wins'])
+        high_score = int(bucket['high_score'])
+        unique_racers = len(bucket['unique_racers'])
+        ppr = round((points / events), 2) if events else 0.0
+        win_rate = round((wins / events) * 100, 2) if events else 0.0
+
+        best_name = '—'
+        best_ppr = 0.0
+        best_events = 0
+        for username, user_stats in bucket['users'].items():
+            user_events = int(user_stats['events'])
+            if user_events < 25:
+                continue
+            user_ppr = _safe_float(user_stats['points']) / max(1, user_events)
+            if user_ppr > best_ppr:
+                best_ppr = user_ppr
+                best_name = username
+                best_events = user_events
+
+        return {
+            'events': events,
+            'points': points,
+            'wins': wins,
+            'win_rate': win_rate,
+            'high_score': high_score,
+            'unique_racers': unique_racers,
+            'ppr': ppr,
+            'top_ppr_name': best_name,
+            'top_ppr': round(best_ppr, 2),
+            'top_ppr_events': best_events,
+        }
+
+    return {key: finalize(value) for key, value in mode_stats.items()}
+
+
+def _aggregate_tilt_from_directories(directories):
+    totals = {'points': 0, 'levels': 0, 'top_tiltee': 0, 'deaths': 0}
+    users = set()
+
+    for directory in directories:
+        for tilt_file in glob.glob(os.path.join(directory, 'tilts_*.csv')):
+            try:
+                with open(tilt_file, 'r', encoding='utf-8', errors='ignore') as f:
+                    for row in iter_csv_rows(f):
+                        detail = parse_tilt_result_detail(row)
+                        if not detail:
+                            continue
+                        users.add(detail.get('display_name') or detail.get('username') or 'unknown')
+                        totals['points'] += _safe_int(detail.get('points', 0))
+                        totals['levels'] += 1
+                        if detail.get('is_top_tiltee'):
+                            totals['top_tiltee'] += 1
+            except Exception:
+                continue
+
+    totals['deaths'] = max(0, int(totals['levels']) - int(totals['top_tiltee']))
+    totals['participants'] = len(users)
+    totals['ppr'] = round((totals['points'] / totals['levels']), 2) if totals['levels'] else 0.0
+    totals['survival_rate'] = round(((totals['levels'] - totals['deaths']) / totals['levels']) * 100, 2) if totals['levels'] else 0.0
+    return totals
+
+
+def _aggregate_mycycle_from_directories(directories):
+    cache_key_parts = []
+    for directory in directories:
+        cycle_file = os.path.join(directory, MYCYCLE_FILE_NAME)
+        try:
+            mtime = os.path.getmtime(cycle_file)
+        except OSError:
+            mtime = None
+        cache_key_parts.append((os.path.abspath(directory), mtime))
+    cache_key = tuple(cache_key_parts)
+    cached = _mycycle_aggregate_cache.get(cache_key)
+    if cached is not None:
+        return copy.deepcopy(cached)
+
+    totals = {'tracked_racers': 0, 'cycles_completed': 0, 'near_complete': 0, 'current_cycle_races': 0}
+
+    for directory in directories:
+        cycle_file = os.path.join(directory, MYCYCLE_FILE_NAME)
+        if not os.path.isfile(cycle_file):
+            continue
+        try:
+            with open(cycle_file, 'r', encoding='utf-8') as f:
+                payload = json.load(f)
+            sessions = payload.get('sessions') if isinstance(payload, dict) else {}
+            merged_users = {}
+            if isinstance(sessions, dict):
+                for session in sessions.values():
+                    users = {}
+                    if isinstance(session, dict):
+                        users = session.get('stats') or session.get('users') or {}
+                    if not isinstance(users, dict):
+                        continue
+                    for username, row in users.items():
+                        if username not in merged_users:
+                            merged_users[username] = {'cycles_completed': 0, 'progress_total': 0, 'progress_hits': 0, 'current_cycle_races': 0}
+                        merged_users[username]['cycles_completed'] += _safe_int(row.get('cycles_completed', 0))
+                        merged_users[username]['progress_total'] = max(_safe_int(row.get('progress_total', 0)), merged_users[username]['progress_total'])
+                        merged_users[username]['progress_hits'] = max(_safe_int(row.get('progress_hits', 0)), merged_users[username]['progress_hits'])
+                        merged_users[username]['current_cycle_races'] += _safe_int(row.get('current_cycle_races', 0))
+
+            totals['tracked_racers'] += len(merged_users)
+            totals['cycles_completed'] += sum(_safe_int(row.get('cycles_completed', 0)) for row in merged_users.values())
+            totals['near_complete'] += sum(1 for row in merged_users.values() if (_safe_int(row.get('progress_total', 0)) - _safe_int(row.get('progress_hits', 0))) <= 2)
+            totals['current_cycle_races'] += sum(_safe_int(row.get('current_cycle_races', 0)) for row in merged_users.values())
+        except Exception:
+            continue
+
+    _mycycle_aggregate_cache.clear()
+    _mycycle_aggregate_cache[cache_key] = copy.deepcopy(totals)
+    return totals
+
+
+def _build_dashboard_analytics_payload(mycycle_rows, tilt_totals, tilt_users):
+    current_dir = config.get_setting('directory') or os.getcwd()
+    season_dirs, has_prior = _collect_results_season_directories(current_dir)
+    current_only_dirs = [os.path.abspath(current_dir)] if os.path.isdir(current_dir) else []
+    all_dirs = season_dirs if season_dirs else current_only_dirs
+
+    season_modes = _aggregate_mode_from_directories(current_only_dirs)
+    all_modes = _aggregate_mode_from_directories(all_dirs) if has_prior else None
+
+    tilt_season = {
+        'participants': len(tilt_users or {}),
+        'points': _safe_int((tilt_totals or {}).get('points', 0)),
+        'levels': _safe_int((tilt_totals or {}).get('levels', 0)),
+        'top_tiltee': _safe_int((tilt_totals or {}).get('top_tiltee', 0)),
+    }
+    tilt_season['deaths'] = max(0, tilt_season['levels'] - tilt_season['top_tiltee'])
+    tilt_season['ppr'] = round((tilt_season['points'] / tilt_season['levels']), 2) if tilt_season['levels'] else 0.0
+    tilt_season['survival_rate'] = round(((tilt_season['levels'] - tilt_season['deaths']) / tilt_season['levels']) * 100, 2) if tilt_season['levels'] else 0.0
+
+    mycycle_season = {
+        'tracked_racers': len(mycycle_rows or []),
+        'cycles_completed': sum(_safe_int(row.get('cycles_completed', 0)) for row in (mycycle_rows or [])),
+        'near_complete': sum(1 for row in (mycycle_rows or []) if (_safe_int(row.get('progress_total', 0)) - _safe_int(row.get('progress_hits', 0))) <= 2),
+        'current_cycle_races': sum(_safe_int(row.get('current_cycle_races', 0)) for row in (mycycle_rows or [])),
+    }
+
+    return {
+        'season_label': f"Season {config.get_setting('season') or 'Current'}",
+        'all_seasons_label': 'All Seasons',
+        'has_prior_seasons': has_prior,
+        'groups': {
+            'race_br_combined': {
+                'title': 'Race/BR Combined',
+                'season': season_modes.get('combined', {}),
+                'all_seasons': all_modes.get('combined', {}) if all_modes else None,
+            },
+            'tilt': {
+                'title': 'Tilt',
+                'season': tilt_season,
+                'all_seasons': _aggregate_tilt_from_directories(all_dirs) if has_prior else None,
+            },
+            'race_only': {
+                'title': 'Race Only',
+                'season': season_modes.get('race', {}),
+                'all_seasons': all_modes.get('race', {}) if all_modes else None,
+            },
+            'br_only': {
+                'title': 'BR Only',
+                'season': season_modes.get('br', {}),
+                'all_seasons': all_modes.get('br', {}) if all_modes else None,
+            },
+            'mycycle': {
+                'title': 'MyCycle',
+                'season': mycycle_season,
+                'all_seasons': _aggregate_mycycle_from_directories(all_dirs) if has_prior else None,
+            },
+        },
+    }
+
+
+def _extract_race_br_trend_rows_from_directory(directory):
+    rows = []
+    for allraces_file in glob.glob(os.path.join(directory, 'allraces_*.csv')):
+        try:
+            with open(allraces_file, 'r', encoding='utf-8', errors='ignore') as f:
+                for row in iter_csv_rows(f):
+                    if len(row) < 6:
+                        continue
+                    mode = str(row[4] or '').strip().lower()
+                    if mode not in ('race', 'br'):
+                        continue
+                    username = str(row[1] or '').strip().lower()
+                    if not username:
+                        continue
+                    display_name = str(row[2] or '').strip() or username
+                    points = _safe_int(row[3])
+                    race_ts = _parse_overlay_timestamp(row[5])
+                    if race_ts is None:
+                        continue
+                    rows.append({
+                        'mode': mode,
+                        'username': username,
+                        'display_name': display_name,
+                        'points': points,
+                        'date_key': race_ts.strftime('%Y-%m-%d'),
+                    })
+        except Exception:
+            continue
+    return rows
+
+
+def _season_label_for_directory(directory):
+    base = os.path.basename(os.path.abspath(directory))
+    season_digits = ''.join(ch for ch in base if ch.isdigit())
+    if season_digits:
+        return f"Season {season_digits}"
+    return base or 'Current Season'
+
+
+def _build_dashboard_race_trends_payload():
+    current_dir = config.get_setting('directory') or os.getcwd()
+    season_dirs, has_prior = _collect_results_season_directories(current_dir)
+    current_only_dirs = [os.path.abspath(current_dir)] if os.path.isdir(current_dir) else []
+    all_season_dirs = season_dirs if season_dirs else current_only_dirs
+
+    season_series = []
+    for directory in all_season_dirs:
+        trend_rows = _extract_race_br_trend_rows_from_directory(directory)
+        unique_racers = len({row['display_name'] for row in trend_rows})
+        race_count = sum(1 for row in trend_rows if row['mode'] == 'race')
+        br_count = sum(1 for row in trend_rows if row['mode'] == 'br')
+        total_races = race_count + br_count
+        total_points = sum(_safe_int(row.get('points', 0)) for row in trend_rows)
+        season_series.append({
+            'season_label': _season_label_for_directory(directory),
+            'unique_racers': unique_racers,
+            'race_count': race_count,
+            'br_count': br_count,
+            'total_races': total_races,
+            'ppr': round((total_points / total_races), 2) if total_races else 0.0,
+        })
+
+    current_rows = []
+    for directory in current_only_dirs:
+        current_rows.extend(_extract_race_br_trend_rows_from_directory(directory))
+
+    day_groups = defaultdict(lambda: {
+        'date': '',
+        'unique_racers': set(),
+        'race_count': 0,
+        'br_count': 0,
+        'points': 0,
+    })
+    for row in current_rows:
+        day = row['date_key']
+        bucket = day_groups[day]
+        bucket['date'] = day
+        bucket['unique_racers'].add(row['display_name'])
+        bucket['points'] += _safe_int(row['points'])
+        if row['mode'] == 'race':
+            bucket['race_count'] += 1
+        else:
+            bucket['br_count'] += 1
+
+    daily_rows = []
+    for day in sorted(day_groups.keys()):
+        bucket = day_groups[day]
+        total_races = _safe_int(bucket['race_count']) + _safe_int(bucket['br_count'])
+        daily_rows.append({
+            'date': day,
+            'unique_racers': len(bucket['unique_racers']),
+            'race_count': _safe_int(bucket['race_count']),
+            'br_count': _safe_int(bucket['br_count']),
+            'total_races': total_races,
+            'ppr': round((_safe_int(bucket['points']) / total_races), 2) if total_races else 0.0,
+        })
+
+    days_with_data = len(daily_rows)
+    avg_racers_per_day = round(sum(row['unique_racers'] for row in daily_rows) / days_with_data, 2) if days_with_data else 0.0
+    avg_races_per_day = round(sum(row['total_races'] for row in daily_rows) / days_with_data, 2) if days_with_data else 0.0
+    avg_ppr_per_day = round(sum(_safe_float(row['ppr']) for row in daily_rows) / days_with_data, 2) if days_with_data else 0.0
+
+    rolling_window = daily_rows[-7:] if daily_rows else []
+    rolling7_avg_racers = round(sum(row['unique_racers'] for row in rolling_window) / len(rolling_window), 2) if rolling_window else 0.0
+    rolling7_avg_races = round(sum(row['total_races'] for row in rolling_window) / len(rolling_window), 2) if rolling_window else 0.0
+
+    total_race_count = sum(row['race_count'] for row in daily_rows)
+    total_br_count = sum(row['br_count'] for row in daily_rows)
+    total_current_races = total_race_count + total_br_count
+    race_share = round((total_race_count / total_current_races) * 100, 2) if total_current_races else 0.0
+    br_share = round((total_br_count / total_current_races) * 100, 2) if total_current_races else 0.0
+
+    busiest = max(daily_rows, key=lambda row: row['unique_racers']) if daily_rows else None
+    max_volume_day = max(daily_rows, key=lambda row: row['total_races']) if daily_rows else None
+    best_ppr_day = max(daily_rows, key=lambda row: _safe_float(row['ppr'])) if daily_rows else None
+
+    return {
+        'has_prior_seasons': has_prior,
+        'season_series': season_series,
+        'daily_current_season': daily_rows,
+        'summary': {
+            'avg_racers_per_day': avg_racers_per_day,
+            'avg_races_per_day': avg_races_per_day,
+            'avg_ppr_per_day': avg_ppr_per_day,
+            'rolling7_avg_racers': rolling7_avg_racers,
+            'rolling7_avg_races': rolling7_avg_races,
+            'race_share_percent': race_share,
+            'br_share_percent': br_share,
+            'days_with_data': days_with_data,
+            'busiest_day': busiest,
+            'highest_volume_day': max_volume_day,
+            'best_ppr_day': best_ppr_day,
+        },
+    }
+
+
+def _collect_results_season_directories(current_dir):
+    current = os.path.abspath(current_dir or '')
+    if not current or not os.path.isdir(current):
+        return [], False
+
+    def has_allraces_csv(path):
+        return bool(glob.glob(os.path.join(path, 'allraces_*.csv')))
+
+    discovered = []
+    parent = os.path.dirname(current)
+    if parent and os.path.isdir(parent):
+        for name in sorted(os.listdir(parent)):
+            candidate = os.path.join(parent, name)
+            if os.path.isdir(candidate) and has_allraces_csv(candidate):
+                discovered.append(candidate)
+
+    if current not in discovered and has_allraces_csv(current):
+        discovered.append(current)
+
+    if not discovered:
+        nested = [
+            os.path.join(current, name)
+            for name in sorted(os.listdir(current))
+            if os.path.isdir(os.path.join(current, name)) and has_allraces_csv(os.path.join(current, name))
+        ]
+        if nested:
+            discovered = nested
+
+    normalized = []
+    for item in discovered:
+        abspath = os.path.abspath(item)
+        if abspath not in normalized:
+            normalized.append(abspath)
+
+    has_prior = len(normalized) > 1
+    return normalized, has_prior
+
+
+def _safe_float(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _aggregate_mode_from_directories(directories):
+    mode_template = {
+        'events': 0,
+        'points': 0,
+        'wins': 0,
+        'high_score': 0,
+        'unique_racers': set(),
+        'users': defaultdict(lambda: {'events': 0, 'points': 0}),
+    }
+    mode_stats = {
+        'combined': copy.deepcopy(mode_template),
+        'race': copy.deepcopy(mode_template),
+        'br': copy.deepcopy(mode_template),
+    }
+
+    for directory in directories:
+        for allraces_file in glob.glob(os.path.join(directory, 'allraces_*.csv')):
+            try:
+                with open(allraces_file, 'r', encoding='utf-8', errors='ignore') as f:
+                    reader = csv.reader(f)
+                    for row in reader:
+                        if len(row) < 5:
+                            continue
+
+                        mode = str(row[4] or '').strip().lower()
+                        if mode not in ('race', 'br'):
+                            continue
+
+                        username = str(row[1] or '').strip().lower()
+                        display_name = str(row[2] or '').strip() or username
+                        if not username:
+                            continue
+
+                        points = _safe_int(row[3])
+                        place_digits = ''.join(ch for ch in str(row[0] or '') if ch.isdigit())
+                        placement = _safe_int(place_digits)
+
+                        for key in ('combined', mode):
+                            bucket = mode_stats[key]
+                            bucket['events'] += 1
+                            bucket['points'] += points
+                            bucket['high_score'] = max(bucket['high_score'], points)
+                            if placement == 1:
+                                bucket['wins'] += 1
+                            bucket['unique_racers'].add(display_name or username)
+                            bucket['users'][username]['events'] += 1
+                            bucket['users'][username]['points'] += points
+            except Exception:
+                continue
+
+    def finalize(bucket):
+        events = int(bucket['events'])
+        points = int(bucket['points'])
+        wins = int(bucket['wins'])
+        high_score = int(bucket['high_score'])
+        unique_racers = len(bucket['unique_racers'])
+        ppr = round((points / events), 2) if events else 0.0
+        win_rate = round((wins / events) * 100, 2) if events else 0.0
+
+        best_name = '—'
+        best_ppr = 0.0
+        best_events = 0
+        for username, user_stats in bucket['users'].items():
+            user_events = int(user_stats['events'])
+            if user_events < 25:
+                continue
+            user_ppr = _safe_float(user_stats['points']) / max(1, user_events)
+            if user_ppr > best_ppr:
+                best_ppr = user_ppr
+                best_name = username
+                best_events = user_events
+
+        return {
+            'events': events,
+            'points': points,
+            'wins': wins,
+            'win_rate': win_rate,
+            'high_score': high_score,
+            'unique_racers': unique_racers,
+            'ppr': ppr,
+            'top_ppr_name': best_name,
+            'top_ppr': round(best_ppr, 2),
+            'top_ppr_events': best_events,
+        }
+
+    return {key: finalize(value) for key, value in mode_stats.items()}
+
+
+def _aggregate_tilt_from_directories(directories):
+    totals = {'points': 0, 'levels': 0, 'top_tiltee': 0, 'deaths': 0}
+    users = set()
+
+    for directory in directories:
+        for tilt_file in glob.glob(os.path.join(directory, 'tilts_*.csv')):
+            try:
+                with open(tilt_file, 'r', encoding='utf-8', errors='ignore') as f:
+                    for row in csv.reader(f):
+                        detail = parse_tilt_result_detail(row)
+                        if not detail:
+                            continue
+                        users.add(detail.get('display_name') or detail.get('username') or 'unknown')
+                        totals['points'] += _safe_int(detail.get('points', 0))
+                        totals['levels'] += 1
+                        if detail.get('is_top_tiltee'):
+                            totals['top_tiltee'] += 1
+            except Exception:
+                continue
+
+    totals['deaths'] = max(0, int(totals['levels']) - int(totals['top_tiltee']))
+    totals['participants'] = len(users)
+    totals['ppr'] = round((totals['points'] / totals['levels']), 2) if totals['levels'] else 0.0
+    totals['survival_rate'] = round(((totals['levels'] - totals['deaths']) / totals['levels']) * 100, 2) if totals['levels'] else 0.0
+    return totals
+
+
+def _aggregate_mycycle_from_directories(directories):
+    totals = {'tracked_racers': 0, 'cycles_completed': 0, 'near_complete': 0, 'current_cycle_races': 0}
 
 @app.route('/api/overlay/myteams')
 def overlay_teams_payload():
@@ -4250,12 +5600,37 @@ def overlay_teams_payload():
 @app.route('/api/overlay/tilt')
 def overlay_tilt_payload():
     return jsonify(_build_tilt_overlay_payload())
+    for directory in directories:
+        cycle_file = os.path.join(directory, MYCYCLE_FILE_NAME)
+        if not os.path.isfile(cycle_file):
+            continue
+        try:
+            with open(cycle_file, 'r', encoding='utf-8') as f:
+                payload = json.load(f)
+            sessions = payload.get('sessions') if isinstance(payload, dict) else {}
+            merged_users = {}
+            if isinstance(sessions, dict):
+                for session in sessions.values():
+                    users = session.get('users') if isinstance(session, dict) else {}
+                    if not isinstance(users, dict):
+                        continue
+                    for username, row in users.items():
+                        if username not in merged_users:
+                            merged_users[username] = {'cycles_completed': 0, 'progress_total': 0, 'progress_hits': 0, 'current_cycle_races': 0}
+                        merged_users[username]['cycles_completed'] += _safe_int(row.get('cycles_completed', 0))
+                        merged_users[username]['progress_total'] = max(_safe_int(row.get('progress_total', 0)), merged_users[username]['progress_total'])
+                        merged_users[username]['progress_hits'] = max(_safe_int(row.get('progress_hits', 0)), merged_users[username]['progress_hits'])
+                        merged_users[username]['current_cycle_races'] += _safe_int(row.get('current_cycle_races', 0))
 
+            totals['tracked_racers'] += len(merged_users)
+            totals['cycles_completed'] += sum(_safe_int(row.get('cycles_completed', 0)) for row in merged_users.values())
+            totals['near_complete'] += sum(1 for row in merged_users.values() if (_safe_int(row.get('progress_total', 0)) - _safe_int(row.get('progress_hits', 0))) <= 2)
+            totals['current_cycle_races'] += sum(_safe_int(row.get('current_cycle_races', 0)) for row in merged_users.values())
+        except Exception:
+            continue
 
-def _build_main_dashboard_payload():
-    mycycle_session_ids, _ = _get_mycycle_home_session_ids()
-    active_session_id = mycycle_session_ids[0] if mycycle_session_ids else None
-    mycycle_session, mycycle_rows = get_mycycle_leaderboard(limit=250, session_id=active_session_id)
+    return totals
+
 
     season_quest_rows = get_quest_completion_leaderboard(limit=100)
     season_quest_targets = get_season_quest_targets()
@@ -4286,6 +5661,62 @@ def _build_main_dashboard_payload():
         'settings': {
             'language': get_ui_language(),
             'rivals': get_rival_settings(),
+def _build_dashboard_analytics_payload(mycycle_rows, tilt_totals, tilt_users):
+    current_dir = config.get_setting('directory') or os.getcwd()
+    season_dirs, has_prior = _collect_results_season_directories(current_dir)
+    current_only_dirs = [os.path.abspath(current_dir)] if os.path.isdir(current_dir) else []
+    all_dirs = season_dirs if season_dirs else current_only_dirs
+
+    season_modes = _aggregate_mode_from_directories(current_only_dirs)
+    all_modes = _aggregate_mode_from_directories(all_dirs) if has_prior else None
+
+    tilt_season = {
+        'participants': len(tilt_users or {}),
+        'points': _safe_int((tilt_totals or {}).get('points', 0)),
+        'levels': _safe_int((tilt_totals or {}).get('levels', 0)),
+        'top_tiltee': _safe_int((tilt_totals or {}).get('top_tiltee', 0)),
+    }
+    tilt_season['deaths'] = max(0, tilt_season['levels'] - tilt_season['top_tiltee'])
+    tilt_season['ppr'] = round((tilt_season['points'] / tilt_season['levels']), 2) if tilt_season['levels'] else 0.0
+    tilt_season['survival_rate'] = round(((tilt_season['levels'] - tilt_season['deaths']) / tilt_season['levels']) * 100, 2) if tilt_season['levels'] else 0.0
+
+    mycycle_season = {
+        'tracked_racers': len(mycycle_rows or []),
+        'cycles_completed': sum(_safe_int(row.get('cycles_completed', 0)) for row in (mycycle_rows or [])),
+        'near_complete': sum(1 for row in (mycycle_rows or []) if (_safe_int(row.get('progress_total', 0)) - _safe_int(row.get('progress_hits', 0))) <= 2),
+        'current_cycle_races': sum(_safe_int(row.get('current_cycle_races', 0)) for row in (mycycle_rows or [])),
+    }
+
+    return {
+        'season_label': f"Season {config.get_setting('season') or 'Current'}",
+        'all_seasons_label': 'All Seasons',
+        'has_prior_seasons': has_prior,
+        'groups': {
+            'race_br_combined': {
+                'title': 'Race/BR Combined',
+                'season': season_modes.get('combined', {}),
+                'all_seasons': all_modes.get('combined', {}) if all_modes else None,
+            },
+            'tilt': {
+                'title': 'Tilt',
+                'season': tilt_season,
+                'all_seasons': _aggregate_tilt_from_directories(all_dirs) if has_prior else None,
+            },
+            'race_only': {
+                'title': 'Race Only',
+                'season': season_modes.get('race', {}),
+                'all_seasons': all_modes.get('race', {}) if all_modes else None,
+            },
+            'br_only': {
+                'title': 'BR Only',
+                'season': season_modes.get('br', {}),
+                'all_seasons': all_modes.get('br', {}) if all_modes else None,
+            },
+            'mycycle': {
+                'title': 'MyCycle',
+                'season': mycycle_season,
+                'all_seasons': _aggregate_mycycle_from_directories(all_dirs) if has_prior else None,
+            },
         },
     }
 
@@ -4312,7 +5743,89 @@ def dashboard_assets(filename):
 
 @app.route('/api/dashboard/main')
 def dashboard_main_payload():
-    return jsonify(_build_main_dashboard_payload())
+    payload = _build_main_dashboard_payload()
+
+    q = (request.args.get('mycycle_query') or '').strip().lower()
+    try:
+        page = max(1, int(request.args.get('mycycle_page', 1)))
+    except (TypeError, ValueError):
+        page = 1
+    try:
+        page_size = min(250, max(10, int(request.args.get('mycycle_page_size', 120))))
+    except (TypeError, ValueError):
+        page_size = 120
+
+    if q or page > 1 or page_size != 120:
+        payload = copy.deepcopy(payload)
+        rows = list(payload.get('mycycle', {}).get('rows') or [])
+        if q:
+            rows = [
+                row for row in rows
+                if q in str(row.get('display_name') or '').lower() or q in str(row.get('username') or '').lower()
+            ]
+        start = (page - 1) * page_size
+        end = start + page_size
+        payload['mycycle']['rows'] = rows[start:end]
+        payload['mycycle']['pagination'] = {
+            'page': page,
+            'page_size': page_size,
+            'total': len(rows),
+            'total_pages': max(1, math.ceil(len(rows) / page_size)) if rows else 1,
+            'query': q,
+        }
+
+    season_q = (request.args.get('season_query') or '').strip().lower()
+    try:
+        season_page = max(1, int(request.args.get('season_page', 1)))
+    except (TypeError, ValueError):
+        season_page = 1
+    try:
+        season_page_size = min(250, max(10, int(request.args.get('season_page_size', 100))))
+    except (TypeError, ValueError):
+        season_page_size = 100
+    season_sort_by = (request.args.get('season_sort_by') or 'completed').strip().lower()
+    season_sort_order = (request.args.get('season_sort_order') or 'desc').strip().lower()
+
+    if season_q or season_page > 1 or season_page_size != 100 or season_sort_by != 'completed' or season_sort_order != 'desc':
+        payload = copy.deepcopy(payload)
+        season_rows = list(payload.get('season_quests', {}).get('rows') or [])
+        if season_q:
+            season_rows = [
+                row for row in season_rows
+                if season_q in str(row.get('display_name') or '').lower() or season_q in str(row.get('username') or '').lower()
+            ]
+
+        sort_fields = {
+            'name': lambda row: str(row.get('display_name') or row.get('username') or '').lower(),
+            'completed': lambda row: (
+                int(row.get('completed', 0)),
+                (int(row.get('completed', 0)) / max(1, int(row.get('active_quests', 0)))) if int(row.get('active_quests', 0)) else 0,
+                int(row.get('points', 0)),
+            ),
+            'points': lambda row: int(row.get('points', 0)),
+            'races': lambda row: int(row.get('races', 0)),
+            'race_hs': lambda row: int(row.get('race_hs', 0)),
+            'br_hs': lambda row: int(row.get('br_hs', 0)),
+            'tilt_points': lambda row: int(row.get('tilt_points', 0)),
+        }
+        sort_key = sort_fields.get(season_sort_by, sort_fields['completed'])
+        reverse_sort = season_sort_order != 'asc'
+        season_rows.sort(key=sort_key, reverse=reverse_sort)
+
+        season_start = (season_page - 1) * season_page_size
+        season_end = season_start + season_page_size
+        payload['season_quests']['rows'] = season_rows[season_start:season_end]
+        payload['season_quests']['pagination'] = {
+            'page': season_page,
+            'page_size': season_page_size,
+            'total': len(season_rows),
+            'total_pages': max(1, math.ceil(len(season_rows) / season_page_size)) if season_rows else 1,
+            'query': season_q,
+            'sort_by': season_sort_by,
+            'sort_order': 'asc' if season_sort_order == 'asc' else 'desc',
+        }
+
+    return jsonify(payload)
 
 
 # Path to the token file
@@ -4335,11 +5848,29 @@ def clear_invalid_token_data(reason):
     )
 
 
+def _sync_chatbot_identity_from_token(access_token):
+    """Refresh UI + config username from a known-good Twitch OAuth token."""
+    if not access_token:
+        return
+
+    username = fetch_twitch_username(access_token)
+    if username:
+        update_login_button_text(username)
+        try:
+            config.set_setting('TWITCH_USERNAME', username, persistent=True)
+        except Exception:
+            logger.exception("Failed to persist TWITCH_USERNAME after token update")
+    else:
+        logger.warning("Token update succeeded but username lookup failed; preserving current chatbot label")
+
+
 # Save token data to a file and reconnect the bot with the new token asynchronously
 def save_token_data(token_info):
     token_info['expires_at'] = time.time() + token_info.get('expires_in', 0)
     with open(TOKEN_FILE_PATH, 'w') as f:
         json.dump(token_info, f)
+
+    _sync_chatbot_identity_from_token(token_info.get('access_token'))
     print("Token data saved successfully. Restarting bot...")
 
     # Reconnect the bot asynchronously with the new token
@@ -4386,6 +5917,7 @@ def refresh_access_token():
         'refresh_token': refresh_token
     }
 
+    logger.info("API call: Twitch token refresh")
     response = requests.post(token_url, data=token_data)
 
     if response.status_code == 200:
@@ -4435,6 +5967,7 @@ def open_login_url():
 def fetch_twitch_username(oauth_token):
     headers = {'Authorization': f'Bearer {oauth_token}', 'Client-Id': CLIENT_ID}
     user_info_url = "https://api.twitch.tv/helix/users"
+    logger.info("API call: Twitch user info")
     response = requests.get(user_info_url, headers=headers)
 
     if response.status_code == 200:
@@ -4448,15 +5981,34 @@ def fetch_twitch_username(oauth_token):
 def fallback_to_saved_username():
     saved_username = config.get_setting('TWITCH_USERNAME')
     if saved_username:
-        login_button.config(text=saved_username)
+        update_login_button_text(saved_username)
     else:
-        login_button.config(text=DEFAULT_BOT_USERNAME)
+        update_login_button_text(DEFAULT_BOT_USERNAME)
         print("No saved username in config. Using default account: mystats_results")
 
 
+def update_login_button_text(text):
+    button = globals().get('login_button')
+    if button is None:
+        return
+
+    def _apply_text():
+        if button.winfo_exists():
+            button.config(text=text)
+
+    app_root = globals().get('root')
+    if app_root is not None and app_root.winfo_exists():
+        try:
+            app_root.after(0, _apply_text)
+            return
+        except Exception:
+            pass
+
+    _apply_text()
+
+
 def set_default_bot_login_button(reason):
-    if 'login_button' in globals() and login_button is not None:
-        login_button.config(text=DEFAULT_BOT_USERNAME)
+    update_login_button_text(DEFAULT_BOT_USERNAME)
     print(
         "Switched chatbot display to default account (mystats_results). "
         f"Reason: {reason}"
@@ -4473,7 +6025,7 @@ def set_login_button_text():
         username = fetch_twitch_username(oauth_token)
 
         if username:
-            login_button.config(text=username)
+            update_login_button_text(username)
         else:
             print("Failed to fetch username from the token.")
             fallback_to_saved_username()  # Use config if fetching the username fails
@@ -4511,7 +6063,7 @@ def callback():
     if oauth_token and verify_token(oauth_token):
         username = fetch_twitch_username(oauth_token)
         if username:
-            login_button.config(text=username)
+            update_login_button_text(username)
             save_token_data(token_info)  # Save token info and restart bot
         return "Authentication successful!", 200
     else:
@@ -4521,6 +6073,7 @@ def callback():
 def verify_token(token):
     verify_url = "https://id.twitch.tv/oauth2/validate"
     headers = {"Authorization": f"OAuth {token}"}
+    logger.info("API call: Twitch token validation")
     response = requests.get(verify_url, headers=headers)
     if response.status_code == 200:
         print("\nToken is valid.")
@@ -4573,7 +6126,7 @@ def show_about_window():
         logo_label.image = logo_photo  # Keep a reference to prevent garbage collection
         logo_label.pack(pady=(0, 10))
     except Exception as e:
-        print(f"Error loading logo image: {e}")
+        logger.error("Error loading logo image", exc_info=True)
         # If the logo can't be loaded, display a text placeholder
         logo_label = ttk.Label(content_frame, text="MyStats", font=("Arial", 14, "bold"))
         logo_label.pack(pady=(0, 10))
@@ -4764,7 +6317,7 @@ def play_audio_file(filename, device_name=None):
         sd.wait()  # Wait until the file is done playing
 
     except Exception as e:
-        print(f"An error occurred while playing the audio file: {e}")
+        logger.error("An error occurred while playing the audio file", exc_info=True)
 
 
 def open_settings_window():
@@ -4786,27 +6339,66 @@ def open_settings_window():
     notebook = ttk.Notebook(content_frame)
     notebook.pack(fill="both", expand=True)
 
-    general_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
-    audio_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
-    chat_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
-    tilt_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
-    season_quests_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
-    rivals_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
-    mycycle_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
-    teams_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
-    appearance_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
-    overlay_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
+    general_root_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
+    tilt_root_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
+    race_br_root_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
 
-    notebook.add(general_tab, text=tr("General"))
-    notebook.add(audio_tab, text=tr("Audio"))
-    notebook.add(chat_tab, text=tr("Chat"))
-    notebook.add(season_quests_tab, text=tr("Season Quests"))
-    notebook.add(rivals_tab, text=tr("Rivals"))
-    notebook.add(mycycle_tab, text=tr("MyCycle"))
+    notebook.add(general_root_tab, text=tr("General"))
+    notebook.add(tilt_root_tab, text=tr("Tilt"))
+    notebook.add(race_br_root_tab, text="Race/BR")
+
+    general_root_tab.grid_columnconfigure(0, weight=1)
+    general_root_tab.grid_rowconfigure(0, weight=1)
+    tilt_root_tab.grid_columnconfigure(0, weight=1)
+    tilt_root_tab.grid_rowconfigure(0, weight=1)
+    race_br_root_tab.grid_columnconfigure(0, weight=1)
+    race_br_root_tab.grid_rowconfigure(0, weight=1)
+
+    general_sections = ttk.Notebook(general_root_tab)
+    general_sections.grid(row=0, column=0, sticky="nsew")
+
+    tilt_sections = ttk.Notebook(tilt_root_tab)
+    tilt_sections.grid(row=0, column=0, sticky="nsew")
+
+    race_br_sections = ttk.Notebook(race_br_root_tab)
+    race_br_sections.grid(row=0, column=0, sticky="nsew")
+
+    general_tab = ttk.Frame(general_sections, style="App.TFrame", padding=10)
+    audio_tab = ttk.Frame(general_sections, style="App.TFrame", padding=10)
+    appearance_tab = ttk.Frame(general_sections, style="App.TFrame", padding=10)
+
+    tilt_chat_tab = ttk.Frame(tilt_sections, style="App.TFrame", padding=10)
+    tilt_overlay_tab = ttk.Frame(tilt_sections, style="App.TFrame", padding=10)
+    tilt_horizontal_overlay_tab = ttk.Frame(tilt_sections, style="App.TFrame", padding=10)
+    tilt_thresholds_tab = ttk.Frame(tilt_sections, style="App.TFrame", padding=10)
+
+    race_chat_tab = ttk.Frame(race_br_sections, style="App.TFrame", padding=10)
+    race_alerts_tab = ttk.Frame(race_br_sections, style="App.TFrame", padding=10)
+    race_overlay_tab = ttk.Frame(race_br_sections, style="App.TFrame", padding=10)
+    race_horizontal_overlay_tab = ttk.Frame(race_br_sections, style="App.TFrame", padding=10)
+    mycycle_tab = ttk.Frame(race_br_sections, style="App.TFrame", padding=10)
+    rivals_tab = ttk.Frame(race_br_sections, style="App.TFrame", padding=10)
+    season_quests_tab = ttk.Frame(race_br_sections, style="App.TFrame", padding=10)
+
+    general_sections.add(audio_tab, text=tr("Audio"))
+    general_sections.add(appearance_tab, text=tr("Appearance"))
+    general_sections.add(general_tab, text=tr("General"))
+
+    tilt_sections.add(tilt_chat_tab, text="Tilt Chat")
+    tilt_sections.add(tilt_overlay_tab, text="Tilt Overlay")
+    tilt_sections.add(tilt_horizontal_overlay_tab, text="Tilt Horizontal Overlay")
+    tilt_sections.add(tilt_thresholds_tab, text="Tilt Command Thresholds")
+
+    race_br_sections.add(race_chat_tab, text=tr("Chat"))
+    race_br_sections.add(race_alerts_tab, text="Alerts")
+    race_br_sections.add(race_overlay_tab, text=tr("Overlay"))
+    race_br_sections.add(race_horizontal_overlay_tab, text="Horizontal Overlay")
+    race_br_sections.add(mycycle_tab, text=tr("MyCycle"))
+    race_br_sections.add(rivals_tab, text=tr("Rivals"))
+    race_br_sections.add(season_quests_tab, text=tr("Season Quests"))
+
+    teams_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
     notebook.add(teams_tab, text="MyTeams")
-    notebook.add(appearance_tab, text=tr("Appearance"))
-    notebook.add(overlay_tab, text=tr("Overlay"))
-    notebook.add(tilt_tab, text=tr("Tilt"))
 
     # --- General tab ---
     ttk.Label(general_tab, text=tr("Core app settings"), style="Small.TLabel").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
@@ -4920,24 +6512,26 @@ def open_settings_window():
         audio_tab.grid_columnconfigure(idx, weight=1)
 
     # --- Chat tab ---
-    ttk.Label(chat_tab, text="Control what MyStats announces in chat", style="Small.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 8))
+    ttk.Label(race_chat_tab, text="Control what MyStats announces in chat", style="Small.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 8))
 
     chat_br_results_var = tk.BooleanVar(value=is_chat_response_enabled("chat_br_results"))
     chat_race_results_var = tk.BooleanVar(value=is_chat_response_enabled("chat_race_results"))
     chat_all_commands_var = tk.BooleanVar(value=is_chat_response_enabled("chat_all_commands"))
+    chat_leaderboard_show_medals_var = tk.BooleanVar(value=str(config.get_setting("chat_leaderboard_show_medals") or "True") == "True")
     competitive_raid_monitor_enabled_var = tk.BooleanVar(value=is_chat_response_enabled("competitive_raid_monitor_enabled"))
 
-    ttk.Checkbutton(chat_tab, text="BR Results", variable=chat_br_results_var).grid(row=1, column=0, sticky="w", pady=2)
-    ttk.Checkbutton(chat_tab, text="Race Results", variable=chat_race_results_var).grid(row=2, column=0, sticky="w", pady=2)
-    ttk.Checkbutton(chat_tab, text="All !commands", variable=chat_all_commands_var).grid(row=3, column=0, sticky="w", pady=2)
-    ttk.Checkbutton(chat_tab, text="Competitive Raid Alerts (opt-in)", variable=competitive_raid_monitor_enabled_var).grid(row=4, column=0, sticky="w", pady=2)
+    ttk.Checkbutton(race_chat_tab, text="BR Results", variable=chat_br_results_var).grid(row=1, column=0, sticky="w", pady=2)
+    ttk.Checkbutton(race_chat_tab, text="Race Results", variable=chat_race_results_var).grid(row=2, column=0, sticky="w", pady=2)
+    ttk.Checkbutton(race_chat_tab, text="All !commands", variable=chat_all_commands_var).grid(row=3, column=0, sticky="w", pady=2)
+    ttk.Checkbutton(race_chat_tab, text="Show top-3 medal emotes in leaderboard commands", variable=chat_leaderboard_show_medals_var).grid(row=4, column=0, sticky="w", pady=2)
+    ttk.Checkbutton(race_chat_tab, text="Competitive Raid Alerts (opt-in)", variable=competitive_raid_monitor_enabled_var).grid(row=5, column=0, sticky="w", pady=2)
 
     race_narrative_alerts_var = tk.BooleanVar(value=is_chat_response_enabled("race_narrative_alerts_enabled"))
     race_narrative_grinder_var = tk.BooleanVar(value=is_chat_response_enabled("race_narrative_grinder_enabled"))
     race_narrative_winmilestone_var = tk.BooleanVar(value=is_chat_response_enabled("race_narrative_winmilestone_enabled"))
     race_narrative_leadchange_var = tk.BooleanVar(value=is_chat_response_enabled("race_narrative_leadchange_enabled"))
 
-    race_alerts_frame = ttk.LabelFrame(chat_tab, text="Race Narrative Player Alerts", style="Card.TLabelframe")
+    race_alerts_frame = ttk.LabelFrame(race_alerts_tab, text="Race Narrative Player Alerts", style="Card.TLabelframe")
     race_alerts_frame.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(10, 0))
 
     ttk.Checkbutton(race_alerts_frame, text="Narrative Alerts", variable=race_narrative_alerts_var).grid(row=0, column=0, sticky="w", padx=10, pady=(8, 4))
@@ -4960,7 +6554,7 @@ def open_settings_window():
     race_narrative_max_items_entry.grid(row=3, column=2, sticky="w", padx=(0, 10), pady=(2, 8))
     race_narrative_max_items_entry.insert(0, config.get_setting("race_narrative_alert_max_items") or "3")
 
-    message_delay_frame = ttk.LabelFrame(chat_tab, text="Message Delay", style="Card.TLabelframe")
+    message_delay_frame = ttk.LabelFrame(race_alerts_tab, text="Message Delay", style="Card.TLabelframe")
     message_delay_frame.grid(row=6, column=0, columnspan=2, sticky="ew", pady=(10, 0))
 
     announce_delay_var = tk.BooleanVar(value=config.get_setting("announcedelay") == "True")
@@ -4969,10 +6563,11 @@ def open_settings_window():
     delay_seconds_entry = ttk.Entry(message_delay_frame, width=12, justify='center')
     delay_seconds_entry.grid(row=1, column=1, sticky="w", padx=(8, 10), pady=(0, 8))
     delay_seconds_entry.insert(0, config.get_setting("announcedelayseconds") or "")
-    chat_tab.grid_columnconfigure(0, weight=1)
+    race_chat_tab.grid_columnconfigure(0, weight=1)
+    race_alerts_tab.grid_columnconfigure(0, weight=1)
 
     # --- Tilt tab ---
-    ttk.Label(tilt_tab, text="Configure tilt chat alerts, !tiltsurvivors threshold, and tilt overlay behavior", style="Small.TLabel").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
+    ttk.Label(tilt_chat_tab, text="Configure tilt chat alerts", style="Small.TLabel").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
 
     chat_tilt_results_var = tk.BooleanVar(value=is_chat_response_enabled("chat_tilt_results"))
     chat_tilt_suppress_offline_var = tk.BooleanVar(value=is_chat_response_enabled("chat_tilt_suppress_offline"))
@@ -4982,7 +6577,7 @@ def open_settings_window():
     narrative_alert_winmilestone_var = tk.BooleanVar(value=is_chat_response_enabled("narrative_alert_winmilestone_enabled"))
     narrative_alert_leadchange_var = tk.BooleanVar(value=is_chat_response_enabled("narrative_alert_leadchange_enabled"))
 
-    tilt_alerts_frame = ttk.LabelFrame(tilt_tab, text="Tilt Chat Alerts", style="Card.TLabelframe")
+    tilt_alerts_frame = ttk.LabelFrame(tilt_chat_tab, text="Tilt Chat Alerts", style="Card.TLabelframe")
     tilt_alerts_frame.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 8))
 
     ttk.Checkbutton(tilt_alerts_frame, text="Tilt Results", variable=chat_tilt_results_var).grid(row=0, column=0, sticky="w", padx=10, pady=(8, 4))
@@ -5008,14 +6603,15 @@ def open_settings_window():
     narrative_alert_max_items_entry.grid(row=6, column=2, sticky="w", padx=(0, 10), pady=(2, 8))
     narrative_alert_max_items_entry.insert(0, config.get_setting("narrative_alert_max_items") or "3")
 
-    ttk.Label(tilt_tab, text="Max names announced (Race/Tilt)").grid(row=2, column=0, sticky="w", pady=(2, 4))
+    ttk.Label(tilt_chat_tab, text="Max names announced (Race/Tilt)").grid(row=2, column=0, sticky="w", pady=(2, 4))
     max_name_values = [str(i) for i in range(3, 26)]
     selected_max_names = tk.StringVar(value=str(get_chat_max_names()))
-    max_names_combobox = ttk.Combobox(tilt_tab, textvariable=selected_max_names, values=max_name_values, width=5, state="readonly")
+    max_names_combobox = ttk.Combobox(tilt_chat_tab, textvariable=selected_max_names, values=max_name_values, width=5, state="readonly")
     max_names_combobox.grid(row=2, column=1, sticky="w", pady=(2, 4), padx=(8, 0))
 
-    tiltsurvivors_frame = ttk.LabelFrame(tilt_tab, text="Tilt Command Thresholds", style="Card.TLabelframe")
-    tiltsurvivors_frame.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(6, 8))
+    ttk.Label(tilt_thresholds_tab, text="Configure !tiltsurvivors filtering", style="Small.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 8))
+    tiltsurvivors_frame = ttk.LabelFrame(tilt_thresholds_tab, text="Tilt Command Thresholds", style="Card.TLabelframe")
+    tiltsurvivors_frame.grid(row=1, column=0, sticky="ew", pady=(0, 8))
     ttk.Label(tiltsurvivors_frame, text="!tiltsurvivors minimum levels participated", style="Small.TLabel").grid(row=0, column=0, sticky="w", padx=(10, 8), pady=(8, 4))
     tiltsurvivors_min_levels_entry = ttk.Entry(tiltsurvivors_frame, width=12, justify='center')
     tiltsurvivors_min_levels_entry.grid(row=0, column=1, sticky="w", padx=(0, 10), pady=(8, 4))
@@ -5071,7 +6667,11 @@ def open_settings_window():
     def reset_season_quest_progress():
         for completion_key in ("season_quest_complete_races", "season_quest_complete_points", "season_quest_complete_race_hs", "season_quest_complete_br_hs", "season_quest_complete_tilt_levels", "season_quest_complete_tilt_tops", "season_quest_complete_tilt_points"):
             config.set_setting(completion_key, "False", persistent=True)
-        messagebox.showinfo("Season Quests", "Season quest completion flags have been reset.")
+        completion_state = _load_season_quest_completion_state()
+        completion_state[_get_season_scope_key()] = {}
+        _save_season_quest_completion_state(completion_state)
+        _invalidate_dashboard_cache()
+        messagebox.showinfo("Season Quests", "Season quest completion flags have been reset for the active season.")
 
     ttk.Button(season_quests_tab, text="Reset Quest Progress", command=reset_season_quest_progress).grid(row=8, column=0, sticky="w", pady=(8, 0))
     ttk.Button(season_quests_tab, text="View Quest Completion", command=lambda: open_quest_completion_window(settings_window)).grid(row=8, column=1, sticky="w", pady=(8, 0))
@@ -5096,13 +6696,21 @@ def open_settings_window():
     rivals_pair_count_entry = ttk.Entry(rivals_tab, width=12, justify='center')
     rivals_pair_count_entry.grid(row=4, column=1, sticky="w", pady=(2, 4))
     rivals_pair_count_entry.insert(0, config.get_setting("rivals_pair_count") or "25")
+    ttk.Label(
+        rivals_tab,
+        text=(
+            f"Ranges: min races 1-{RIVALS_MAX_MIN_RACES:,}, max gap 0-{RIVALS_MAX_POINT_GAP:,}, "
+            f"pairs 1-{RIVALS_MAX_PAIRS:,}."
+        ),
+        style="Small.TLabel"
+    ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(0, 8))
 
-    ttk.Button(rivals_tab, text="View Rivalries", command=lambda: open_rivalries_window(settings_window)).grid(row=5, column=0, sticky="w", pady=(8, 0))
-    ttk.Label(rivals_tab, text="How Rivals works: only players above Minimum Season Races are considered.", style="Small.TLabel").grid(row=6, column=0, columnspan=2, sticky="w", pady=(10, 0))
-    ttk.Label(rivals_tab, text="Pairs qualify when their season points are within Maximum Point Gap, then closest gaps are ranked.", style="Small.TLabel").grid(row=7, column=0, columnspan=2, sticky="w", pady=(2, 0))
-    ttk.Label(rivals_tab, text="Chat helpers: !rivals <user> for personal rivals and !h2h <user1> <user2> for direct comparison.", style="Small.TLabel").grid(row=8, column=0, columnspan=2, sticky="w", pady=(6, 0))
-    ttk.Label(rivals_tab, text="Need a deeper breakdown? Open the Rivals dashboard tab for a guide and live rivalry context.", style="Small.TLabel").grid(row=9, column=0, columnspan=2, sticky="w", pady=(6, 0))
-    ttk.Button(rivals_tab, text="Open Rivals Dashboard", command=open_rivals_dashboard).grid(row=10, column=0, sticky="w", pady=(8, 0))
+    ttk.Button(rivals_tab, text="View Rivalries", command=lambda: open_rivalries_window(settings_window)).grid(row=6, column=0, sticky="w", pady=(8, 0))
+    ttk.Label(rivals_tab, text="How Rivals works: only players above Minimum Season Races are considered.", style="Small.TLabel").grid(row=7, column=0, columnspan=2, sticky="w", pady=(10, 0))
+    ttk.Label(rivals_tab, text="Pairs qualify when their season points are within Maximum Point Gap, then closest gaps are ranked.", style="Small.TLabel").grid(row=8, column=0, columnspan=2, sticky="w", pady=(2, 0))
+    ttk.Label(rivals_tab, text="Chat helpers: !rivals <user> [full] for personal rivals and !h2h <user1> <user2> for direct comparison.", style="Small.TLabel").grid(row=9, column=0, columnspan=2, sticky="w", pady=(6, 0))
+    ttk.Label(rivals_tab, text="Need a deeper breakdown? Open the Rivals dashboard tab for a guide and live rivalry context.", style="Small.TLabel").grid(row=10, column=0, columnspan=2, sticky="w", pady=(6, 0))
+    ttk.Button(rivals_tab, text="Open Rivals Dashboard", command=open_rivals_dashboard).grid(row=11, column=0, sticky="w", pady=(8, 0))
 
     # --- MyCycle tab ---
     ttk.Label(mycycle_tab, text="Track placement cycles (uses your configured min/max placements) and custom sessions", style="Small.TLabel").grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 8))
@@ -5397,85 +7005,183 @@ def open_settings_window():
     theme_combobox.bind('<<ComboboxSelected>>', apply_selected_theme)
 
 
-    # --- Overlay tab ---
-    ttk.Label(overlay_tab, text="Control OBS overlay visuals from the desktop app", style="Small.TLabel").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
+    # --- Overlay tabs ---
+    race_overlay_tab.grid_columnconfigure(0, weight=1)
 
-    ttk.Label(overlay_tab, text="Stats Rotation (seconds)").grid(row=1, column=0, sticky="w", pady=(0, 4))
-    overlay_rotation_entry = ttk.Entry(overlay_tab, width=12, justify='center')
-    overlay_rotation_entry.grid(row=1, column=1, sticky="w", pady=(0, 4), padx=(8, 0))
+    ttk.Label(
+        race_overlay_tab,
+        text="Control OBS overlay visuals from the desktop app",
+        style="Small.TLabel"
+    ).grid(row=0, column=0, sticky="w", pady=(0, 8))
+
+    # Race/BR results overlay settings
+
+    core_overlay_frame = ttk.LabelFrame(race_overlay_tab, text="Results Display", style="Card.TLabelframe")
+    core_overlay_frame.grid(row=0, column=0, sticky="nsew")
+    core_overlay_frame.grid_columnconfigure(0, weight=1)
+
+    overlay_fields_frame = ttk.Frame(core_overlay_frame, style="App.TFrame")
+    overlay_fields_frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=(8, 6))
+    overlay_fields_frame.grid_columnconfigure(0, weight=1)
+
+    ttk.Label(overlay_fields_frame, text="Stats Rotation (seconds)").grid(row=0, column=0, sticky="w", pady=(0, 4))
+    overlay_rotation_entry = ttk.Entry(overlay_fields_frame, width=12, justify='center')
+    overlay_rotation_entry.grid(row=0, column=1, sticky="w", pady=(0, 4), padx=(12, 0))
     overlay_rotation_entry.insert(0, config.get_setting("overlay_rotation_seconds") or "10")
 
-    ttk.Label(overlay_tab, text="Data Refresh (seconds)").grid(row=2, column=0, sticky="w", pady=(0, 4))
-    overlay_refresh_entry = ttk.Entry(overlay_tab, width=12, justify='center')
-    overlay_refresh_entry.grid(row=2, column=1, sticky="w", pady=(0, 4), padx=(8, 0))
+    ttk.Label(overlay_fields_frame, text="Data Refresh (seconds)").grid(row=1, column=0, sticky="w", pady=(0, 4))
+    overlay_refresh_entry = ttk.Entry(overlay_fields_frame, width=12, justify='center')
+    overlay_refresh_entry.grid(row=1, column=1, sticky="w", pady=(0, 4), padx=(12, 0))
     overlay_refresh_entry.insert(0, config.get_setting("overlay_refresh_seconds") or "3")
 
-    ttk.Label(overlay_tab, text="Server Port").grid(row=3, column=0, sticky="w", pady=(0, 4))
-    overlay_port_entry = ttk.Entry(overlay_tab, width=12, justify='center')
-    overlay_port_entry.grid(row=3, column=1, sticky="w", pady=(0, 4), padx=(8, 0))
+    ttk.Label(overlay_fields_frame, text="Server Port").grid(row=2, column=0, sticky="w", pady=(0, 4))
+    overlay_port_entry = ttk.Entry(overlay_fields_frame, width=12, justify='center')
+    overlay_port_entry.grid(row=2, column=1, sticky="w", pady=(0, 4), padx=(12, 0))
     overlay_port_entry.insert(0, config.get_setting("overlay_server_port") or "5000")
 
-    ttk.Label(overlay_tab, text="Theme").grid(row=4, column=0, sticky="w", pady=(0, 4))
+    ttk.Label(overlay_fields_frame, text="Theme").grid(row=3, column=0, sticky="w", pady=(0, 4))
     overlay_theme_var = tk.StringVar(value=(config.get_setting("overlay_theme") or "midnight"))
-    overlay_theme_combo = ttk.Combobox(overlay_tab, textvariable=overlay_theme_var, values=["midnight", "ocean", "sunset", "forest", "mono", "violethearts"], width=18, state="readonly")
-    overlay_theme_combo.grid(row=4, column=1, sticky="w", pady=(0, 4), padx=(8, 0))
+    overlay_theme_combo = ttk.Combobox(
+        overlay_fields_frame,
+        textvariable=overlay_theme_var,
+        values=["midnight", "ocean", "sunset", "forest", "mono", "violethearts"],
+        width=18,
+        state="readonly"
+    )
+    overlay_theme_combo.grid(row=3, column=1, sticky="w", pady=(0, 4), padx=(12, 0))
 
-    ttk.Label(overlay_tab, text="Card Opacity (65-100)").grid(row=5, column=0, sticky="w", pady=(0, 4))
-    overlay_opacity_entry = ttk.Entry(overlay_tab, width=12, justify='center')
-    overlay_opacity_entry.grid(row=5, column=1, sticky="w", pady=(0, 4), padx=(8, 0))
+    ttk.Label(overlay_fields_frame, text="Card Opacity (65-100)").grid(row=4, column=0, sticky="w", pady=(0, 4))
+    overlay_opacity_entry = ttk.Entry(overlay_fields_frame, width=12, justify='center')
+    overlay_opacity_entry.grid(row=4, column=1, sticky="w", pady=(0, 4), padx=(12, 0))
     overlay_opacity_entry.insert(0, config.get_setting("overlay_card_opacity") or "84")
 
-    ttk.Label(overlay_tab, text="Text Scale (75-175)").grid(row=6, column=0, sticky="w", pady=(0, 4))
-    overlay_text_scale_entry = ttk.Entry(overlay_tab, width=12, justify='center')
-    overlay_text_scale_entry.grid(row=6, column=1, sticky="w", pady=(0, 4), padx=(8, 0))
+    ttk.Label(overlay_fields_frame, text="Text Scale (75-175)").grid(row=5, column=0, sticky="w", pady=(0, 4))
+    overlay_text_scale_entry = ttk.Entry(overlay_fields_frame, width=12, justify='center')
+    overlay_text_scale_entry.grid(row=5, column=1, sticky="w", pady=(0, 4), padx=(12, 0))
     overlay_text_scale_entry.insert(0, config.get_setting("overlay_text_scale") or "100")
 
     overlay_show_medals_var = tk.BooleanVar(value=str(config.get_setting("overlay_show_medals") or "True") == "True")
     overlay_compact_rows_var = tk.BooleanVar(value=str(config.get_setting("overlay_compact_rows") or "False") == "True")
     overlay_horizontal_layout_var = tk.BooleanVar(value=str(config.get_setting("overlay_horizontal_layout") or "False") == "True")
-    ttk.Checkbutton(overlay_tab, text="Show top-3 medal emotes", variable=overlay_show_medals_var).grid(row=7, column=0, sticky="w", pady=(6, 2), columnspan=2)
-    ttk.Checkbutton(overlay_tab, text="Compact row spacing", variable=overlay_compact_rows_var).grid(row=8, column=0, sticky="w", pady=(0, 2), columnspan=2)
-    ttk.Checkbutton(overlay_tab, text="Horizontal ticker layout (1080x100)", variable=overlay_horizontal_layout_var).grid(row=9, column=0, sticky="w", pady=(0, 2), columnspan=2)
 
-    tilt_overlay_frame = ttk.LabelFrame(overlay_tab, text="Tilt Overlay", style="Card.TLabelframe")
-    tilt_overlay_frame.grid(row=11, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+    overlay_toggles_frame = ttk.Frame(core_overlay_frame, style="App.TFrame")
+    overlay_toggles_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 8))
 
-    ttk.Label(tilt_overlay_frame, text="Starting Lifetime XP", style="Small.TLabel").grid(row=0, column=0, sticky="w", padx=(10, 8), pady=(8, 4))
-    tilt_lifetime_base_entry = ttk.Entry(tilt_overlay_frame, width=12, justify='center')
-    tilt_lifetime_base_entry.grid(row=0, column=1, sticky="w", padx=(0, 10), pady=(8, 4))
+    ttk.Checkbutton(overlay_toggles_frame, text="Show top-3 medal emotes", variable=overlay_show_medals_var).grid(row=0, column=0, sticky="w", pady=(0, 2))
+    ttk.Checkbutton(overlay_toggles_frame, text="Compact row spacing", variable=overlay_compact_rows_var).grid(row=1, column=0, sticky="w", pady=(0, 2))
+    ttk.Checkbutton(overlay_toggles_frame, text="Horizontal ticker layout (1080x100)", variable=overlay_horizontal_layout_var).grid(row=2, column=0, sticky="w", pady=(0, 2))
+
+    # Horizontal ticker settings
+    race_horizontal_overlay_tab.grid_columnconfigure(0, weight=1)
+    horizontal_feed_frame = ttk.LabelFrame(race_horizontal_overlay_tab, text="Feed Items", style="Card.TLabelframe")
+    horizontal_feed_frame.grid(row=0, column=0, sticky="nsew")
+    horizontal_feed_frame.grid_columnconfigure(0, weight=1)
+
+    overlay_horizontal_feed_season_var = tk.BooleanVar(value=str(config.get_setting("overlay_horizontal_feed_season") or "True") == "True")
+    overlay_horizontal_feed_today_var = tk.BooleanVar(value=str(config.get_setting("overlay_horizontal_feed_today") or "True") == "True")
+    overlay_horizontal_feed_races_season_var = tk.BooleanVar(value=str(config.get_setting("overlay_horizontal_feed_races_season") or "True") == "True")
+    overlay_horizontal_feed_brs_season_var = tk.BooleanVar(value=str(config.get_setting("overlay_horizontal_feed_brs_season") or "True") == "True")
+    overlay_horizontal_feed_races_today_var = tk.BooleanVar(value=str(config.get_setting("overlay_horizontal_feed_races_today") or "True") == "True")
+    overlay_horizontal_feed_brs_today_var = tk.BooleanVar(value=str(config.get_setting("overlay_horizontal_feed_brs_today") or "True") == "True")
+    overlay_horizontal_feed_previous_race_var = tk.BooleanVar(value=str(config.get_setting("overlay_horizontal_feed_previous_race") or "True") == "True")
+    overlay_horizontal_feed_events_var = tk.BooleanVar(value=str(config.get_setting("overlay_horizontal_feed_events") or "True") == "True")
+
+    race_feed_frame = ttk.Frame(horizontal_feed_frame, style="App.TFrame")
+    race_feed_frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=(8, 6))
+    race_feed_frame.grid_columnconfigure(0, weight=1)
+    ttk.Label(race_feed_frame, text="Race and BR ticker feed", style="Small.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 2))
+    ttk.Checkbutton(race_feed_frame, text="Top 10 Season", variable=overlay_horizontal_feed_season_var).grid(row=1, column=0, sticky="w", pady=(0, 2))
+    ttk.Checkbutton(race_feed_frame, text="Top 10 Today", variable=overlay_horizontal_feed_today_var).grid(row=2, column=0, sticky="w", pady=(0, 2))
+    ttk.Checkbutton(race_feed_frame, text="Top 10 Races (Season)", variable=overlay_horizontal_feed_races_season_var).grid(row=3, column=0, sticky="w", pady=(0, 2))
+    ttk.Checkbutton(race_feed_frame, text="Top 10 BRs (Season)", variable=overlay_horizontal_feed_brs_season_var).grid(row=4, column=0, sticky="w", pady=(0, 2))
+    ttk.Checkbutton(race_feed_frame, text="Top 10 Races (Today)", variable=overlay_horizontal_feed_races_today_var).grid(row=5, column=0, sticky="w", pady=(0, 2))
+    ttk.Checkbutton(race_feed_frame, text="Top 10 BRs (Today)", variable=overlay_horizontal_feed_brs_today_var).grid(row=6, column=0, sticky="w", pady=(0, 2))
+    ttk.Checkbutton(race_feed_frame, text="Top 10 Previous Race", variable=overlay_horizontal_feed_previous_race_var).grid(row=7, column=0, sticky="w", pady=(0, 2))
+    ttk.Checkbutton(race_feed_frame, text="Ticker Events", variable=overlay_horizontal_feed_events_var).grid(row=8, column=0, sticky="w")
+
+    overlay_horizontal_feed_tilt_current_var = tk.BooleanVar(value=str(config.get_setting("overlay_horizontal_feed_tilt_current") or "True") == "True")
+    overlay_horizontal_feed_tilt_today_var = tk.BooleanVar(value=str(config.get_setting("overlay_horizontal_feed_tilt_today") or "True") == "True")
+    overlay_horizontal_feed_tilt_season_var = tk.BooleanVar(value=str(config.get_setting("overlay_horizontal_feed_tilt_season") or "True") == "True")
+    overlay_horizontal_feed_tilt_last_run_var = tk.BooleanVar(value=str(config.get_setting("overlay_horizontal_feed_tilt_last_run") or "True") == "True")
+
+    tilt_horizontal_overlay_tab.grid_columnconfigure(0, weight=1)
+    tilt_horizontal_feed_frame = ttk.LabelFrame(tilt_horizontal_overlay_tab, text="Feed Items", style="Card.TLabelframe")
+    tilt_horizontal_feed_frame.grid(row=0, column=0, sticky="nsew")
+    tilt_horizontal_feed_frame.grid_columnconfigure(0, weight=1)
+
+    tilt_feed_frame = ttk.Frame(tilt_horizontal_feed_frame, style="App.TFrame")
+    tilt_feed_frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=(8, 8))
+    tilt_feed_frame.grid_columnconfigure(0, weight=1)
+    ttk.Label(tilt_feed_frame, text="Tilt ticker feed", style="Small.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 2))
+    ttk.Checkbutton(tilt_feed_frame, text="Tilt Current Run", variable=overlay_horizontal_feed_tilt_current_var).grid(row=1, column=0, sticky="w", pady=(0, 2))
+    ttk.Checkbutton(tilt_feed_frame, text="Tilt Today Standings", variable=overlay_horizontal_feed_tilt_today_var).grid(row=2, column=0, sticky="w", pady=(0, 2))
+    ttk.Checkbutton(tilt_feed_frame, text="Tilt Season Standings", variable=overlay_horizontal_feed_tilt_season_var).grid(row=3, column=0, sticky="w", pady=(0, 2))
+    ttk.Checkbutton(tilt_feed_frame, text="Tilt Last Run", variable=overlay_horizontal_feed_tilt_last_run_var).grid(row=4, column=0, sticky="w")
+
+    # Tilt overlay settings
+    tilt_overlay_tab.grid_columnconfigure(0, weight=1)
+    tilt_overlay_frame = ttk.LabelFrame(tilt_overlay_tab, text="Tilt Display", style="Card.TLabelframe")
+    tilt_overlay_frame.grid(row=0, column=0, sticky="nsew")
+    tilt_overlay_frame.grid_columnconfigure(0, weight=1)
+
+    tilt_fields_frame = ttk.Frame(tilt_overlay_frame, style="App.TFrame")
+    tilt_fields_frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=(8, 8))
+    for col in range(3):
+        tilt_fields_frame.grid_columnconfigure(col, weight=1)
+
+    ttk.Label(tilt_fields_frame, text="Starting Lifetime XP", style="Small.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 2))
+    tilt_lifetime_base_entry = ttk.Entry(tilt_fields_frame, width=12, justify='center')
+    tilt_lifetime_base_entry.grid(row=1, column=0, sticky="w", pady=(0, 6), padx=(0, 12))
     tilt_lifetime_base_entry.insert(0, config.get_setting("tilt_lifetime_base_xp") or "0")
 
-    ttk.Label(tilt_overlay_frame, text="Season Best Level", style="Small.TLabel").grid(row=1, column=0, sticky="w", padx=(10, 8), pady=4)
-    tilt_season_best_entry = ttk.Entry(tilt_overlay_frame, width=12, justify='center')
-    tilt_season_best_entry.grid(row=1, column=1, sticky="w", padx=(0, 10), pady=4)
+    ttk.Label(tilt_fields_frame, text="Season Best Level", style="Small.TLabel").grid(row=0, column=1, sticky="w", pady=(0, 2))
+    tilt_season_best_entry = ttk.Entry(tilt_fields_frame, width=12, justify='center')
+    tilt_season_best_entry.grid(row=1, column=1, sticky="w", pady=(0, 6), padx=(0, 12))
     tilt_season_best_entry.insert(0, config.get_setting("tilt_season_best_level") or "1")
 
-    ttk.Label(tilt_overlay_frame, text="Personal Best Level", style="Small.TLabel").grid(row=2, column=0, sticky="w", padx=(10, 8), pady=4)
-    tilt_personal_best_entry = ttk.Entry(tilt_overlay_frame, width=12, justify='center')
-    tilt_personal_best_entry.grid(row=2, column=1, sticky="w", padx=(0, 10), pady=4)
+    ttk.Label(tilt_fields_frame, text="Personal Best Level", style="Small.TLabel").grid(row=0, column=2, sticky="w", pady=(0, 2))
+    tilt_personal_best_entry = ttk.Entry(tilt_fields_frame, width=12, justify='center')
+    tilt_personal_best_entry.grid(row=1, column=2, sticky="w", pady=(0, 6))
     tilt_personal_best_entry.insert(0, config.get_setting("tilt_personal_best_level") or "1")
 
-    ttk.Label(tilt_overlay_frame, text="Tilt Theme", style="Small.TLabel").grid(row=3, column=0, sticky="w", padx=(10, 8), pady=4)
+    ttk.Label(tilt_fields_frame, text="Tilt Theme", style="Small.TLabel").grid(row=2, column=0, sticky="w", pady=(0, 2))
     tilt_overlay_theme_var = tk.StringVar(value=(config.get_setting("tilt_overlay_theme") or config.get_setting("overlay_theme") or "midnight"))
-    ttk.Combobox(tilt_overlay_frame, textvariable=tilt_overlay_theme_var, values=["midnight", "ocean", "sunset", "forest", "mono", "violethearts"], width=18, state="readonly").grid(row=3, column=1, sticky="w", padx=(0, 10), pady=4)
+    ttk.Combobox(
+        tilt_fields_frame,
+        textvariable=tilt_overlay_theme_var,
+        values=["midnight", "ocean", "sunset", "forest", "mono", "violethearts"],
+        width=18,
+        state="readonly"
+    ).grid(row=3, column=0, sticky="w", pady=(0, 6), padx=(0, 12))
 
-    ttk.Label(tilt_overlay_frame, text="Scroll Step (px)", style="Small.TLabel").grid(row=4, column=0, sticky="w", padx=(10, 8), pady=4)
-    tilt_scroll_step_entry = ttk.Entry(tilt_overlay_frame, width=12, justify='center')
-    tilt_scroll_step_entry.grid(row=4, column=1, sticky="w", padx=(0, 10), pady=4)
+    ttk.Label(tilt_fields_frame, text="Scroll Step (px)", style="Small.TLabel").grid(row=2, column=1, sticky="w", pady=(0, 2))
+    tilt_scroll_step_entry = ttk.Entry(tilt_fields_frame, width=12, justify='center')
+    tilt_scroll_step_entry.grid(row=3, column=1, sticky="w", pady=(0, 6), padx=(0, 12))
     tilt_scroll_step_entry.insert(0, config.get_setting("tilt_scroll_step_px") or "1")
 
-    ttk.Label(tilt_overlay_frame, text="Scroll Tick (ms)", style="Small.TLabel").grid(row=5, column=0, sticky="w", padx=(10, 8), pady=4)
-    tilt_scroll_interval_entry = ttk.Entry(tilt_overlay_frame, width=12, justify='center')
-    tilt_scroll_interval_entry.grid(row=5, column=1, sticky="w", padx=(0, 10), pady=4)
+    ttk.Label(tilt_fields_frame, text="Scroll Tick (ms)", style="Small.TLabel").grid(row=2, column=2, sticky="w", pady=(0, 2))
+    tilt_scroll_interval_entry = ttk.Entry(tilt_fields_frame, width=12, justify='center')
+    tilt_scroll_interval_entry.grid(row=3, column=2, sticky="w", pady=(0, 6))
     tilt_scroll_interval_entry.insert(0, config.get_setting("tilt_scroll_interval_ms") or "40")
 
-    ttk.Label(tilt_overlay_frame, text="Edge Pause (ms)", style="Small.TLabel").grid(row=6, column=0, sticky="w", padx=(10, 8), pady=(4, 8))
-    tilt_scroll_pause_entry = ttk.Entry(tilt_overlay_frame, width=12, justify='center')
-    tilt_scroll_pause_entry.grid(row=6, column=1, sticky="w", padx=(0, 10), pady=(4, 8))
+    ttk.Label(tilt_fields_frame, text="Edge Pause (ms)", style="Small.TLabel").grid(row=4, column=0, sticky="w", pady=(0, 2))
+    tilt_scroll_pause_entry = ttk.Entry(tilt_fields_frame, width=12, justify='center')
+    tilt_scroll_pause_entry.grid(row=5, column=0, sticky="w", pady=(0, 8), padx=(0, 12))
     tilt_scroll_pause_entry.insert(0, config.get_setting("tilt_scroll_pause_ms") or "900")
 
-    ttk.Label(tilt_overlay_frame, text="Tip: Best level settings are minimum floors for Season/Personal Best output files.", style="Small.TLabel").grid(row=7, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 8))
-    ttk.Label(overlay_tab, text="Restart MyStats after changing port. Visual changes apply on next refresh.", style="Small.TLabel").grid(row=12, column=0, columnspan=2, sticky="w", pady=(8, 0))
+    ttk.Label(
+        tilt_fields_frame,
+        text="Tip: Best level settings are minimum floors for Season/Personal Best output files.",
+        style="Small.TLabel",
+        wraplength=420,
+        justify="left"
+    ).grid(row=6, column=0, columnspan=3, sticky="w")
+
+    ttk.Label(
+        race_overlay_tab,
+        text="Restart MyStats after changing port. Visual changes apply on next refresh.",
+        style="Small.TLabel"
+    ).grid(row=2, column=0, sticky="w", pady=(8, 0))
 
 
     def reset_settings_defaults():
@@ -5488,6 +7194,7 @@ def open_settings_window():
         chat_race_results_var.set(True)
         chat_tilt_results_var.set(True)
         chat_all_commands_var.set(True)
+        chat_leaderboard_show_medals_var.set(True)
         competitive_raid_monitor_enabled_var.set(False)
         chat_narrative_alerts_var.set(True)
         chat_tilt_suppress_offline_var.set(True)
@@ -5561,6 +7268,18 @@ def open_settings_window():
         overlay_show_medals_var.set(True)
         overlay_compact_rows_var.set(False)
         overlay_horizontal_layout_var.set(False)
+        overlay_horizontal_feed_season_var.set(True)
+        overlay_horizontal_feed_today_var.set(True)
+        overlay_horizontal_feed_races_season_var.set(True)
+        overlay_horizontal_feed_brs_season_var.set(True)
+        overlay_horizontal_feed_races_today_var.set(True)
+        overlay_horizontal_feed_brs_today_var.set(True)
+        overlay_horizontal_feed_previous_race_var.set(True)
+        overlay_horizontal_feed_events_var.set(True)
+        overlay_horizontal_feed_tilt_current_var.set(True)
+        overlay_horizontal_feed_tilt_today_var.set(True)
+        overlay_horizontal_feed_tilt_season_var.set(True)
+        overlay_horizontal_feed_tilt_last_run_var.set(True)
         tilt_lifetime_base_entry.delete(0, tk.END)
         tilt_lifetime_base_entry.insert(0, "0")
         tilt_season_best_entry.delete(0, tk.END)
@@ -5581,6 +7300,13 @@ def open_settings_window():
     ttk.Button(footer, text=tr("Reset Defaults"), command=reset_settings_defaults).pack(side="left")
 
     def save_settings_and_close():
+        def _bounded_int(raw_value, default_value, min_value, max_value):
+            try:
+                parsed = int(str(raw_value).strip())
+            except (TypeError, ValueError):
+                parsed = default_value
+            return max(min_value, min(parsed, max_value))
+
         config.set_setting("CHANNEL", channel_entry.get(), persistent=True)
         selected_language_name = app_language_var.get()
         config.set_setting("app_language", app_language_name_to_code.get(selected_language_name, "en"), persistent=True)
@@ -5594,6 +7320,7 @@ def open_settings_window():
         config.set_setting("UI_THEME", selected_theme.get(), persistent=True)
         config.set_setting("chat_br_results", str(chat_br_results_var.get()), persistent=True)
         config.set_setting("chat_race_results", str(chat_race_results_var.get()), persistent=True)
+        config.set_setting("chat_leaderboard_show_medals", str(chat_leaderboard_show_medals_var.get()), persistent=True)
         config.set_setting("chat_tilt_results", str(chat_tilt_results_var.get()), persistent=True)
         config.set_setting("chat_tilt_suppress_offline", str(chat_tilt_suppress_offline_var.get()), persistent=True)
         config.set_setting("chat_tilt_redact_survivor_names", str(chat_tilt_redact_survivor_names_var.get()), persistent=True)
@@ -5615,17 +7342,35 @@ def open_settings_window():
         config.set_setting("race_narrative_alert_max_items", race_narrative_max_items_entry.get(), persistent=True)
         config.set_setting("tiltsurvivors_min_levels", tiltsurvivors_min_levels_entry.get(), persistent=True)
         config.set_setting("season_quests_enabled", str(season_quests_enabled_var.get()), persistent=True)
-        config.set_setting("season_quest_target_races", season_quest_races_entry.get(), persistent=True)
-        config.set_setting("season_quest_target_points", season_quest_points_entry.get(), persistent=True)
-        config.set_setting("season_quest_target_race_hs", season_quest_race_hs_entry.get(), persistent=True)
-        config.set_setting("season_quest_target_br_hs", season_quest_br_hs_entry.get(), persistent=True)
-        config.set_setting("season_quest_target_tilt_levels", season_quest_tilt_levels_entry.get(), persistent=True)
-        config.set_setting("season_quest_target_tilt_tops", season_quest_tilt_tops_entry.get(), persistent=True)
-        config.set_setting("season_quest_target_tilt_points", season_quest_tilt_points_entry.get(), persistent=True)
+        season_target_bounds = {
+            "season_quest_target_races": (1000, 0, 10000000),
+            "season_quest_target_points": (500000, 0, 500000000),
+            "season_quest_target_race_hs": (3000, 0, 1000000),
+            "season_quest_target_br_hs": (3000, 0, 1000000),
+            "season_quest_target_tilt_levels": (1000, 0, 1000000),
+            "season_quest_target_tilt_tops": (100, 0, 1000000),
+            "season_quest_target_tilt_points": (500000, 0, 500000000),
+        }
+        season_target_entries = {
+            "season_quest_target_races": season_quest_races_entry,
+            "season_quest_target_points": season_quest_points_entry,
+            "season_quest_target_race_hs": season_quest_race_hs_entry,
+            "season_quest_target_br_hs": season_quest_br_hs_entry,
+            "season_quest_target_tilt_levels": season_quest_tilt_levels_entry,
+            "season_quest_target_tilt_tops": season_quest_tilt_tops_entry,
+            "season_quest_target_tilt_points": season_quest_tilt_points_entry,
+        }
+        for target_key, entry_widget in season_target_entries.items():
+            default_value, min_value, max_value = season_target_bounds[target_key]
+            target_value = _bounded_int(entry_widget.get(), default_value, min_value, max_value)
+            config.set_setting(target_key, str(target_value), persistent=True)
         config.set_setting("rivals_enabled", str(rivals_enabled_var.get()), persistent=True)
-        config.set_setting("rivals_min_races", rivals_min_races_entry.get(), persistent=True)
-        config.set_setting("rivals_max_point_gap", rivals_max_gap_entry.get(), persistent=True)
-        config.set_setting("rivals_pair_count", rivals_pair_count_entry.get(), persistent=True)
+        rivals_min_races = _bounded_int(rivals_min_races_entry.get(), 50, 1, RIVALS_MAX_MIN_RACES)
+        rivals_max_gap = _bounded_int(rivals_max_gap_entry.get(), 1500, 0, RIVALS_MAX_POINT_GAP)
+        rivals_pair_count = _bounded_int(rivals_pair_count_entry.get(), 25, 1, RIVALS_MAX_PAIRS)
+        config.set_setting("rivals_min_races", str(rivals_min_races), persistent=True)
+        config.set_setting("rivals_max_point_gap", str(rivals_max_gap), persistent=True)
+        config.set_setting("rivals_pair_count", str(rivals_pair_count), persistent=True)
         config.set_setting("mycycle_enabled", str(mycycle_enabled_var.get()), persistent=True)
         config.set_setting("mycycle_announcements_enabled", str(mycycle_announce_var.get()), persistent=True)
         config.set_setting("mycycle_include_br", str(mycycle_include_br_var.get()), persistent=True)
@@ -5653,6 +7398,18 @@ def open_settings_window():
         config.set_setting("overlay_show_medals", str(overlay_show_medals_var.get()), persistent=True)
         config.set_setting("overlay_compact_rows", str(overlay_compact_rows_var.get()), persistent=True)
         config.set_setting("overlay_horizontal_layout", str(overlay_horizontal_layout_var.get()), persistent=True)
+        config.set_setting("overlay_horizontal_feed_season", str(overlay_horizontal_feed_season_var.get()), persistent=True)
+        config.set_setting("overlay_horizontal_feed_today", str(overlay_horizontal_feed_today_var.get()), persistent=True)
+        config.set_setting("overlay_horizontal_feed_races_season", str(overlay_horizontal_feed_races_season_var.get()), persistent=True)
+        config.set_setting("overlay_horizontal_feed_brs_season", str(overlay_horizontal_feed_brs_season_var.get()), persistent=True)
+        config.set_setting("overlay_horizontal_feed_races_today", str(overlay_horizontal_feed_races_today_var.get()), persistent=True)
+        config.set_setting("overlay_horizontal_feed_brs_today", str(overlay_horizontal_feed_brs_today_var.get()), persistent=True)
+        config.set_setting("overlay_horizontal_feed_previous_race", str(overlay_horizontal_feed_previous_race_var.get()), persistent=True)
+        config.set_setting("overlay_horizontal_feed_events", str(overlay_horizontal_feed_events_var.get()), persistent=True)
+        config.set_setting("overlay_horizontal_feed_tilt_current", str(overlay_horizontal_feed_tilt_current_var.get()), persistent=True)
+        config.set_setting("overlay_horizontal_feed_tilt_today", str(overlay_horizontal_feed_tilt_today_var.get()), persistent=True)
+        config.set_setting("overlay_horizontal_feed_tilt_season", str(overlay_horizontal_feed_tilt_season_var.get()), persistent=True)
+        config.set_setting("overlay_horizontal_feed_tilt_last_run", str(overlay_horizontal_feed_tilt_last_run_var.get()), persistent=True)
         config.set_setting("tilt_lifetime_base_xp", tilt_lifetime_base_entry.get(), persistent=True)
         config.set_setting("tilt_season_best_level", tilt_season_best_entry.get(), persistent=True)
         config.set_setting("tilt_personal_best_level", tilt_personal_best_entry.get(), persistent=True)
@@ -6152,7 +7909,7 @@ def refresh_main_leaderboards():
 
         if rivals_tree and rivals_tree.winfo_exists():
             rivals_tree.delete(*rivals_tree.get_children())
-            for idx, row in enumerate(get_global_rivalries(limit=200), start=1):
+            for idx, row in enumerate(get_global_rivalries(limit=RIVALS_MAX_PAIRS), start=1):
                 rivals_tree.insert("", "end", values=(
                     idx,
                     row.get('display_a') or '-',
@@ -6308,6 +8065,7 @@ def open_events_window():
             } if active_event_ids else {}
 
             # Send POST request with the data payload
+            logger.info("API call: active events for channel %s", channel)
             response = requests.post(
                 f"https://mystats.camwow.tv/api/app/get-active-events/{channel}",
                 json=data_payload  # Sending the data as JSON
@@ -6498,7 +8256,7 @@ def open_events_window():
         def build_date_picker(parent, row_index, label_text):
             ttk.Label(parent, text=label_text).grid(row=row_index, column=0, sticky="w", pady=(0, 4))
 
-            value = tk.StringVar(value=datetime.now().strftime('%Y-%m-%d'))
+            value = tk.StringVar(value=get_internal_adjusted_time().strftime('%Y-%m-%d'))
             field_frame = ttk.Frame(parent, style="App.TFrame")
             field_frame.grid(row=row_index + 1, column=0, sticky="w", pady=(0, 10))
 
@@ -6656,7 +8414,7 @@ root.config(menu=menu_bar)
 TILT_RUNTIME_PERSISTENT_KEYS = {
     "tilt_current_level", "tilt_current_elapsed", "tilt_current_top_tiltee",
     "tilt_current_run_id", "tilt_run_started_at", "tilt_run_ledger",
-    "tilt_top_tiltee_ledger", "tilt_current_top_tiltee_count", "tilt_run_xp",
+    "tilt_run_deaths_ledger", "tilt_top_tiltee_ledger", "tilt_current_top_tiltee_count", "tilt_run_xp",
     "tilt_run_points", "tilt_run_total_seconds", "tilt_previous_run_xp", "tilt_level_completion_overlay",
     "tilt_run_completion_overlay", "tilt_run_completion_event_id",
     "tilt_last_run_summary", "tilt_best_run_xp_today", "tilt_highest_level_points_today",
@@ -6672,7 +8430,7 @@ def set_tilt_runtime_setting(key, value):
 
 class ConfigManager:
     def __init__(self):
-        self.settings_file = 'settings.txt'
+        self.settings_file = SETTINGS_FILE_PATH
         self.settings = {}
         self.transient_settings = {}
         self.persistent_keys = {'TWITCH_USERNAME', 'TWITCH_TOKEN', 'CHANNEL', 'chunk_alert', 'chunk_alert_value',
@@ -6681,7 +8439,7 @@ class ConfigManager:
                                 'chunk_alert_sound', 'reset_audio_sound', 'audio_device', 'checkpoint_file',
                                 'tilt_player_file', 'active_event_ids', 'paused_event_ids', 'checkpoint_results_file',
                                 'tilts_results_file', 'tilt_level_file', 'map_data_file', 'map_results_file',
-                                'UI_THEME', 'chat_br_results', 'chat_race_results', 'chat_tilt_results',
+                                'UI_THEME', 'chat_br_results', 'chat_race_results', 'chat_leaderboard_show_medals', 'chat_tilt_results',
                                 'chat_tilt_suppress_offline', 'chat_tilt_redact_survivor_names',
                                 'chat_mystats_command', 'chat_all_commands', 'chat_narrative_alerts', 'competitive_raid_monitor_enabled', 'competitive_raid_phase', 'competitive_raid_queue_started_at', 'competitive_raid_live_started_at', 'competitive_raid_last_summary_live_started_at',
                                 'narrative_alert_grinder_enabled', 'narrative_alert_winmilestone_enabled',
@@ -6697,6 +8455,7 @@ class ConfigManager:
                                 'season_quest_complete_races', 'season_quest_complete_points', 'season_quest_complete_race_hs',
                                 'season_quest_complete_br_hs', 'season_quest_complete_tilt_levels',
                                 'season_quest_complete_tilt_tops', 'season_quest_complete_tilt_points',
+                                'season_quest_completion_state',
                                 'rivals_enabled', 'rivals_min_races', 'rivals_max_point_gap', 'rivals_pair_count',
                                 'mycycle_enabled', 'mycycle_announcements_enabled', 'mycycle_include_br',
                                 'mycycle_min_place', 'mycycle_max_place', 'mycycle_primary_session_id',
@@ -6706,7 +8465,12 @@ class ConfigManager:
                                 'teams_bonus_weight_2x', 'teams_bonus_weight_3x', 'teams_bonus_weight_4x',
                                 'overlay_rotation_seconds', 'overlay_refresh_seconds', 'overlay_theme',
                                 'overlay_card_opacity', 'overlay_text_scale', 'overlay_show_medals',
-                                'overlay_compact_rows', 'overlay_horizontal_layout', 'overlay_server_port', 'tilt_lifetime_base_xp',
+                                'overlay_compact_rows', 'overlay_horizontal_layout', 'overlay_horizontal_feed_season', 'overlay_horizontal_feed_today',
+                                'overlay_horizontal_feed_races_season', 'overlay_horizontal_feed_brs_season', 'overlay_horizontal_feed_races_today',
+                                'overlay_horizontal_feed_brs_today', 'overlay_horizontal_feed_previous_race', 'overlay_horizontal_feed_events',
+                                'overlay_horizontal_feed_tilt_current', 'overlay_horizontal_feed_tilt_today',
+                                'overlay_horizontal_feed_tilt_season', 'overlay_horizontal_feed_tilt_last_run',
+                                'overlay_server_port', 'tilt_lifetime_base_xp',
                                 'tilt_season_best_level', 'tilt_personal_best_level', 'tilt_overlay_theme', 'tilt_scroll_step_px', 'tilt_scroll_interval_ms',
                                 'tilt_scroll_pause_ms', 'tiltsurvivors_min_levels', 'tiltdeath_min_levels',
                                 'update_later_clicks', 'update_later_version', 'pending_update_installer_path',
@@ -6716,6 +8480,7 @@ class ConfigManager:
         self.defaults = {
             'chat_br_results': 'True',
             'chat_race_results': 'True',
+            'chat_leaderboard_show_medals': 'True',
             'chat_tilt_results': 'True',
             'chat_tilt_suppress_offline': 'True',
             'chat_tilt_redact_survivor_names': 'False',
@@ -6759,6 +8524,7 @@ class ConfigManager:
             'season_quest_complete_tilt_levels': 'False',
             'season_quest_complete_tilt_tops': 'False',
             'season_quest_complete_tilt_points': 'False',
+            'season_quest_completion_state': '{}',
             'rivals_enabled': 'True',
             'rivals_min_races': '50',
             'rivals_max_point_gap': '1500',
@@ -6791,6 +8557,18 @@ class ConfigManager:
             'overlay_show_medals': 'True',
             'overlay_compact_rows': 'False',
             'overlay_horizontal_layout': 'False',
+            'overlay_horizontal_feed_season': 'True',
+            'overlay_horizontal_feed_today': 'True',
+            'overlay_horizontal_feed_races_season': 'True',
+            'overlay_horizontal_feed_brs_season': 'True',
+            'overlay_horizontal_feed_races_today': 'True',
+            'overlay_horizontal_feed_brs_today': 'True',
+            'overlay_horizontal_feed_previous_race': 'True',
+            'overlay_horizontal_feed_events': 'True',
+            'overlay_horizontal_feed_tilt_current': 'True',
+            'overlay_horizontal_feed_tilt_today': 'True',
+            'overlay_horizontal_feed_tilt_season': 'True',
+            'overlay_horizontal_feed_tilt_last_run': 'True',
             'tilt_lifetime_base_xp': '0',
             'tilt_season_best_level': '1',
             'tilt_personal_best_level': '1',
@@ -6806,6 +8584,7 @@ class ConfigManager:
             'tilt_current_run_id': '',
             'tilt_run_started_at': '',
             'tilt_run_ledger': '{}',
+            'tilt_run_deaths_ledger': '{}',
             'tilt_top_tiltee_ledger': '{}',
             'tilt_current_top_tiltee_count': '0',
             'tilt_run_xp': '0',
@@ -6937,6 +8716,25 @@ class TimeManager:
 time_manager = TimeManager()
 
 
+def get_internal_adjusted_time():
+    """Return MyStats internal clock datetime aligned to Marble Day boundaries."""
+    try:
+        _, _, _, adjusted_time = time_manager.get_adjusted_time()
+        if adjusted_time is not None:
+            return adjusted_time
+    except Exception:
+        logger.error("Failed to read internal time manager clock.", exc_info=True)
+    eastern = pytz.timezone('America/New_York')
+    return datetime.now(eastern) + timedelta(hours=-12)
+
+
+def get_internal_now_iso(timespec='seconds'):
+    now_value = get_internal_adjusted_time()
+    if timespec == 'seconds':
+        now_value = now_value.replace(microsecond=0)
+    return now_value.isoformat(timespec=timespec)
+
+
 def data_sync():
     config.set_setting('data_sync', 'yes', persistent=False)
 
@@ -6998,7 +8796,7 @@ def process_event_data(event_id):
             encoding = result['encoding'] if result['encoding'] else 'utf-8'
 
             with open(allraces, 'r', encoding=encoding, errors='ignore') as f:
-                reader = csv.reader(f)
+                reader = iter_csv_rows(f)
                 for row in reader:
                     if len(row) < 11:
                         continue
@@ -7044,13 +8842,13 @@ def process_event_data(event_id):
         except FileNotFoundError:
             print(f"File not found: {allraces}")
         except Exception as e:
-            print(f"An error occurred while processing the file {allraces}: {e}")
+            logger.error("An error occurred while processing the file %s", allraces, exc_info=True)
 
     # Process checkpoint files similarly to allraces
     for checkpoint_file in glob.glob(os.path.join(directory, "checkpoints_*.csv")):
         try:
             with open(checkpoint_file, 'r', encoding='utf-8', errors='ignore') as f:
-                reader = csv.reader(f)
+                reader = iter_csv_rows(f)
                 for row in reader:
                     try:
                         racer_name = row[1].lower()
@@ -7064,7 +8862,7 @@ def process_event_data(event_id):
         except FileNotFoundError:
             print(f"File not found: {checkpoint_file}")
         except Exception as e:
-            print(f"An error occurred while processing the file {checkpoint_file}: {e}")
+            logger.error("An error occurred while processing the file %s", checkpoint_file, exc_info=True)
 
     # Use %localappdata%/mystats/data as the save directory
     local_app_data = os.getenv('LOCALAPPDATA')
@@ -7088,7 +8886,7 @@ def process_event_data(event_id):
             for racer in event_data.values():
                 writer.writerow(racer)
     except Exception as e:
-        print(f"Error saving CSV file: {e}")
+        logger.error("Error saving CSV file", exc_info=True)
 
     # Upload event data CSV to API
     api_url = f"https://mystats.camwow.tv/api/app/upload-event-data/"
@@ -7194,7 +8992,7 @@ def create_results_files():
                 f"[{timestamp}]  - ~\\AppData\\Local\\MarblesOnStream\\Saved\\SaveGames\\LastSeasonRoyale.csv "
                 f"does not exist\n")
     except Exception as e:
-        print(f"{Fore.RED}We see no record of you hosting a Battle Royale.  Do that.{Style.RESET_ALL}")
+        logger.error("We see no record of you hosting a Battle Royale.  Do that.", exc_info=True)
 
     race_file = os.path.expanduser(r"~\AppData\Local\MarblesOnStream\Saved\SaveGames\LastSeasonRace.csv")
     config.set_setting('race_file', race_file, persistent=True)
@@ -7207,7 +9005,7 @@ def create_results_files():
                 f"[{timestamp}]  - ~\\AppData\\Local\\MarblesOnStream\\Saved\\SaveGames\\LastSeasonRace.csv "
                 f"does not exist\n")
     except Exception as e:
-        print(f"{Fore.RED}We see no record of you hosting a map race.  Do that.{Style.RESET_ALL}")
+        logger.error("We see no record of you hosting a map race.  Do that.", exc_info=True)
 
     tilt_player_file = os.path.expanduser(r"~\AppData\Local\MarblesOnStream\Saved\SaveGames\LastTiltLevelPlayers.csv")
     config.set_setting('tilt_player_file', tilt_player_file, persistent=True)
@@ -7220,7 +9018,7 @@ def create_results_files():
                 f"[{timestamp}]  - ~\\AppData\\Local\\MarblesOnStream\\Saved\\SaveGames\\LastTiltLevelPlayers.csv "
                 f"does not exist\n")
     except Exception as e:
-        print(f"{Fore.RED}No tilt file, tilt again or get tilted.{Style.RESET_ALL}")
+        logger.error("No tilt file, tilt again or get tilted.", exc_info=True)
 
     tilt_level_file = os.path.expanduser(r"~\AppData\Local\MarblesOnStream\Saved\SaveGames\LastTiltLevel.csv")
     config.set_setting('tilt_level_file', tilt_level_file, persistent=True)
@@ -7233,7 +9031,7 @@ def create_results_files():
                 f"[{timestamp}]  - ~\\AppData\\Local\\MarblesOnStream\\Saved\\SaveGames\\LastTiltLevel.csv "
                 f"does not exist\n")
     except Exception as e:
-        print(f"{Fore.RED}No tilt file, tilt again or get tilted.{Style.RESET_ALL}")
+        logger.error("No tilt file, tilt again or get tilted.", exc_info=True)
 
     checkpoint_file = os.path.expanduser(r"~\AppData\Local\MarblesOnStream\Saved\SaveGames\LastRaceNumbersHit.csv")
     config.set_setting('checkpoint_file', checkpoint_file, persistent=True)
@@ -7246,7 +9044,7 @@ def create_results_files():
                 f"[{timestamp}]  - ~\\AppData\\Local\\MarblesOnStream\\Saved\\SaveGames\\LastRaceNumbersHit.csv "
                 f"does not exist\n")
     except Exception as e:
-        print(f"{Fore.RED}We see no record.  Do something.{Style.RESET_ALL}")
+        logger.error("We see no record.  Do something.", exc_info=True)
 
     map_file = os.path.expanduser(r"~\AppData\Local\MarblesOnStream\Saved\SaveGames\LastCustomRaceMapPlayed.csv")
     config.set_setting('map_data_file', map_file, persistent=True)
@@ -7259,7 +9057,7 @@ def create_results_files():
                 f"[{timestamp}]  - ~\\AppData\\Local\\MarblesOnStream\\Saved\\SaveGames\\LastCustomRaceMapPlayed.csv "
                 f"does not exist\n")
     except Exception as e:
-        print(f"{Fore.RED}We see no record.  Do something.{Style.RESET_ALL}")
+        logger.error("We see no record.  Do something.", exc_info=True)
 
 
 def load_racer_data():
@@ -7284,7 +9082,7 @@ def load_racer_data():
             result = chardet.detect(raw_data)
             encoding = result['encoding'] if result['encoding'] else 'utf-8'
             with open(allraces, 'r', encoding=encoding, errors='ignore') as f:
-                reader = csv.reader(f)
+                reader = iter_csv_rows(f)
                 for row in reader:
                     if len(row) < 7:
                         continue
@@ -7312,8 +9110,7 @@ def load_racer_data():
         except FileNotFoundError:
             print(f"File not found: {allraces}")
         except Exception as e:
-            print(f"An error occurred while processing the file {allraces}: {e}")
-            print(e)
+            logger.error("An error occurred while processing the file %s", allraces, exc_info=True)
 
     racer_data = dict(racer_data)
 
@@ -7327,8 +9124,10 @@ def load_additional_settings():
 
     with MYCYCLE_LOCK:
         cycle_data = load_mycycle_data()
-        ensure_default_mycycle_session(cycle_data)
-        save_mycycle_data(cycle_data)
+        migrated = bool(cycle_data.pop('_changed', False))
+        _, changed = ensure_default_mycycle_session(cycle_data)
+        if changed or migrated:
+            save_mycycle_data(cycle_data)
 
     load_race_hs_season = 0
     load_race_hs_today = 0
@@ -7347,7 +9146,7 @@ def load_additional_settings():
             result = chardet.detect(raw_data)
             encoding = result['encoding'] if result['encoding'] else 'utf-8'
             with open(allraces, 'r', encoding=encoding, errors='ignore') as f:
-                reader = csv.reader(f)
+                reader = iter_csv_rows(f)
                 for row in reader:
                     if len(row) >= 5:
                         if int(row[0]) == 1:
@@ -7360,8 +9159,7 @@ def load_additional_settings():
         except FileNotFoundError:
             print(f"File not found: {allraces}")
         except Exception as e:
-            print(f"An error occurred while processing the file {allraces}: {e}")
-            print(e)
+            logger.error("An error occurred while processing the file %s", allraces, exc_info=True)
 
     config.set_setting('totalpointsseason', load_totalpointsseason, persistent=False)
     config.set_setting('totalcountseason', load_totalcountseason, persistent=False)
@@ -7379,7 +9177,7 @@ def load_additional_settings():
         encoding = result['encoding'] if result['encoding'] else 'utf-8'  # Default to UTF-8 if detection fails
 
         with open(config.get_setting('allraces_file'), 'r', encoding=encoding, errors='ignore') as t:
-            today_reader = csv.reader(t)
+            today_reader = iter_csv_rows(t)
             rows = list(today_reader)
 
             for row in rows:
@@ -7397,6 +9195,8 @@ def load_additional_settings():
         print(f"File not found: " + config.get_setting('allraces_file'))
         with open(config.get_setting('allraces_file'), 'w', encoding='utf-8', errors='ignore'):
             pass
+    except csv.Error as e:
+        logger.error("Malformed CSV in allraces_file (possible bad quoting): %s", e)
 
     if load_totalcounttoday == 0:
         load_averagepointstoday = 0
@@ -7655,58 +9455,446 @@ def _create_update_progress_dialog(version_label):
     return progress_window, progress_var, percent_var, status_var
 
 
-def _start_installer_and_exit(installer_path, silent_mode=True):
-    if not installer_path:
-        messagebox.showerror("Update Failed", "Installer path was empty.")
-        return
+def _launch_update_splash(version_label, installer_pid):
+    """Launch a standalone PowerShell splash window that monitors the installer.
 
-    command = [installer_path]
-    if silent_mode:
-        command.extend(["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS"])
+    The splash runs as a separate process so it survives MyStats shutting down.
+    It shows a branded indeterminate progress bar and closes automatically when
+    the installer process (identified by *installer_pid*) exits.
+    """
+    ps_script = r'''
+Add-Type -AssemblyName PresentationFramework
+Add-Type -AssemblyName PresentationCore
 
-    config.set_setting('pending_update_installer_path', installer_path, persistent=True)
-    config.set_setting('pending_update_silent_mode', 'True' if silent_mode else 'False', persistent=True)
-    config.set_setting('pending_update_version_label', str(config.get_setting('update_later_version') or ''), persistent=True)
+[xml]$xaml = @"
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        Title="MyStats Update" Height="180" Width="420"
+        WindowStartupLocation="CenterScreen" ResizeMode="NoResize"
+        WindowStyle="SingleBorderWindow" Topmost="True"
+        Background="#1a1a2e">
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="16"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="12"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <TextBlock Grid.Row="0" Text="MYSTATS_VERSION_PLACEHOLDER"
+                   Foreground="#00d4ff" FontSize="18" FontWeight="Bold"
+                   HorizontalAlignment="Center"/>
+        <ProgressBar Grid.Row="2" Height="22" IsIndeterminate="True"
+                     Foreground="#00d4ff" Background="#2a2a4a"/>
+        <TextBlock Grid.Row="4" Text="Please wait while the update installs..."
+                   Foreground="#aaaacc" FontSize="12"
+                   HorizontalAlignment="Center"/>
+    </Grid>
+</Window>
+"@
+
+$reader = (New-Object System.Xml.XmlNodeReader $xaml)
+$window = [Windows.Markup.XamlReader]::Load($reader)
+
+$installerPid = INSTALLER_PID_PLACEHOLDER
+$timer = New-Object System.Windows.Threading.DispatcherTimer
+$timer.Interval = [TimeSpan]::FromSeconds(2)
+$timer.Add_Tick({
+    try {
+        $proc = Get-Process -Id $installerPid -ErrorAction Stop
+    } catch {
+        $timer.Stop()
+        $window.Close()
+    }
+})
+$timer.Start()
+$window.ShowDialog() | Out-Null
+'''.replace('MYSTATS_VERSION_PLACEHOLDER', f'Updating MyStats to {version_label} ...').replace(
+        'INSTALLER_PID_PLACEHOLDER', str(installer_pid))
 
     try:
-        creationflags = 0
-        if sys.platform == "win32":
-            creationflags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        subprocess.Popen(
+            ['powershell', '-NoProfile', '-WindowStyle', 'Hidden',
+             '-ExecutionPolicy', 'Bypass', '-Command', ps_script],
+            creationflags=getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        logger.info("Update splash launched for installer PID %s", installer_pid)
+    except Exception as exc:
+        logger.warning("Could not launch update splash: %s", exc)
 
-        subprocess.Popen(command, shell=False, creationflags=creationflags)
+
+def _schedule_installer_bootstrap(installer_path, command_args, version_label, parent_pid):
+    """Schedule a one-shot Windows task that launches installer + splash outside MyStats job."""
+    if sys.platform != "win32":
+        raise RuntimeError("Windows bootstrap scheduling is only available on win32")
+
+    task_name = f"MyStatsUpdate_{uuid.uuid4().hex}"
+    escaped_args = ', '.join("'" + str(arg).replace("'", "''") + "'" for arg in command_args)
+
+    ps_script = f"""
+$ErrorActionPreference = 'Stop'
+$installerPath = {json.dumps(installer_path)}
+$installerArgs = @({escaped_args})
+$versionLabel = {json.dumps(version_label or 'latest')}
+$parentPid = {int(parent_pid)}
+$taskName = {json.dumps(task_name)}
+
+try {{
+    while (Get-Process -Id $parentPid -ErrorAction SilentlyContinue) {{
+        Start-Sleep -Milliseconds 500
+    }}
+
+    $installer = Start-Process -FilePath $installerPath -ArgumentList $installerArgs -PassThru -WindowStyle Hidden
+
+    Add-Type -AssemblyName PresentationFramework
+    Add-Type -AssemblyName PresentationCore
+
+    [xml]$xaml = @"
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        Title="MyStats Update" Height="180" Width="420"
+        WindowStartupLocation="CenterScreen" ResizeMode="NoResize"
+        WindowStyle="SingleBorderWindow" Topmost="True"
+        Background="#1a1a2e">
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="16"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="12"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <TextBlock Grid.Row="0" Text="Updating MyStats to $($versionLabel) ..."
+                   Foreground="#00d4ff" FontSize="18" FontWeight="Bold"
+                   HorizontalAlignment="Center"/>
+        <ProgressBar Grid.Row="2" Height="22" IsIndeterminate="True"
+                     Foreground="#00d4ff" Background="#2a2a4a"/>
+        <TextBlock Grid.Row="4" Text="Please wait while the update installs..."
+                   Foreground="#aaaacc" FontSize="12"
+                   HorizontalAlignment="Center"/>
+    </Grid>
+</Window>
+"@
+
+    $reader = New-Object System.Xml.XmlNodeReader $xaml
+    $window = [Windows.Markup.XamlReader]::Load($reader)
+    $timer = New-Object System.Windows.Threading.DispatcherTimer
+    $timer.Interval = [TimeSpan]::FromSeconds(1)
+    $timer.Add_Tick({{
+        if (-not (Get-Process -Id $installer.Id -ErrorAction SilentlyContinue)) {{
+            $timer.Stop()
+            $window.Close()
+        }}
+    }})
+    $timer.Start()
+    $window.ShowDialog() | Out-Null
+}} finally {{
+    schtasks /Delete /TN $taskName /F | Out-Null
+}}
+""".strip()
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.ps1', prefix='mystats_update_bootstrap_', mode='w', encoding='utf-8') as script_file:
+        script_file.write(ps_script)
+        script_path = script_file.name
+
+    run_time = (get_internal_adjusted_time() + timedelta(minutes=1)).strftime("%H:%M")
+    task_command = f'powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{script_path}"'
+
+    try:
+        subprocess.run(
+            ['schtasks', '/Create', '/F', '/SC', 'ONCE', '/ST', run_time, '/TN', task_name, '/TR', task_command],
+            check=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        subprocess.run(
+            ['schtasks', '/Run', '/TN', task_name],
+            check=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        logger.info("Installer bootstrap scheduled with task %s", task_name)
+    except Exception:
+        try:
+            os.remove(script_path)
+        except OSError:
+            pass
+        raise
+
+
+def _launch_installer_process(installer_path, command_args):
+    """Launch installer in a way that survives MyStats process shutdown."""
+    if sys.platform == "win32":
+        # Prefer CreateProcess via subprocess first so we can request breakaway
+        # from the parent job object (common when running from packaged apps).
+        # Without breakaway, Windows can terminate child processes when MyStats
+        # exits, which can kill the updater right after launch.
+        try:
+            creationflags = 0
+            creationflags |= getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
+            creationflags |= getattr(subprocess, 'DETACHED_PROCESS', 0x00000008)
+            creationflags |= getattr(subprocess, 'CREATE_BREAKAWAY_FROM_JOB', 0x01000000)
+
+            proc = subprocess.Popen(
+                [installer_path, *command_args],
+                creationflags=creationflags,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                close_fds=True,
+            )
+            logger.info("Installer launched via CreateProcess (pid=%s)", proc.pid)
+            return proc
+        except Exception as popen_exc:
+            logger.warning("CreateProcess installer launch failed, falling back to ShellExecuteExW: %s", popen_exc)
+
+        params = subprocess.list2cmdline(command_args)
+
+        class SHELLEXECUTEINFOW(ctypes.Structure):
+            _fields_ = [
+                ("cbSize", ctypes.c_ulong),
+                ("fMask", ctypes.c_ulong),
+                ("hwnd", ctypes.c_void_p),
+                ("lpVerb", ctypes.c_wchar_p),
+                ("lpFile", ctypes.c_wchar_p),
+                ("lpParameters", ctypes.c_wchar_p),
+                ("lpDirectory", ctypes.c_wchar_p),
+                ("nShow", ctypes.c_int),
+                ("hInstApp", ctypes.c_void_p),
+                ("lpIDList", ctypes.c_void_p),
+                ("lpClass", ctypes.c_wchar_p),
+                ("hkeyClass", ctypes.c_void_p),
+                ("dwHotKey", ctypes.c_ulong),
+                ("hIconOrMonitor", ctypes.c_void_p),
+                ("hProcess", ctypes.c_void_p),
+            ]
+
+        sei = SHELLEXECUTEINFOW()
+        sei.cbSize = ctypes.sizeof(SHELLEXECUTEINFOW)
+        sei.fMask = 0x00000040  # SEE_MASK_NOCLOSEPROCESS
+        sei.hwnd = None
+        sei.lpVerb = "open"
+        sei.lpFile = installer_path
+        sei.lpParameters = params
+        sei.lpDirectory = None
+        sei.nShow = 0
+
+        shell_execute_ex = ctypes.windll.shell32.ShellExecuteExW
+        shell_execute_ex.argtypes = [ctypes.POINTER(SHELLEXECUTEINFOW)]
+        shell_execute_ex.restype = ctypes.c_int
+
+        if not shell_execute_ex(ctypes.byref(sei)):
+            error_code = ctypes.windll.kernel32.GetLastError()
+            raise RuntimeError(f"ShellExecuteExW failed with error {error_code}")
+
+        process_handle = sei.hProcess
+        process_id = ctypes.windll.kernel32.GetProcessId(process_handle)
+
+        if process_id:
+            logger.info("Installer launched via ShellExecuteExW (pid=%s)", process_id)
+
+            class _InstallerProcRef:
+                def __init__(self, pid, handle):
+                    self.pid = pid
+                    self._handle = handle
+
+                def poll(self):
+                    if not self._handle:
+                        return 0
+
+                    WAIT_OBJECT_0 = 0
+                    WAIT_TIMEOUT = 0x00000102
+                    wait_status = ctypes.windll.kernel32.WaitForSingleObject(self._handle, 0)
+                    if wait_status == WAIT_TIMEOUT:
+                        return None
+                    if wait_status != WAIT_OBJECT_0:
+                        return None
+
+                    exit_code = ctypes.c_ulong()
+                    if ctypes.windll.kernel32.GetExitCodeProcess(self._handle, ctypes.byref(exit_code)):
+                        ctypes.windll.kernel32.CloseHandle(self._handle)
+                        self._handle = None
+                        return int(exit_code.value)
+                    return None
+
+            return _InstallerProcRef(process_id, process_handle)
+
+        # If process ID was unavailable, keep legacy behavior and continue without PID tracking.
+        logger.info("Installer launched via ShellExecuteExW (process id unavailable)")
+        if process_handle:
+            ctypes.windll.kernel32.CloseHandle(process_handle)
+        return None
+
+    creationflags = getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
+    creationflags |= getattr(subprocess, 'CREATE_BREAKAWAY_FROM_JOB', 0x01000000)
+    proc = subprocess.Popen(
+        [installer_path, *command_args],
+        creationflags=creationflags,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    logger.info("Installer process started, PID=%s", proc.pid)
+    return proc
+
+def _start_installer_and_exit(installer_path, silent_mode=True):
+    if not installer_path or not os.path.exists(installer_path):
+        logger.error("Installer not found on disk: %s", installer_path)
+        messagebox.showerror("Update Failed", "Downloaded installer was not found on disk.")
+        return
+
+    # Validate the file is actually a PE executable (MZ header).
+    try:
+        with open(installer_path, 'rb') as f:
+            header = f.read(2)
+        if header != b'MZ':
+            logger.error("Downloaded file is not a valid executable (header: %r)", header)
+            messagebox.showerror(
+                "Update Failed",
+                "The downloaded update file is not a valid installer.\n"
+                "Please try again or download manually from the website."
+            )
+            try:
+                os.remove(installer_path)
+            except OSError:
+                pass
+            return
+    except OSError as exc:
+        logger.error("Could not read installer file for validation: %s", exc)
+        messagebox.showerror("Update Failed", f"Could not read installer file: {exc}")
+        return
+
+    file_size = os.path.getsize(installer_path)
+    logger.info("Installer validated: %s (%d bytes)", installer_path, file_size)
+
+    # Always use /VERYSILENT. /NORESTART prevents automatic reboots.
+    command_args = ["/VERYSILENT", "/CLOSEAPPLICATIONS", "/SUPPRESSMSGBOXES", "/NORESTART"]
+    command = [installer_path, *command_args]
+
+    version_label = str(config.get_setting('pending_update_version_label') or '').strip()
+
+    # Save recovery settings BEFORE launch so if the app crashes mid-launch,
+    # recovery can retry on next startup.
+    config.set_setting('pending_update_installer_path', installer_path, persistent=True)
+    config.set_setting('pending_update_silent_mode', 'True', persistent=True)
+    config.set_setting('pending_update_version_label', version_label, persistent=True)
+
+    try:
+        logger.info("Launching installer: %s", command)
+
+        if sys.platform == "win32":
+            # Fresh approach for PyInstaller builds: schedule a Windows Task that
+            # starts after this process exits, so the installer is not tied to our
+            # process tree or job object.
+            _schedule_installer_bootstrap(
+                installer_path,
+                command_args,
+                version_label,
+                os.getpid(),
+            )
+
+            # Task creation succeeded — clear recovery settings and exit so
+            # bootstrap can detect parent shutdown and launch installer.
+            config.set_setting('pending_update_installer_path', '', persistent=True)
+            config.set_setting('pending_update_silent_mode', 'True', persistent=True)
+            config.set_setting('pending_update_version_label', '', persistent=True)
+
+            logger.info("Closing MyStats so scheduled installer bootstrap can proceed.")
+            root.after(500, force_exit_application)
+            return
+
+        proc = _launch_installer_process(installer_path, command_args)
+
+        # Verify direct child launches are still alive (when we have a process
+        # handle). ShellExecute launches do not provide a child PID here.
+        if proc is not None:
+            import time as _time
+            _time.sleep(1)
+            exit_code = proc.poll()
+            if exit_code is not None:
+                logger.error("Installer exited immediately with code %s", exit_code)
+                messagebox.showerror(
+                    "Update Failed",
+                    f"The installer exited immediately (code {exit_code}).\n"
+                    "It may have been blocked by antivirus software.\n"
+                    "Please try downloading and running the installer manually."
+                )
+                config.set_setting('pending_update_installer_path', '', persistent=True)
+                config.set_setting('pending_update_version_label', '', persistent=True)
+                return
+
+        # Installer is running — clear recovery settings.
         config.set_setting('pending_update_installer_path', '', persistent=True)
         config.set_setting('pending_update_silent_mode', 'True', persistent=True)
         config.set_setting('pending_update_version_label', '', persistent=True)
-        force_exit_application()
+
+        # Launch the custom splash window (separate process, survives MyStats exit).
+        if proc is not None:
+            _launch_update_splash(version_label or 'latest', proc.pid)
+
+        # Give the splash a moment to appear, then close MyStats so the
+        # installer can replace our files.
+        logger.info("Closing MyStats so installer can proceed.")
+        root.after(500, force_exit_application)
+
     except Exception as exc:
-        messagebox.showerror("Update Failed", f"Could not start installer: {exc}")
+        logger.error("Failed to launch installer: %s", exc, exc_info=True)
+        messagebox.showerror(
+            "Update Failed",
+            f"Could not start installer: {exc}\n"
+            "Please try downloading and running the installer manually."
+        )
 
 
 def recover_pending_update_launch(parent=None):
     installer_path = str(config.get_setting('pending_update_installer_path') or '').strip()
-    silent_mode_raw = str(config.get_setting('pending_update_silent_mode') or 'True').strip().lower()
-    silent_mode = silent_mode_raw == 'true'
     version_label = str(config.get_setting('pending_update_version_label') or '').strip()
 
     if not installer_path:
         return False
 
     if not os.path.exists(installer_path):
+        logger.info("Recovery: installer file gone, clearing settings.")
         config.set_setting('pending_update_installer_path', '', persistent=True)
         config.set_setting('pending_update_silent_mode', 'True', persistent=True)
         config.set_setting('pending_update_version_label', '', persistent=True)
         return False
 
-    command = [installer_path]
-    if silent_mode:
-        command.extend(["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS"])
+    # Validate PE header.
+    try:
+        with open(installer_path, 'rb') as f:
+            if f.read(2) != b'MZ':
+                logger.error("Recovery: installer file is not a valid PE executable.")
+                config.set_setting('pending_update_installer_path', '', persistent=True)
+                config.set_setting('pending_update_version_label', '', persistent=True)
+                return False
+    except OSError:
+        config.set_setting('pending_update_installer_path', '', persistent=True)
+        config.set_setting('pending_update_version_label', '', persistent=True)
+        return False
+
+    command_args = ["/VERYSILENT", "/CLOSEAPPLICATIONS", "/SUPPRESSMSGBOXES", "/NORESTART"]
+    command = [installer_path, *command_args]
 
     try:
-        creationflags = 0
-        if sys.platform == "win32":
-            creationflags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        logger.info("Recovery: launching installer %s", command)
 
-        subprocess.Popen(command, shell=False, creationflags=creationflags)
+        if sys.platform == "win32":
+            _schedule_installer_bootstrap(
+                installer_path,
+                command_args,
+                version_label,
+                os.getpid(),
+            )
+            logger.info("Recovery: scheduled installer bootstrap task")
+        else:
+            proc = _launch_installer_process(installer_path, command_args)
+            if proc is not None:
+                logger.info("Recovery: installer PID=%s", proc.pid)
+
         config.set_setting('pending_update_installer_path', '', persistent=True)
         config.set_setting('pending_update_silent_mode', 'True', persistent=True)
         config.set_setting('pending_update_version_label', '', persistent=True)
@@ -7714,11 +9902,11 @@ def recover_pending_update_launch(parent=None):
         label_suffix = f" {version_label}" if version_label else ""
         show_windows_toast("MyStats Update", f"Resuming installer launch{label_suffix}.")
 
-        if parent is not None and parent.winfo_exists():
-            parent.after(150, force_exit_application)
+        # Do not force-close MyStats here. We only relaunch the pending installer
+        # and allow it to coordinate any shutdown it requires.
         return True
     except Exception as exc:
-        logger.warning(f"Pending update installer launch failed: {exc}")
+        logger.warning("Pending update installer launch failed: %s", exc)
         if parent is not None and parent.winfo_exists():
             parent.after(0, lambda: messagebox.showwarning(
                 "Update Resume Failed",
@@ -7734,6 +9922,7 @@ def download_and_install_update(download_url, version_label, silent_mode=True):
         messagebox.showerror("Update Failed", "No download URL was provided by the update service.")
         return
 
+    logger.info("Starting update download from %s", download_url)
     toast_on_progress = is_minimized_to_tray()
     show_windows_toast("MyStats Update", f"Downloading MyStats {version_label} update...")
 
@@ -7761,7 +9950,18 @@ def download_and_install_update(download_url, version_label, silent_mode=True):
         try:
             response = requests.get(download_url, stream=True, timeout=60)
             response.raise_for_status()
+
+            # Check content-type to catch accidental HTML page downloads.
+            content_type = response.headers.get('content-type', '')
+            if 'text/html' in content_type:
+                logger.error("Download URL returned HTML instead of a binary: %s", content_type)
+                raise RuntimeError(
+                    "The update server returned a web page instead of an installer file. "
+                    "Please try again later or download manually."
+                )
+
             total_bytes = int(response.headers.get('content-length') or 0)
+            logger.info("Download started: %d bytes expected", total_bytes)
             downloaded = 0
 
             with tempfile.NamedTemporaryFile(delete=False, suffix='.exe', prefix='mystats_update_') as tmp_file:
@@ -7773,13 +9973,15 @@ def download_and_install_update(download_url, version_label, silent_mode=True):
                     downloaded += len(chunk)
                     root.after(0, lambda d=downloaded, t=total_bytes: update_progress(d, t))
 
+            logger.info("Download complete: %s (%d bytes)", installer_path, downloaded)
             root.after(0, lambda: progress_var.set(100))
             root.after(0, lambda: percent_var.set("100%"))
             root.after(0, lambda: status_var.set("Download complete. Launching installer..."))
             root.after(0, lambda: show_windows_toast("MyStats Update", "Download complete. Launching installer..."))
             root.after(350, lambda: progress_window.destroy() if progress_window.winfo_exists() else None)
-            root.after(500, lambda: _start_installer_and_exit(installer_path, silent_mode=silent_mode))
+            root.after(500, lambda: _start_installer_and_exit(installer_path))
         except Exception as exc:
+            logger.error("Update download/install failed: %s", exc, exc_info=True)
             if installer_path and os.path.exists(installer_path):
                 try:
                     os.remove(installer_path)
@@ -7841,7 +10043,7 @@ def show_update_message(versioncheck, download_url):
         image = image.resize((90, 90), Image.LANCZOS)
         photo = ImageTk.PhotoImage(image)
     except Exception as e:
-        print(f"Error loading image: {e}")
+        logger.error("Error loading image", exc_info=True)
         photo = None
 
     if photo:
@@ -7873,7 +10075,7 @@ def show_update_message(versioncheck, download_url):
         update_now_requested['value'] = True
         config.set_setting('pending_update_version_label', str(versioncheck), persistent=True)
         popup.destroy()
-        download_and_install_update(download_url, versioncheck, silent_mode=True)
+        download_and_install_update(download_url, versioncheck)
 
     ttk.Button(
         button_frame,
@@ -7950,7 +10152,7 @@ def ver_season_only():
                     else:
                         print(f"An update is available. Current Version: {version} | New Version: {versioncheck}")
                         show_windows_toast("MyStats Update Available", f"New version {versioncheck} is ready to install.")
-                        show_update_message(versioncheck, download_url)
+                        root.after(0, lambda v=versioncheck, u=download_url: show_update_message(v, u))
                         return season
                 else:
                     print("API call failed with status code:", response.status_code)
@@ -7970,17 +10172,30 @@ def ver_season_only():
                 break
 
         print("All retries have failed.")
-        messagebox.showerror("Error", "Unable to verify season data after multiple attempts.")
-        root.destroy()
-        sys.exit(0)
+
+        def _fatal_error():
+            messagebox.showerror("Error", "Unable to verify season data after multiple attempts.")
+            root.destroy()
+            sys.exit(0)
+
+        root.after(0, _fatal_error)
 
     def retry_popup():
-        """Show retry popup to prompt user login and retry."""
-        return messagebox.askretrycancel(
-            "Login Required",
-            "You must log in to the website to use MyStats. Click Retry to try again.",
-            parent=root
-        )
+        """Show retry popup on the main thread and return the result."""
+        result = [None]
+        event = threading.Event()
+
+        def _show():
+            result[0] = messagebox.askretrycancel(
+                "Login Required",
+                "You must log in to the website to use MyStats. Click Retry to try again.",
+                parent=root
+            )
+            event.set()
+
+        root.after(0, _show)
+        event.wait()
+        return result[0]
 
     retry_request()  # Initial API call
 
@@ -8071,7 +10286,21 @@ def startup(text_widget):
     config.set_setting('startup', 'yes', persistent=False)
     config.set_setting('data_sync', 'yes', persistent=False)
     create_results_files()
-    ver_season_only()
+
+    def _post_version_check():
+        """Run on main thread once the version-check thread completes."""
+        timestamp, timestampMDY, timestampHMS, adjusted_time = time_manager.get_adjusted_time()
+        if config.get_setting('new_season') == 'True':
+            reset_season_stats()
+        if config.get_setting('marble_day') != timestampMDY:
+            reset()
+
+    def _run_version_check():
+        ver_season_only()
+        root.after(0, _post_version_check)
+
+    threading.Thread(target=_run_version_check, daemon=True).start()
+
     refresh_tilt_lifetime_xp_from_leaderboard()
     load_additional_settings()
     write_overlays()
@@ -8085,22 +10314,16 @@ def startup(text_widget):
         hs.write(str(br_hscore_format + '\n'))
 
     timestamp, timestampMDY, timestampHMS, adjusted_time = time_manager.get_adjusted_time()
-
-    if config.get_setting('new_season') == 'True':
-        reset_season_stats()
-
-    if config.get_setting('marble_day') != timestampMDY:
-        reset()
-
     display_welcome_message(text_widget, version, config, timestamp)
 
 
 # Try to recover a previously downloaded installer if a prior update launch was interrupted.
-recover_pending_update_launch(root)
+pending_update_resumed = recover_pending_update_launch(root)
 
-# Schedule the startup function to run after the window is ready
-root.after(100, lambda: startup(text_area))
-root.after(250, refresh_main_leaderboards)
+# Schedule startup only when the normal UI flow should continue.
+if not pending_update_resumed:
+    root.after(100, lambda: startup(text_area))
+    root.after(250, refresh_main_leaderboards)
 
 
 # Initialize the Bot
@@ -9118,17 +11341,32 @@ class Bot(commands.Bot):
         return [f'!{cmd.name}' for cmd in self.commands.values() if cmd.name not in excluded_commands]
 
     @commands.command(name='rivals')
-    async def rivals_command(self, ctx, username: str = None, compare_username: str = None):
+    async def rivals_command(self, ctx, *args):
         if not is_chat_response_enabled("rivals_enabled"):
             return
 
+        if _is_rivals_command_on_cooldown(getattr(ctx.author, 'name', '')):
+            _track_rivals_metric('cooldown')
+            await self.send_command_response(ctx, "Rivals is cooling down. Please wait a few seconds before retrying.")
+            return
+
+        tokens = [str(arg).strip() for arg in args if str(arg).strip()]
+        username = tokens[0] if len(tokens) >= 1 else None
+        compare_username = tokens[1] if len(tokens) >= 2 else None
+        detail_token = tokens[2].lower() if len(tokens) >= 3 else ''
+        verbose_requested = detail_token in {'full', 'verbose', '--full', '--verbose'} or (compare_username and compare_username.lower() in {'full', 'verbose'})
+
+        if compare_username and compare_username.lower() in {'full', 'verbose'}:
+            compare_username = None
+
         if username and compare_username:
             user_stats = get_user_season_stats()
-            user_a_key = resolve_user_in_stats(user_stats, username)
-            user_b_key = resolve_user_in_stats(user_stats, compare_username)
+            user_a_key, err_a = _resolve_user_or_error(user_stats, username)
+            user_b_key, err_b = _resolve_user_or_error(user_stats, compare_username)
 
-            if user_a_key is None or user_b_key is None:
-                await self.send_command_response(ctx, "Could not find one or both users in season stats.")
+            if err_a or err_b:
+                _track_rivals_metric('pair_lookup_failed')
+                await self.send_command_response(ctx, err_a or err_b)
                 return
 
             stats_a = user_stats[user_a_key]
@@ -9142,38 +11380,56 @@ class Bot(commands.Bot):
 
             rivalry_status = "✅ Rivalry active" if are_rivals else "❌ Not a qualifying rivalry"
 
+            pair_row = _build_rivalry_row(user_a_key, stats_a, user_b_key, stats_b)
+            trend_text = "Trend: closing" if pair_row['trend_direction'] == 'closing' else ("Trend: widening" if pair_row['trend_direction'] == 'widening' else "Trend: steady")
+
+            _track_rivals_metric('pair_check')
             await self.send_command_response(ctx, 
                 f"Rivals Check • {format_user_tag(stats_a['display_name'])} vs {format_user_tag(stats_b['display_name'])} | "
                 f"Gap: ±{point_gap:,} pts | "
                 f"{format_user_tag(stats_a['display_name'])}: {stats_a.get('points', 0):,} pts, {stats_a.get('races', 0):,} races | "
                 f"{format_user_tag(stats_b['display_name'])}: {stats_b.get('points', 0):,} pts, {stats_b.get('races', 0):,} races | "
+                f"{trend_text} | Score: {pair_row['rivalry_score']:,} | "
                 f"{rivalry_status}"
             )
             return
 
         if username:
-            rival_data = get_user_rivals(username, limit=5)
+            limit = RIVALS_MAX_USER_RESULTS if verbose_requested else 5
+            rival_data = get_user_rivals(username, limit=limit)
             if rival_data is None:
-                await self.send_command_response(ctx, f"{format_user_tag(username)}: no season rival data found.")
+                _track_rivals_metric('user_lookup_failed')
+                await self.send_command_response(ctx, f"{format_user_tag(username)}: no season rival data found. Try exact @handle.")
+                return
+
+            if rival_data.get('ambiguous'):
+                _track_rivals_metric('user_lookup_ambiguous')
+                options = ', '.join(format_user_tag(name) for name in rival_data.get('matches', [])[:3])
+                await self.send_command_response(ctx, f"{format_user_tag(username)} matches multiple users ({options}). Use exact @handle.")
                 return
 
             if rival_data['races'] < rival_data['min_races_required']:
+                _track_rivals_metric('under_min_races')
                 await self.send_command_response(ctx, 
                     f"{format_user_tag(rival_data['display_name'])}: {rival_data['races']:,} races so far. "
-                    f"Need {rival_data['min_races_required']:,}+ races for rivals tracking."
+                    f"Need {rival_data['min_races_required']:,}+ races for rivals tracking. "
+                    f"Tip: lower Minimum Season Races in Settings → Rivals."
                 )
                 return
 
             if not rival_data['rivals']:
+                _track_rivals_metric('no_rivals_found')
                 await self.send_command_response(ctx, 
-                    f"{format_user_tag(rival_data['display_name'])}: no close rivals found within configured point gap."
+                    f"{format_user_tag(rival_data['display_name'])}: no close rivals found within configured point gap. "
+                    f"Tip: increase Maximum Point Gap in Settings → Rivals."
                 )
                 return
 
             entries = [
-                f"#{idx} {format_user_tag(row['display_name'])} (±{row['point_gap']:,}, {row['points']:,} pts)"
+                f"#{idx} {format_user_tag(row['display_name'])} (±{row['point_gap']:,}, {row['points']:,} pts, {row.get('trend_direction', 'steady')})"
                 for idx, row in enumerate(rival_data['rivals'], start=1)
             ]
+            _track_rivals_metric('user_rivals')
             await self.send_command_response(ctx, 
                 f"Rivals for {format_user_tag(rival_data['display_name'])}, {rival_data['points']:,} pts: " + " | ".join(entries)
             )
@@ -9181,13 +11437,15 @@ class Bot(commands.Bot):
 
         rivalries = get_global_rivalries(limit=5)
         if not rivalries:
+            _track_rivals_metric('global_empty')
             await self.send_command_response(ctx, "No rivalries found yet with current rival settings.")
             return
 
         entries = [
-            f"#{idx} {format_user_tag(row['display_a'])} vs {format_user_tag(row['display_b'])} (±{row['point_gap']:,})"
+            f"#{idx} {format_user_tag(row['display_a'])} vs {format_user_tag(row['display_b'])} (±{row['point_gap']:,}, {row.get('trend_direction', 'steady')})"
             for idx, row in enumerate(rivalries, start=1)
         ]
+        _track_rivals_metric('global_board')
         await self.send_command_response(ctx, "Rivalries Leaderboard: " + " | ".join(entries))
 
     @commands.command(name='h2h')
@@ -9197,11 +11455,11 @@ class Bot(commands.Bot):
             return
 
         user_stats = get_user_season_stats()
-        user_a_key = resolve_user_in_stats(user_stats, user_a)
-        user_b_key = resolve_user_in_stats(user_stats, user_b)
+        user_a_key, err_a = _resolve_user_or_error(user_stats, user_a)
+        user_b_key, err_b = _resolve_user_or_error(user_stats, user_b)
 
-        if user_a_key is None or user_b_key is None:
-            await self.send_command_response(ctx, "Could not find one or both users in season stats.")
+        if err_a or err_b:
+            await self.send_command_response(ctx, err_a or err_b)
             return
 
         stats_a = user_stats[user_a_key]
@@ -9209,6 +11467,7 @@ class Bot(commands.Bot):
 
         leader_name = stats_a['display_name'] if stats_a['points'] >= stats_b['points'] else stats_b['display_name']
         point_gap = abs(stats_a['points'] - stats_b['points'])
+        pair_row = _build_rivalry_row(user_a_key, stats_a, user_b_key, stats_b)
 
         await self.send_command_response(ctx, 
             f"⚔️ H2H {format_user_tag(stats_a['display_name'])} vs {format_user_tag(stats_b['display_name'])} | "
@@ -9216,16 +11475,61 @@ class Bot(commands.Bot):
             f"Races: {stats_a['races']:,}, {stats_b['races']:,} | "
             f"Race HS: {stats_a['race_hs']:,}, {stats_b['race_hs']:,} | "
             f"BR HS: {stats_a['br_hs']:,}, {stats_b['br_hs']:,} | "
+            f"30d Gap: {pair_row['recent_point_gap_30d']:,} | "
+            f"Score: {pair_row['rivalry_score']:,} | "
             f"Leader: {format_user_tag(leader_name)} by {point_gap:,}"
         )
 
     @commands.command(name='mycycle')
-    async def mycycle_command(self, ctx, username: str = None):
+    async def mycycle_command(self, ctx, *args):
         if not is_chat_response_enabled('mycycle_enabled'):
             return
 
-        target_name = username or ctx.author.name
-        session, stats, target_user = get_mycycle_progress(target_name)
+        target_name = None
+        session_query = None
+        tokens = [str(arg).strip() for arg in args if str(arg).strip()]
+        idx = 0
+        while idx < len(tokens):
+            token = tokens[idx]
+            lowered = token.lower()
+            if lowered in ('--session', '-s'):
+                if idx + 1 < len(tokens):
+                    session_query = tokens[idx + 1]
+                    idx += 2
+                    continue
+                idx += 1
+                continue
+            if lowered.startswith('--session='):
+                session_query = token.split('=', 1)[1].strip()
+                idx += 1
+                continue
+            if lowered.startswith('session:'):
+                session_query = token.split(':', 1)[1].strip()
+                idx += 1
+                continue
+            if target_name is None:
+                target_name = token
+            idx += 1
+
+        target_name = target_name or ctx.author.name
+        requested_session_id = None
+        session_query_failed = False
+        if session_query:
+            sessions, _ = get_mycycle_sessions(include_inactive=True)
+            query = session_query.strip().lower()
+            for item in sessions:
+                sid = str(item.get('id', '')).strip()
+                sname = str(item.get('name', '')).strip().lower()
+                if sid.lower() == query or sname == query:
+                    requested_session_id = sid
+                    break
+            session_query_failed = not requested_session_id
+
+        if session_query and session_query_failed:
+            await self.send_command_response(ctx, f"Unknown MyCycle session '{session_query}'.")
+            return
+
+        session, stats, target_user = get_mycycle_progress(target_name, session_id=requested_session_id)
         settings = get_mycycle_settings()
 
         if not target_user or target_user not in stats:
@@ -9251,6 +11555,31 @@ class Bot(commands.Bot):
             message += f" | Missing: {', '.join(missing)}"
 
         await self.send_command_response(ctx, message)
+
+
+    @commands.command(name='nextcycle')
+    async def nextcycle_command(self, ctx):
+        if not is_chat_response_enabled('mycycle_enabled'):
+            return
+
+        session, candidates = get_next_mycycle_candidates(limit=10)
+        session_name = (session or {}).get('name', 'Unknown')
+
+        if not candidates:
+            await self.send_command_response(ctx, f"🔁 NextCycle [{session_name}] | No upcoming cycles found yet.")
+            return
+
+        entries = []
+        for row in candidates:
+            missing_positions = ','.join(str(pos) for pos in row.get('missing_positions', []))
+            entries.append(
+                f"{format_user_tag(row['display_name'])} | C{row['next_cycle_number']} | Missing: {missing_positions}"
+            )
+
+        await self.send_command_response(
+            ctx,
+            f"🔁 NextCycle [{session_name}] Top {len(entries)}: " + " || ".join(entries)
+        )
 
     @commands.command(name='cyclestats')
     async def cyclestats_command(self, ctx, session_name: str = None):
@@ -9306,8 +11635,26 @@ class Bot(commands.Bot):
             f"{format_user_tag(progress['display_name'])} Quest Progress: "
             f"{progress['completed']}/{progress['active_quests'] if progress['active_quests'] > 0 else 0} quests complete"
         )
-        details = " | ".join(progress['progress_lines'])
-        await self.send_command_response(ctx, f"🔎 {headline} | {details}")
+        detail_segments = list(progress['progress_lines'])
+        if not detail_segments:
+            await self.send_command_response(ctx, f"🔎 {headline}")
+            return
+
+        max_message_length = 420
+        prefix = "🔎 "
+        current_message = f"{prefix}{headline}"
+        sent_any = False
+        for segment in detail_segments:
+            candidate = f"{current_message} | {segment}"
+            if len(candidate) <= max_message_length:
+                current_message = candidate
+                continue
+            await self.send_command_response(ctx, current_message)
+            sent_any = True
+            current_message = f"{prefix}{segment}"
+
+        if current_message:
+            await self.send_command_response(ctx, current_message if sent_any else current_message)
 
 
     @commands.command(name='top10ppr')
@@ -9326,7 +11673,7 @@ class Bot(commands.Bot):
 
                 # Open the file with the detected encoding
                 with open(allraces, 'r', encoding=encoding, errors='ignore') as f:
-                    reader = csv.reader(f)
+                    reader = iter_csv_rows(f)
                     for row in reader:
                         # Assume:
                         # row[1] contains the racer's name
@@ -9347,7 +11694,7 @@ class Bot(commands.Bot):
                 await self.send_command_response(ctx, "No season races recorded yet")
                 return
             except Exception as e:
-                print(e)
+                logger.error("Unexpected error", exc_info=True)
                 return
 
         # Filter for racers with more than 100 races
@@ -9432,7 +11779,7 @@ class Bot(commands.Bot):
                 encoding = result['encoding'] if result['encoding'] else 'utf-8'
 
                 with open(allraces, 'r', encoding=encoding, errors='ignore') as f:
-                    reader = csv.reader(f)
+                    reader = iter_csv_rows(f)
                     for row in reader:
                         race_date = datetime.strptime(row[5], "%Y-%m-%d %H:%M:%S").date()
 
@@ -9470,7 +11817,7 @@ class Bot(commands.Bot):
                 await self.send_command_response(ctx, "No season races recorded yet")
                 return
             except Exception as e:
-                print(e)
+                logger.error("Unexpected error", exc_info=True)
                 return
 
         # Compute average points per race for different event types.
@@ -9557,7 +11904,7 @@ class Bot(commands.Bot):
                 encoding = result['encoding'] if result['encoding'] else 'utf-8'
 
                 with open(tilts_file, 'r', encoding=encoding, errors='ignore') as f:
-                    reader = csv.reader(f)
+                    reader = iter_csv_rows(f)
                     for row in reader:
                         parsed = parse_tilt_result_row(row)
                         if parsed is None:
@@ -9594,7 +11941,7 @@ class Bot(commands.Bot):
             except FileNotFoundError:
                 continue
             except Exception as e:
-                print(e)
+                logger.error("Unexpected error", exc_info=True)
 
         if not current_run_id and latest_run_by_user:
             current_run_id = latest_run_by_user
@@ -9608,7 +11955,7 @@ class Bot(commands.Bot):
                     encoding = result['encoding'] if result['encoding'] else 'utf-8'
 
                     with open(tilts_file, 'r', encoding=encoding, errors='ignore') as f:
-                        reader = csv.reader(f)
+                        reader = iter_csv_rows(f)
                         for row in reader:
                             parsed = parse_tilt_result_row(row)
                             if parsed is None:
@@ -9736,7 +12083,7 @@ class Bot(commands.Bot):
                 encoding = result['encoding'] if result['encoding'] else 'utf-8'
 
                 with open(tilts_file, 'r', encoding=encoding, errors='ignore') as f:
-                    reader = csv.reader(f)
+                    reader = iter_csv_rows(f)
                     for row in reader:
                         detail = parse_tilt_result_detail(row)
                         if detail is None:
@@ -9749,7 +12096,7 @@ class Bot(commands.Bot):
             except FileNotFoundError:
                 continue
             except Exception as e:
-                print(e)
+                logger.error("Unexpected error", exc_info=True)
 
         if not top_tiltee_counts:
             await send_chat_message(ctx.channel, "⚖️ No top tiltee data available yet.", category="mystats")
@@ -9782,7 +12129,7 @@ class Bot(commands.Bot):
                 encoding = result['encoding'] if result['encoding'] else 'utf-8'
 
                 with open(tilts_file, 'r', encoding=encoding, errors='ignore') as f:
-                    reader = csv.reader(f)
+                    reader = iter_csv_rows(f)
                     for row in reader:
                         parsed = parse_tilt_result_row(row)
                         if parsed is None:
@@ -9793,7 +12140,7 @@ class Bot(commands.Bot):
             except FileNotFoundError:
                 continue
             except Exception as e:
-                print(e)
+                logger.error("Unexpected error", exc_info=True)
 
         if not data:
             await send_chat_message(ctx.channel, "⚖️ No tilt data available yet.", category="mystats")
@@ -9822,7 +12169,7 @@ class Bot(commands.Bot):
                 encoding = result['encoding'] if result['encoding'] else 'utf-8'
 
                 with open(tilts_file, 'r', encoding=encoding, errors='ignore') as f:
-                    reader = csv.reader(f)
+                    reader = iter_csv_rows(f)
                     for row in reader:
                         parsed = parse_tilt_result_row(row)
                         if parsed is None or len(row) < 2:
@@ -9842,7 +12189,7 @@ class Bot(commands.Bot):
             except FileNotFoundError:
                 continue
             except Exception as e:
-                print(e)
+                logger.error("Unexpected error", exc_info=True)
 
         if not player_run_levels:
             await send_chat_message(ctx.channel, "⚖️ No tilt data available yet.", category="mystats")
@@ -9903,7 +12250,7 @@ class Bot(commands.Bot):
         data = {}
         try:
             with open(config.get_setting('allraces_file'), 'r', encoding='utf-8', errors='ignore') as f:
-                reader = csv.reader(f)
+                reader = iter_csv_rows(f)
 
                 for row in reader:
                     # Check if the row has at least 11 columns and the 11th value is not 1
@@ -9929,8 +12276,7 @@ class Bot(commands.Bot):
             print("File not found.")
             await self.send_command_response(ctx, self.last_command_author + ": No races have been recorded today.")
         except Exception as e:
-            pass
-            print(e)
+            logger.error("Unexpected error", exc_info=True)
 
     @commands.command(name='top10today')
     async def top10scores_command(self, ctx):
@@ -9938,7 +12284,7 @@ class Bot(commands.Bot):
         data = {}
         try:
             with open(config.get_setting('allraces_file'), 'r', encoding='utf-8', errors='ignore') as f:
-                reader = csv.reader(f)
+                reader = iter_csv_rows(f)
 
                 for row in reader:
                     if len(row) >= 5 and int(''.join(row[3]).replace('\x00', '')) != 0:
@@ -9962,8 +12308,7 @@ class Bot(commands.Bot):
             print("File not found.")
             await self.send_command_response(ctx, self.last_command_author + ": No races have been recorded today.")
         except Exception as e:
-            pass
-            print(e)
+            logger.error("Unexpected error", exc_info=True)
 
     @commands.command(name='top10races')
     async def top10races_command(self, ctx):
@@ -9971,7 +12316,7 @@ class Bot(commands.Bot):
         for allraces in glob.glob(os.path.join(config.get_setting('directory'), "allraces_*.csv")):
             try:
                 with open(allraces, 'r', encoding='utf-8', errors='ignore') as f:
-                    reader = csv.reader(f)
+                    reader = iter_csv_rows(f)
                     for row in reader:
                         if len(row) >= 5 and row[2]:
                             racer = row[2]
@@ -9983,8 +12328,7 @@ class Bot(commands.Bot):
             except FileNotFoundError:
                 print("File not found.")
             except Exception as e:
-                pass
-                print(e)
+                logger.error("Unexpected error", exc_info=True)
 
         top_racers = sorted(data.items(), key=lambda x: x[1], reverse=True)[:10]
         entries = [
@@ -10001,7 +12345,7 @@ class Bot(commands.Bot):
         for allraces in glob.glob(os.path.join(config.get_setting('directory'), "allraces_*.csv")):
             try:
                 with open(allraces, 'r', encoding='utf-8', errors='ignore') as f:
-                    reader = csv.reader(f)
+                    reader = iter_csv_rows(f)
                     for row in reader:
                         if len(row) >= 5 and int(row[0]) == 1:
                             racer = row[2]
@@ -10013,8 +12357,7 @@ class Bot(commands.Bot):
             except FileNotFoundError:
                 print("File not found. #609")
             except Exception as e:
-                pass
-                print(e)
+                logger.error("Unexpected error", exc_info=True)
 
         top_racers = sorted(data.items(), key=lambda x: x[1], reverse=True)[:10]
         entries = [
@@ -10031,7 +12374,7 @@ class Bot(commands.Bot):
         for allraces in glob.glob(os.path.join(config.get_setting('directory'), "allraces_*.csv")):
             try:
                 with open(allraces, 'r', encoding='utf-8', errors='ignore') as f:
-                    reader = csv.reader(f)
+                    reader = iter_csv_rows(f)
                     for row in reader:
                         if len(row) >= 5 and int(row[3]) != 0:
                             racer = row[2]
@@ -10043,8 +12386,7 @@ class Bot(commands.Bot):
             except FileNotFoundError:
                 print("File not found. #651")
             except Exception as e:
-                pass
-                print(e)
+                logger.error("Unexpected error", exc_info=True)
 
         top_racers = sorted(data.items(), key=lambda x: x[1], reverse=True)[:10]
         entries = [
@@ -10070,7 +12412,7 @@ class Bot(commands.Bot):
                 encoding = result['encoding'] if result['encoding'] else 'utf-8'
 
                 with open(allraces, 'r', encoding=encoding, errors='ignore') as f:
-                    reader = csv.reader(f)
+                    reader = iter_csv_rows(f)
                     for row in reader:
                         # Check that the row has at least 12 columns and the 12th column equals "1"
                         if len(row) > 11 and row[11] == '1':
@@ -10092,7 +12434,7 @@ class Bot(commands.Bot):
                 await self.send_command_response(ctx, "No season races recorded yet")
                 return
             except Exception as e:
-                print(e)
+                logger.error("Unexpected error", exc_info=True)
                 return
 
         if not world_record_stats:
@@ -10129,7 +12471,7 @@ class Bot(commands.Bot):
         for allraces in glob.glob(os.path.join(config.get_setting('directory'), "allraces_*.csv")):
             try:
                 with open(allraces, 'r', encoding='utf-8', errors='ignore') as f:
-                    reader = csv.reader(f)
+                    reader = iter_csv_rows(f)
                     for row in reader:
                         # Check 12th value at index 11 (must be 0 or exists)
                         if len(row) >= 12 and int(row[11]) != 1:  # Changed to index 11
@@ -10140,7 +12482,7 @@ class Bot(commands.Bot):
             except FileNotFoundError:
                 print("File not found. #651")
             except Exception as e:
-                print(e)
+                logger.error("Unexpected error", exc_info=True)
 
         top_racers = sorted(data.items(), key=lambda x: x[1], reverse=True)[:10]
         entries = [
@@ -10182,7 +12524,7 @@ class Bot(commands.Bot):
             await bot.start()
 
         except Exception as e:
-            print(f"Failed to reconnect: {e}")
+            logger.error("Failed to reconnect", exc_info=True)
             await asyncio.sleep(delay)
             await self.reconnect_with_new_token(new_token, retries - 1, delay * 2)
 
@@ -10286,7 +12628,7 @@ def process_season(directory, season):
             encoding = result['encoding'] if result['encoding'] else 'utf-8'  # Default to UTF-8 if detection fails
 
             with open(allraces, 'r', encoding=encoding, errors='ignore') as f:
-                reader = csv.reader(f)
+                reader = iter_csv_rows(f)
                 for rowrow in reader:
                     if len(rowrow) < 7:
                         continue
@@ -10332,8 +12674,7 @@ def process_season(directory, season):
         except FileNotFoundError:
             print(f"File not found: {allraces}")
         except Exception as e:
-            print(f"An error occurred while processing the file {allraces}: {e}")
-            print(e)
+            logger.error("An error occurred while processing the file %s", allraces, exc_info=True)
 
     # Use %localappdata%/mystats/data as the save directory
     local_app_data = os.getenv('LOCALAPPDATA')
@@ -10423,7 +12764,6 @@ async def competitive_raid_monitor(bot):
             payload_fields = _collect_payload_field_names(payload)
             payload_signature = '|'.join(payload_fields)
             if payload_signature != bot.last_competitive_raid_field_list_signature:
-                print(f"Competitive raid payload fields ({len(payload_fields)}): {', '.join(payload_fields)}")
                 bot.last_competitive_raid_field_list_signature = payload_signature
 
             local_streamer = normalize_channel_name(bot.channel_name)
@@ -10432,9 +12772,14 @@ async def competitive_raid_monitor(bot):
             live_streamer = normalize_channel_name((live_info or {}).get('streamer'))
 
             queue_started_at = (queue_info or {}).get('started_at') or _parse_iso_utc(config.get_setting('competitive_raid_queue_started_at'))
-            live_started_at = (live_info or {}).get('started_at') or _parse_iso_utc(config.get_setting('competitive_raid_live_started_at'))
+            live_started_at = (live_info or {}).get('started_at')
+            previous_phase = str(config.get_setting('competitive_raid_phase') or '').lower()
+            persisted_live_start = _parse_iso_utc(config.get_setting('competitive_raid_live_started_at'))
 
-            if queue_streamer:
+            if live_streamer:
+                bot.last_competitive_raid_streamer = live_streamer
+                persist_competitive_raid_snapshot(payload, live_streamer, live_started_at)
+            elif queue_streamer:
                 bot.last_competitive_raid_streamer = queue_streamer
                 persist_competitive_raid_snapshot(payload, queue_streamer, live_started_at)
 
@@ -10442,47 +12787,38 @@ async def competitive_raid_monitor(bot):
                 queue_start_iso = queue_started_at.isoformat()
                 if config.get_setting('competitive_raid_queue_started_at') != queue_start_iso:
                     config.set_setting('competitive_raid_queue_started_at', queue_start_iso, persistent=True)
-                    config.set_setting('competitive_raid_phase', 'queue', persistent=True)
-                    queue_message = (
-                        f"🟡 {local_streamer} is next up for competitive raids! "
-                        f"Queue is open now: https://pixelbypixel.studio/competitions"
-                    )
-                    if bot.channel is not None:
-                        await send_chat_message(bot.channel, queue_message, category='race')
-                    enqueue_overlay_event('raid_queue_open', queue_message)
+                    if previous_phase != 'live':
+                        config.set_setting('competitive_raid_phase', 'queue', persistent=True)
 
             if live_streamer == local_streamer and live_started_at is not None:
                 live_start_iso = live_started_at.isoformat()
                 if config.get_setting('competitive_raid_live_started_at') != live_start_iso:
                     config.set_setting('competitive_raid_live_started_at', live_start_iso, persistent=True)
-
+                    config.set_setting('competitive_raid_phase', 'live', persistent=True)
                     participant_count = _extract_participant_count(
                         payload,
                         preferred_node=(live_info or {}).get('source'),
                         streamer_name=local_streamer,
                     )
+                    raider_segment = (
+                        f" ({participant_count:,} raiders)" if participant_count is not None else ""
+                    )
+                    live_message = (
+                        f"🏁 Competitive raid host selected: {format_user_tag(local_streamer)}{raider_segment}! "
+                        "Welcome competitive raiders—good luck and have fun!"
+                    )
+                    if bot.channel is not None:
+                        await send_chat_message(bot.channel, live_message, category='race')
+                    enqueue_overlay_event('raid_selected', live_message)
 
-                    if participant_count is not None and participant_count < 10:
-                        cancel_message = (
-                            f"🛑 Competitive raid cancelled for {local_streamer}: only {participant_count} participants (minimum 10)."
-                        )
-                        if bot.channel is not None:
-                            await send_chat_message(bot.channel, cancel_message, category='race')
-                        enqueue_overlay_event('raid_cancelled', cancel_message)
-                        config.set_setting('competitive_raid_phase', 'idle', persistent=True)
-                        config.set_setting('competitive_raid_last_summary_live_started_at', live_start_iso, persistent=True)
-                    else:
-                        config.set_setting('competitive_raid_phase', 'live', persistent=True)
-                        live_message = f"🔴 Competitive raid has begun for {local_streamer}!"
-                        if bot.channel is not None:
-                            await send_chat_message(bot.channel, live_message, category='race')
-                        enqueue_overlay_event('raid_live_started', live_message)
-
-            persisted_live_start = _parse_iso_utc(config.get_setting('competitive_raid_live_started_at'))
-            if persisted_live_start and live_streamer == local_streamer and str(config.get_setting('competitive_raid_phase') or '').lower() == 'live':
-                elapsed = datetime.now(timezone.utc) - persisted_live_start
+            if (
+                previous_phase == 'live'
+                and persisted_live_start is not None
+                and live_streamer != local_streamer
+                and (datetime.now(timezone.utc) - persisted_live_start) >= timedelta(minutes=18)
+            ):
                 summary_key = persisted_live_start.isoformat()
-                if elapsed >= timedelta(minutes=20) and config.get_setting('competitive_raid_last_summary_live_started_at') != summary_key:
+                if config.get_setting('competitive_raid_last_summary_live_started_at') != summary_key:
                     history_payload = None
                     try:
                         history_payload = await asyncio.to_thread(fetch_competitions_history_payload)
@@ -10496,22 +12832,24 @@ async def competitive_raid_monitor(bot):
                     enqueue_overlay_event('raid_summary', summary_message)
                     config.set_setting('competitive_raid_last_summary_live_started_at', summary_key, persistent=True)
                     config.set_setting('competitive_raid_phase', 'idle', persistent=True)
+                    config.set_setting('competitive_raid_live_started_at', '', persistent=True)
 
             now_utc = datetime.now(timezone.utc)
-            if queue_streamer == local_streamer and queue_started_at is not None:
-                queue_end = queue_started_at + timedelta(minutes=15)
-                if now_utc < queue_end:
-                    remaining = (queue_end - now_utc).total_seconds()
-                    next_poll_at = time.monotonic() + max(10, min(30, remaining / 3))
-                else:
-                    next_poll_at = time.monotonic() + 15
-            elif live_streamer == local_streamer and live_started_at is not None:
+            current_phase = str(config.get_setting('competitive_raid_phase') or '').lower()
+            if current_phase == 'live' and live_streamer == local_streamer and live_started_at is not None:
                 live_end = live_started_at + timedelta(minutes=20)
                 if now_utc < live_end:
                     remaining = (live_end - now_utc).total_seconds()
                     next_poll_at = time.monotonic() + (10 if remaining < 90 else 30)
                 else:
                     next_poll_at = time.monotonic() + 20
+            elif queue_streamer == local_streamer and queue_started_at is not None:
+                queue_end = queue_started_at + timedelta(minutes=15)
+                if now_utc < queue_end:
+                    remaining = (queue_end - now_utc).total_seconds()
+                    next_poll_at = time.monotonic() + max(10, min(30, remaining / 3))
+                else:
+                    next_poll_at = time.monotonic() + 15
             else:
                 started_at = get_competitive_raid_started_at(payload)
                 delay_seconds = get_competitive_raid_poll_delay_seconds(started_at)
@@ -10555,7 +12893,7 @@ async def tilted(bot):
             print("Tilted task was cancelled.")
             break
         except Exception as e:
-            print(f"Error checking modification time: {e}")
+            logger.error("Error checking modification time", exc_info=True)
             await asyncio.sleep(1)
             continue
 
@@ -10576,6 +12914,7 @@ async def tilted(bot):
             continue
 
         await asyncio.sleep(1)
+        set_overlay_mode('tilt')
 
         try:
             level_rows = safe_read_csv_rows(tilt_level_file)
@@ -10609,8 +12948,9 @@ async def tilted(bot):
 
             if current_level == 1 and run_id is None:
                 run_id = base64.urlsafe_b64encode(uuid.uuid4().bytes).rstrip(b'=').decode('utf-8')
-                set_tilt_runtime_setting('tilt_run_started_at', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+                set_tilt_runtime_setting('tilt_run_started_at', get_internal_adjusted_time().strftime('%Y-%m-%d %H:%M:%S'))
                 set_tilt_runtime_setting('tilt_run_ledger', '{}')
+                set_tilt_runtime_setting('tilt_run_deaths_ledger', '{}')
                 set_tilt_runtime_setting('tilt_top_tiltee_ledger', '{}')
                 set_tilt_runtime_setting('tilt_current_top_tiltee_count', '0')
                 set_tilt_runtime_setting('tilt_run_xp', '0')
@@ -10632,6 +12972,13 @@ async def tilted(bot):
                     run_ledger = {}
             except Exception:
                 run_ledger = {}
+
+            try:
+                run_deaths_ledger = json.loads(config.get_setting('tilt_run_deaths_ledger') or '{}')
+                if not isinstance(run_deaths_ledger, dict):
+                    run_deaths_ledger = {}
+            except Exception:
+                run_deaths_ledger = {}
 
             try:
                 tilt_top_tiltee_ledger = json.loads(config.get_setting('tilt_top_tiltee_ledger') or '{}')
@@ -10679,6 +13026,7 @@ async def tilted(bot):
                     run_ledger[username] = int(run_ledger.get(username, 0)) + level_points
                 else:
                     deaths_this_level += 1
+                    run_deaths_ledger[username] = int(run_deaths_ledger.get(username, 0)) + 1
 
             terminal_run_death = 1 if (not level_passed and 1 <= len(survivors) <= 2) else 0
             deaths_this_level += terminal_run_death
@@ -10730,6 +13078,7 @@ async def tilted(bot):
                 config.set_setting('tilt_personal_best_level', str(updated_personal_best_setting_level), persistent=True)
 
             set_tilt_runtime_setting('tilt_run_ledger', json.dumps(run_ledger))
+            set_tilt_runtime_setting('tilt_run_deaths_ledger', json.dumps(run_deaths_ledger))
 
             lifetime_expertise = get_int_setting('tilt_lifetime_expertise', 0)
             lifetime_base_xp = get_int_setting('tilt_lifetime_base_xp', 0)
@@ -10785,8 +13134,9 @@ async def tilted(bot):
                                 is_top_tiltee = normalize_tilt_player_name(username) == normalized_top_tiltee
                                 data_to_write = [run_id, current_level] + row + [str(is_top_tiltee), event_ids]
                                 writer.writerow(data_to_write)
+                        logger.info("Data synced: tilt results written to tilts results file")
                     except Exception as e:
-                        print(f"Error opening/writing to tilts_results_file: {e}")
+                        logger.error("Error opening/writing to tilts_results_file", exc_info=True)
 
                 narrative_messages = []
                 if is_chat_response_enabled("chat_narrative_alerts"):
@@ -10850,7 +13200,7 @@ async def tilted(bot):
                 death_rate = round(((deaths_this_level / total_active) * 100), 1) if total_active else 0
                 survival_rate = round(((survivor_count / total_active) * 100), 1) if total_active else 0
                 completion_summary = {
-                    'completed_at': datetime.now().isoformat(timespec='seconds'),
+                    'completed_at': get_internal_now_iso(timespec='seconds'),
                     'level': current_level,
                     'top_tiltee': top_tiltee,
                     'top_tiltee_count': top_tiltee_run_count,
@@ -10932,7 +13282,7 @@ async def tilted(bot):
                 last_run_summary = {
                     'run_id': run_id,
                     'run_short_id': run_id[:6] if run_id else '',
-                    'ended_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    'ended_at': get_internal_adjusted_time().strftime('%Y-%m-%d %H:%M:%S'),
                     'ended_level': current_level,
                     'elapsed_time': elapsed_time,
                     'total_time': format_tilt_duration(run_total_seconds),
@@ -10946,7 +13296,14 @@ async def tilted(bot):
                     'best_run_xp_today': best_run_xp_today,
                     'total_xp_today': total_xp_today,
                     'total_deaths_today': total_deaths_today,
-                    'standings': [{'name': name, 'points': int(points)} for name, points in participants_with_points],
+                    'standings': [
+                        {
+                            'name': name,
+                            'points': int(points),
+                            'deaths': _safe_int(run_deaths_ledger.get(name, 0)),
+                        }
+                        for name, points in participants_with_points
+                    ],
                 }
                 set_tilt_runtime_setting('tilt_last_run_summary', json.dumps(last_run_summary))
                 set_tilt_runtime_setting('tilt_run_completion_overlay', json.dumps(last_run_summary))
@@ -10959,6 +13316,7 @@ async def tilted(bot):
                 set_tilt_runtime_setting('tilt_run_points', '0')
                 set_tilt_runtime_setting('tilt_run_total_seconds', '0')
                 set_tilt_runtime_setting('tilt_run_ledger', '{}')
+                set_tilt_runtime_setting('tilt_run_deaths_ledger', '{}')
                 set_tilt_runtime_setting('tilt_top_tiltee_ledger', '{}')
                 set_tilt_runtime_setting('tilt_current_top_tiltee_count', '0')
                 set_tilt_runtime_setting('tilt_level_completion_overlay', '{}')
@@ -10968,7 +13326,7 @@ async def tilted(bot):
             last_modified_tilt = current_modified_tilt
             last_tilt_processed_at = time.monotonic()
         except Exception as e:
-            print(f"An error occurred while processing the tilt file: {e}")
+            logger.error("An error occurred while processing the tilt file", exc_info=True)
             last_modified_tilt = current_modified_tilt
             last_tilt_processed_at = time.monotonic()
 
@@ -11027,7 +13385,7 @@ async def checkpoints(bot):
 
                 def parse_checkpoint_players(checkpoint_file_path, detected_encoding):
                     with open(checkpoint_file_path, 'r', encoding=detected_encoding, errors='ignore', newline='') as checkpoint_file:
-                        reader = csv.reader(checkpoint_file)
+                        reader = iter_csv_rows(checkpoint_file)
                         rows = list(reader)
 
                     if len(rows) <= 1:
@@ -11121,7 +13479,7 @@ async def checkpoints(bot):
             continue
 
         except Exception as e:
-            print(f"Error in checkpoints task: {e}")
+            logger.error("Error in checkpoints task", exc_info=True)
             # Optionally log the exception or take other actions
             await asyncio.sleep(5)  # Prevent tight loop on error
 
@@ -11158,9 +13516,6 @@ def read_latest_map_data(map_data_file):
     encoding_result = chardet.detect(map_data)
     map_encoding = encoding_result['encoding'] or 'utf-8'
     map_text = map_data.decode(map_encoding, errors='ignore')
-
-    if DEBUG == True:
-        print('Debug: Read Map Data File')
 
     sample = '\n'.join(map_text.splitlines()[:3])
     delimiter = ','
@@ -11232,10 +13587,6 @@ async def race(bot):
         'RecordStreamer': None,
     }
     while True:
-        if DEBUG == True:
-            print('Debug: Race file check')
-        else:
-            pass
         try:
             current_modified_race = await asyncio.to_thread(os.path.getmtime, config.get_setting('race_file'))
         except FileNotFoundError:
@@ -11261,6 +13612,7 @@ async def race(bot):
             reset()
 
         if current_modified_race != last_modified_race:
+            set_overlay_mode('race')
             await asyncio.sleep(3)
             racedata = []
             namecolordata = []
@@ -11295,13 +13647,12 @@ async def race(bot):
                     else:
                         print(f"The map data file {map_data_file} does not contain enough data.")
                 else:
-                    if DEBUG == True:
-                        print("Debug: Map file has not been modified; reusing cached map data.")
+                    pass
 
             except FileNotFoundError:
                 print(f"Map data file {map_data_file} not found.")
             except Exception as e:
-                print(f"An error occurred while processing the map data file: {e}")
+                logger.error("An error occurred while processing the map data file", exc_info=True)
 
             MapName = cached_map_data['MapName']
             MapBuilder = cached_map_data['MapBuilder']
@@ -11322,10 +13673,6 @@ async def race(bot):
 
             with open(config.get_setting('race_file'), 'r', encoding=encoding, errors='ignore') as f:
                 lines = f.readlines()
-                if DEBUG == True:
-                    print('Debug: Read Race File')
-                else:
-                    pass
 
             if all(line.split(',')[6].strip() == 'true' for line in lines[1:]):
                 nowinner = True
@@ -11345,10 +13692,6 @@ async def race(bot):
             # Step 3: Comparison between race finish time and record time
             first_row_full = lines[1].replace('\x00', '').strip().split(',')
             race_finish_time = float(first_row_full[5])
-            if DEBUG == True:
-                print('Debug: Calculating World Record')
-            else:
-                pass
 
             if RecordTime and race_finish_time < RecordTime:
                 RecordAmount = RecordTime - race_finish_time
@@ -11374,10 +13717,6 @@ async def race(bot):
 
             # first row with WR flagged
             if config.get_setting('wr').lower() == 'yes':
-                if DEBUG == True:
-                    print('Debug: World Record Detected, processing')
-                else:
-                    pass
                 first_row = [first_row_full[0], first_row_full[1], first_row_full[2], first_row_full[4], 'Race',
                              timestamp, marbcount, first_row_full[6], 0, 0, event_ids, 1]
             else:
@@ -11396,10 +13735,6 @@ async def race(bot):
             totalpointsrace += int(first_row_full[4])
 
             # Process remaining lines
-            if DEBUG == True:
-                print('Debug: Processing Race File Rows, Cleaning Data')
-            else:
-                pass
             for line in lines[2:]:
                 cleaned_line = line.replace('\x00', '').strip().split(',')
                 row = [cleaned_line[0], cleaned_line[1], cleaned_line[2], cleaned_line[4], 'Race', timestamp, marbcount,
@@ -11413,10 +13748,7 @@ async def race(bot):
                 totalpointsrace += int(row[3])
                 s_t_points += int(row[3])
 
-            with open(config.get_setting('allraces_file'), 'a', newline='', encoding='utf-8', errors='ignore') as f:
-                writer = csv.writer(f)
-                for row in racedata:
-                    writer.writerow(row)
+            append_csv_rows_safely(config.get_setting('allraces_file'), racedata)
 
             _record_live_team_points_rows(config.get_setting('CHANNEL'), racedata)
 
@@ -11424,12 +13756,13 @@ async def race(bot):
                 print('Debug: Write Race Data to Data File')
             else:
                 pass
+            logger.info("Data synced: race results written to allraces file")
 
             race_counts = {row[1]: 0 for row in racedata}
             points_by_player = {}
             wins_by_player = {}
             with open(config.get_setting('allraces_file'), 'r', encoding='utf-8', errors='ignore') as f:
-                reader = csv.reader(f)
+                reader = iter_csv_rows(f)
                 for row in reader:
                     if len(row) < 4:
                         continue
@@ -11444,11 +13777,6 @@ async def race(bot):
                         continue
                     points_by_player[racer_username] = points_by_player.get(racer_username, 0) + racer_points
 
-            if DEBUG == True:
-                print('Debug: Check for 120 Race Checkmark')
-            else:
-                pass
-
             for player_name, count in race_counts.items():
                 if count == 120:
                     announcement_message = (
@@ -11459,14 +13787,10 @@ async def race(bot):
                         await send_chat_message(bot.channel, announcement_message, category="race")
 
             # MPL Code
-            if DEBUG == True:
-                print('Debug: Skipping MPL Code, Not MPL event')
-            else:
-                pass
             if config.get_setting('MPL') == 'True':
                 checkpointdata = []
                 with open(config.get_setting('checkpoint_file'), 'r', encoding='utf-8', errors='ignore') as f:
-                    checkpointfile = csv.reader(f)
+                    checkpointfile = iter_csv_rows(f)
                     for row in checkpointfile:
                         checkpointdata.append(row)
 
@@ -11505,20 +13829,12 @@ async def race(bot):
                     worksheet.append_row(row_to_append)
 
             # Chunk Alert Code
-            if DEBUG == True:
-                print('Debug: Checking for Chunk Alert Threshold')
-            else:
-                pass
             if int(first_row[3]) >= int(config.get_setting('chunk_alert_value')) and config.get_setting('chunk_alert') == 'True':
                 audio_device = config.get_setting('audio_device')
                 audio_file_path = config.get_setting('chunk_alert_sound')
 
                 if audio_file_path:
                     play_audio_file(audio_file_path, device_name=audio_device)
-                    if DEBUG == True:
-                        print('Debug: Play Chunk Alert Audio')
-                    else:
-                        pass
 
             if first_row[1] != first_row[2].lower():
                 winnersname = first_row[1]
@@ -11542,11 +13858,6 @@ async def race(bot):
             if current_score > int(config.get_setting('race_hs_today')):
                 config.set_setting('race_hs_today', current_score, persistent=False)
 
-            if DEBUG == True:
-                print('Debug: Process High Score check')
-            else:
-                pass
-
             # Write last winners
             lastwinner1 = ""
             lastwinnerh = ""
@@ -11565,24 +13876,23 @@ async def race(bot):
             with open('LatestWinner_horizontal.txt', 'w', encoding='utf-8', errors='replace') as lwh:
                 lwh.write("Previous Winners:" + lastwinnerh)
 
+            logger.info("Data synced: race latest winner files updated")
+
             config.set_setting('totalpointstoday', t_points, persistent=False)
             config.set_setting('totalcounttoday', t_count, persistent=False)
             config.set_setting('totalpointsseason', s_t_points, persistent=False)
             config.set_setting('totalcountseason', s_t_count, persistent=False)
             update_config_labels()
 
-            if config.get_setting('totalpointstoday') != 0:
-                avgptstoday = int(config.get_setting('totalpointstoday')) / int(config.get_setting('totalcounttoday'))
+            t_count_today = int(config.get_setting('totalcounttoday'))
+            if t_count_today > 0:
+                avgptstoday = int(config.get_setting('totalpointstoday')) / t_count_today
             else:
                 avgptstoday = 0
 
             config.set_setting('avgpointstoday', avgptstoday, persistent=False)
 
             # Add color tags for the text widget
-            if DEBUG == True:
-                print('Debug: Calculate colors for application output')
-            else:
-                pass
             def add_color_tag(widget, tag_name, color):
                 try:
                     widget.tag_configure(tag_name, foreground=color)
@@ -11696,10 +14006,6 @@ async def race(bot):
                 text_widget.see(tk.END)
 
             # Display in text_area
-            if DEBUG == True:
-                print('Debug: Display Winners in Application')
-            else:
-                pass
             display_race_winners(text_area, marbcount, namecolordata, nowinner)
 
             # Prepare messages for Twitch chat
@@ -11881,8 +14187,9 @@ async def race(bot):
             config.set_setting('totalpointsseason', s_t_points, persistent=False)
             config.set_setting('totalcountseason', s_t_count, persistent=False)
 
-            if config.get_setting('totalpointstoday') != 0:
-                avgptstoday = int(config.get_setting('totalpointstoday')) / int(config.get_setting('totalcounttoday'))
+            t_count_today = int(config.get_setting('totalcounttoday'))
+            if t_count_today > 0:
+                avgptstoday = int(config.get_setting('totalpointstoday')) / t_count_today
             else:
                 avgptstoday = 0
 
@@ -11925,12 +14232,85 @@ async def race(bot):
 async def royale(bot):
     last_modified_royale = None
     marbcount = 0
+    br_cache_loaded = False
+    br_user_totals = {}
 
     def add_color_tag(widget, tag_name, color):
         widget.tag_configure(tag_name, foreground=color)
 
     def insert_colored_text(text_area, text, tag_name):
         text_area.insert(tk.END, text, tag_name)
+
+    def atomic_write_text(path, content, *, errors='ignore'):
+        temp_path = f"{path}.tmp"
+        with open(temp_path, 'w', encoding='utf-8', errors=errors) as tmp:
+            tmp.write(content)
+        os.replace(temp_path, path)
+
+    def map_name_color(color_code):
+        color_lookup = {
+            '6E95FFFF': 'blue',
+            'F91ED2FF': 'magenta',
+            'FF82D6FF': 'violet',
+            '79FFC7FF': 'green',
+            'F88688FF': 'red',
+            'DA6700FF': 'orange',
+        }
+        return color_lookup.get(str(color_code).strip().upper(), 'white')
+
+    def resolve_br_identity(br_winner_row):
+        winner_login = str(br_winner_row[1] if len(br_winner_row) > 1 else '').strip().lower()
+        winner_display = str(br_winner_row[2] if len(br_winner_row) > 2 else '').strip()
+        if not winner_display:
+            winner_display = winner_login
+        if winner_login and winner_login != winner_display.lower():
+            winner_label = f"{winner_display}({winner_login})"
+        else:
+            winner_label = winner_display
+        return winner_login, winner_display, winner_label
+
+    def build_br_winner_message(*, crownwin, chunk_alert, winner_label, points, kills, damage, total_points, wins, races):
+        prefix = "🧃 " if chunk_alert else ""
+        event_text = "CROWN WIN! 👑" if crownwin else "Battle Royale Champion 🏆"
+        return (
+            f"{prefix}{event_text}: {winner_label} | {points:,} points | {kills} eliminations | {damage} damage | "
+            f"Today's stats: {total_points:,} points | {wins} wins | {races:,} races"
+        )
+
+    def load_br_user_totals_from_allraces():
+        totals = {}
+        try:
+            with open(config.get_setting('allraces_file'), 'r', encoding='utf-8', errors='ignore') as f:
+                for row in iter_csv_rows(f):
+                    if len(row) < 5:
+                        continue
+                    username = str(row[1]).strip().lower()
+                    if not username:
+                        continue
+                    entry = totals.setdefault(username, {'points': 0, 'wins': 0, 'races': 0})
+                    entry['races'] += 1
+                    entry['points'] += _safe_int(row[3])
+                    if str(row[0]).strip() == '1':
+                        entry['wins'] += 1
+        except FileNotFoundError:
+            with open(config.get_setting('allraces_file'), 'w', encoding='utf-8', errors='ignore'):
+                pass
+        except Exception:
+            logger.error("An error occurred while loading BR totals cache", exc_info=True)
+        return totals
+
+    def update_br_user_totals_cache(rows):
+        for row in rows:
+            if len(row) < 4:
+                continue
+            username = str(row[1]).strip().lower()
+            if not username:
+                continue
+            entry = br_user_totals.setdefault(username, {'points': 0, 'wins': 0, 'races': 0})
+            entry['races'] += 1
+            entry['points'] += _safe_int(row[3])
+            if str(row[0]).strip() == '1':
+                entry['wins'] += 1
 
     # Crown Winner Display
     def display_battle_royale_crownwinner(text_area, marbcount, wname, wpoints, wkills, wdam, wcount, winnertotalpoints, namecolor):
@@ -11942,6 +14322,7 @@ async def royale(bot):
         add_color_tag(text_area, "blue", "blue")
         add_color_tag(text_area, "magenta", "magenta")
         add_color_tag(text_area, "violet", "violet")
+        add_color_tag(text_area, "orange", "orange")
 
         insert_colored_text(text_area, "\n", "white")
         insert_colored_text(text_area, "CROWN WIN! 👑: ", "yellow")
@@ -11972,6 +14353,7 @@ async def royale(bot):
         add_color_tag(text_area, "blue", "blue")
         add_color_tag(text_area, "magenta", "magenta")
         add_color_tag(text_area, "violet", "violet")
+        add_color_tag(text_area, "orange", "orange")
 
         insert_colored_text(text_area, "\n", "white")
         insert_colored_text(text_area, "Battle Royale: (", "white")
@@ -11992,13 +14374,10 @@ async def royale(bot):
         text_area.see(tk.END)
 
     while True:
-        if DEBUG == True:
-            print('Debug: BR file check')
-        else:
-            pass
         try:
             current_modified_royale = await asyncio.to_thread(os.path.getmtime, config.get_setting('br_file'))
         except FileNotFoundError:
+            await asyncio.sleep(2)
             continue
         if last_modified_royale is None:
             last_modified_royale = current_modified_royale
@@ -12008,6 +14387,7 @@ async def royale(bot):
         timestamp, timestampMDY, timestampHMS, adjusted_time = time_manager.get_adjusted_time()
 
         if current_modified_royale != last_modified_royale:
+            set_overlay_mode('br')
             await asyncio.sleep(3)
             brdata = []
             metadata = []
@@ -12015,10 +14395,10 @@ async def royale(bot):
             winner = ''
             crownwin = False
             last_br_winner = config.get_setting('last_br_winner')
-            t_points = int(config.get_setting('totalpointstoday'))
-            t_count = int(config.get_setting('totalcounttoday'))
-            s_t_points = int(config.get_setting('totalpointsseason'))
-            s_t_count = int(config.get_setting('totalcountseason'))
+            t_points = _safe_int(config.get_setting('totalpointstoday'))
+            t_count = _safe_int(config.get_setting('totalcounttoday'))
+            s_t_points = _safe_int(config.get_setting('totalpointsseason'))
+            s_t_count = _safe_int(config.get_setting('totalcountseason'))
             last_modified_royale = current_modified_royale
 
             # Initialize br_winner to None before processing
@@ -12027,7 +14407,7 @@ async def royale(bot):
             max_retries = 3  # Number of retry attempts
             retry_delay = 2  # Delay between retries (in seconds)
             attempts = 0  # Track the number of attempts
-            lines = None  # Initialize lines variable
+            parsed_rows = None
 
             while attempts < max_retries:
                 try:
@@ -12039,33 +14419,34 @@ async def royale(bot):
                     result = chardet.detect(data)
                     encoding = result['encoding']
 
-                    # Open the file using the detected encoding and read the lines
+                    # Open the file using the detected encoding and parse CSV rows
                     with open(config.get_setting('br_file'), 'r', encoding=encoding, errors='ignore') as f:
-                        lines = f.readlines()
+                        parsed_rows = list(iter_csv_rows(f))
 
                     # If file reading is successful, break out of the retry loop
                     break
 
                 except PermissionError as e:
                     attempts += 1
-                    print(f"Permission denied: {e}. Retrying in {retry_delay} seconds... (Attempt {attempts}/{max_retries})")
-                    time.sleep(retry_delay)  # Wait before retrying
+                    logger.warning("Permission denied: %s. Retrying in %s seconds... (Attempt %d/%d)", e, retry_delay, attempts, max_retries)
+                    await asyncio.sleep(retry_delay)
 
                 except Exception as e:
                     attempts += 1
-                    print(f"An error occurred: {e}. Retrying in {retry_delay} seconds... (Attempt {attempts}/{max_retries})")
-                    time.sleep(retry_delay)
+                    logger.warning("An error occurred: %s. Retrying in %s seconds... (Attempt %d/%d)", e, retry_delay, attempts, max_retries)
+                    await asyncio.sleep(retry_delay)
 
             # After retry attempts, handle failure if the file could not be opened
-            if attempts == max_retries or lines is None:
-                print(f"Failed to open the file after {max_retries} attempts.")
+            if parsed_rows is None:
+                logger.error("Failed to open BR file after %d attempts.", max_retries)
             else:
-                # Ensure that lines is not empty before accessing elements
-                if lines:
-                    # Process the header
-                    header = lines[0].replace('\x00', '').strip().split(',')
+                # Ensure that parsed_rows is not empty before accessing elements
+                if parsed_rows:
+                    first_row = parsed_rows[0]
+                    has_header = not str(first_row[0]).strip().isdigit() if first_row else False
+                    data_rows = parsed_rows[1:] if has_header else parsed_rows
 
-                    marbcount = len(lines)
+                    marbcount = len(data_rows)
 
                     # Handle active_event_ids
                     event_ids_tmp = config.get_setting('active_event_ids')
@@ -12078,10 +14459,8 @@ async def royale(bot):
 
                     brdata = []  # Initialize brdata
 
-                    # Process each line, starting from the second line (skip header)
-                    for line in lines[1:]:
-                        # Clean and split the line
-                        cleaned_line = line.replace('\x00', '').strip().split(',')
+                    # Process each row, skipping a detected header
+                    for cleaned_line in data_rows:
 
                         # Ensure the cleaned_line has the expected length to avoid index errors
                         if len(cleaned_line) < 8:
@@ -12108,237 +14487,125 @@ async def royale(bot):
                         if cleaned_line[0] == '1':
                             br_winner = cleaned_line
 
-                            if br_winner[1] == last_br_winner:
+                            winner_login, winner_display, winner_label = resolve_br_identity(br_winner)
+
+                            if winner_login == str(last_br_winner or '').strip().lower():
                                 crownwin = True
                             else:
                                 crownwin = False
-                            config.set_setting('last_br_winner', br_winner[1], persistent=False)
+                            config.set_setting('last_br_winner', winner_login, persistent=False)
 
                             t_count += 1
                             s_t_count += 1
 
                 else:
-                    print("The file is empty or could not be processed.")
+                    logger.warning("BR file is empty or could not be processed.")
 
                 # Check if br_winner is assigned before using it
-                if br_winner is not None and len(br_winner) >= 5 and br_winner[4]:
-                    t_points += int(br_winner[4])
-                    s_t_points += int(br_winner[4])
+                if br_winner is not None and len(br_winner) >= 8:
+                    winner_login, winner_display, winner_label = resolve_br_identity(br_winner)
+                    current_score = _safe_int(br_winner[4])
+                    winner_kills = _safe_int(br_winner[6])
+                    winner_damage = _safe_int(br_winner[7])
 
-                    with open(config.get_setting('allraces_file'), 'a', newline='', encoding='utf-8',
-                              errors='ignore') as f:
-                        writer = csv.writer(f)
-                        writer.writerows(brdata)
+                    if not winner_login:
+                        logger.warning("Skipping BR winner update due to missing winner login: %s", br_winner)
+                        continue
+
+                    t_points += current_score
+                    s_t_points += current_score
 
                     _record_live_team_points_rows(config.get_setting('CHANNEL'), brdata)
 
                     race_counts = {row[1]: 0 for row in brdata}
+                    append_csv_rows_safely(config.get_setting('allraces_file'), brdata)
 
-                    with open(config.get_setting('allraces_file'), 'r', encoding='utf-8', errors='ignore') as f:
-                        reader = csv.reader(f)
-                        for row in reader:
-                            if row[1] in race_counts:
-                                race_counts[row[1]] += 1
+                    if not br_cache_loaded or t_count <= 1:
+                        br_user_totals = load_br_user_totals_from_allraces()
+                        br_cache_loaded = True
+                    else:
+                        update_br_user_totals_cache(brdata)
 
-                    for player_name, count in race_counts.items():
-                        if count == 120:
+                    for row in brdata:
+                        player_name = str(row[1]).strip().lower()
+                        player_totals = br_user_totals.get(player_name, {})
+                        if player_totals.get('races', 0) == 120 and is_chat_response_enabled("chat_br_results"):
                             announcement_message = (
                                 f"🎉 {player_name} has just completed their "
                                 f"120th race today! Congratulations! 🎉"
                             )
-                            if is_chat_response_enabled("chat_br_results"):
-                                await send_chat_message(bot.channel, announcement_message, category="br")
+                            await send_chat_message(bot.channel, announcement_message, category="br")
 
-                    if int(br_winner[4]) >= int(config.get_setting('chunk_alert_value')) and config.get_setting(
-                            'chunk_alert') == 'True':
+                    chunk_alert_enabled = config.get_setting('chunk_alert') == 'True'
+                    chunk_alert_threshold = _safe_int(config.get_setting('chunk_alert_value'))
+                    is_chunk_alert = chunk_alert_enabled and current_score >= chunk_alert_threshold
+
+                    if is_chunk_alert:
                         audio_device = config.get_setting('audio_device')
                         audio_file_path = config.get_setting('chunk_alert_sound')
-
                         if audio_file_path:
                             play_audio_file(audio_file_path, device_name=audio_device)
-                            if DEBUG == True:
-                                print('Debug: Audio Chunk Alert Played')
-                                print('Points for winner ' + str(br_winner[4]))
-                            else:
-                                pass
 
-                    if br_winner[1] != br_winner[2].lower():
-                        winnersname = br_winner[1]
-                    else:
-                        winnersname = br_winner[2]
-
-                    current_score = int(br_winner[4])
-
-                    if current_score > int(config.get_setting('hscore')):
-                        config.set_setting('hscore_name', winnersname, persistent=False)
+                    br_high_score_global = _safe_int(config.get_setting('hscore'))
+                    if current_score > br_high_score_global:
+                        config.set_setting('hscore_name', winner_display, persistent=False)
                         config.set_setting('hscore', current_score, persistent=False)
-                        br_hscore = int(config.get_setting('hscore'))
-                        br_hscore_format = format(br_hscore, ',')
-                        with open('HighScore.txt', 'w', encoding='utf-8', errors='ignore') as hs:
-                            hs.write(str(config.get_setting('hscore_name')) + '\n')
-                            hs.write(str(br_hscore_format + '\n'))
+                        high_score_payload = f"{config.get_setting('hscore_name')}\n{current_score:,}\n"
+                        atomic_write_text('HighScore.txt', high_score_payload)
 
-                    if current_score > int(config.get_setting('br_hs_season')):
+                    if current_score > _safe_int(config.get_setting('br_hs_season')):
                         config.set_setting('br_hs_season', current_score, persistent=False)
 
-                    if current_score > int(config.get_setting('br_hs_today')):
+                    if current_score > _safe_int(config.get_setting('br_hs_today')):
                         config.set_setting('br_hs_today', current_score, persistent=False)
-                    if DEBUG == True:
-                        print('Debug: High Score File Updated')
-                    else:
-                        pass
-                    lastwinner1 = ""
 
-                    if br_winner[1] != br_winner[2].lower():
-                        lastwinner1 = "{} ({}) with {} points, ".format(br_winner[2], br_winner[1], br_winner[4])
-                    else:
-                        lastwinner1 = "{} with {} points, ".format(br_winner[2], br_winner[4])
+                    latest_winner_summary = f"{winner_label} with {current_score} points, "
+                    latest_winner_detail = f"{winner_kills} kills and {winner_damage} damage."
+                    atomic_write_text(
+                        'LatestWinner.txt',
+                        f"Previous Winner:\n{latest_winner_summary}\n{latest_winner_detail}\n"
+                    )
+                    atomic_write_text(
+                        'LatestWinner_horizontal.txt',
+                        f"Previous Winner: {latest_winner_summary}{latest_winner_detail}",
+                        errors='replace'
+                    )
 
-                    lastwinner2 = "{} kills and {} damage.".format(br_winner[6], br_winner[7])
+                    logger.info("Data synced: BR latest winner files updated")
 
-                    with open('LatestWinner.txt', 'w', encoding='utf-8', errors='ignore') as hs:
-                        hs.write("Previous Winner:" + '\n')
-                        hs.write(lastwinner1 + '\n')
-                        hs.write(lastwinner2 + '\n')
-
-                    with open('LatestWinner_horizontal.txt', 'w', encoding='utf-8', errors='replace') as lwh:
-                        lwh.write("Previous Winner: " + lastwinner1 + lastwinner2)
-                        if DEBUG == True:
-                            print('Debug: Latest Winner File Updated')
-                        else:
-                            pass
-
-                    if config.get_setting('totalpointstoday') != 0:
-                        avgptstoday = t_points / t_count
-                    else:
-                        avgptstoday = 0
-
+                    avgptstoday = (t_points / t_count) if t_count > 0 else 0
                     config.set_setting('avgpointstoday', avgptstoday, persistent=False)
                     config.set_setting('totalpointstoday', t_points, persistent=False)
                     config.set_setting('totalcounttoday', t_count, persistent=False)
                     config.set_setting('totalpointsseason', s_t_points, persistent=False)
                     config.set_setting('totalcountseason', s_t_count, persistent=False)
                     update_config_labels()
-                    if DEBUG == True:
-                        print('Debug: Counts and Points Updated in UI and Config Manager')
-                    else:
-                        pass
-                    winnertotalpoints = 0
-                    wcount = 0
-                    totalcount = 0
 
-                    try:
-                        with open(config.get_setting('allraces_file'), 'r', encoding='utf-8', errors='ignore') as f:
-                            reader = csv.reader(f)
-                            for row in reader:
-                                if row[1] == winnersname.lower():
-                                    winnertotalpoints += int(row[3])
-                                    if row[0] == '1':
-                                        wcount += 1
-                                if row[1] == br_winner[1]:
-                                    totalcount += 1
-                    except FileNotFoundError:
-                        print("File not found. " + config.get_setting('allraces_file'))
-                        with open(config.get_setting('allraces_file'), 'w', encoding='utf-8', errors='ignore'):
-                            pass
-                    except Exception as e:
-                        print("An error occurred while processing the file:", e)
+                    winner_totals = br_user_totals.get(winner_login, {'points': 0, 'wins': 0, 'races': 0})
+                    winnertotalpoints = winner_totals.get('points', 0)
+                    wcount = winner_totals.get('wins', 0)
+                    totalcount = winner_totals.get('races', 0)
 
-                    if br_winner[1] != br_winner[2].lower():
-                        wname = br_winner[1]
-                    else:
-                        wname = br_winner[2]
-                    wpoints = '{:,}'.format(int(br_winner[4]))
-                    wkills = br_winner[6]
-                    wdam = br_winner[7]
+                    wname = winner_display
+                    wpoints = f"{current_score:,}"
+                    wkills = str(winner_kills)
+                    wdam = str(winner_damage)
 
-                    if DEBUG == True:
-                        print(config.get_setting('chunk_alert'))
-                        print(int(config.get_setting('chunk_alert_value')))
-                        print(str(wpoints))
-                        print(str(crownwin))
-                    else:
-                        pass
-
-                    if int(br_winner[4]) >= int(config.get_setting('chunk_alert_value')) and config.get_setting(
-                            'chunk_alert') == 'True':
-                        if DEBUG == True:
-                            print('Debug: Chunk Alert: True, Winner Points: ' + str(wpoints))
-                        else:
-                            pass
-                        if crownwin:
-                            if DEBUG == True:
-                                print('Debug: Chunk Alert: True, Crown Win: True')
-                            else:
-                                pass
-                            if br_winner[1] != br_winner[2].lower():
-                                message = "🧃 CROWN WIN! 👑: {}({}) | {} points | {} eliminations | {} damage | ".format(
-                                    br_winner[2], br_winner[1], '{:,}'.format(int(br_winner[4])), br_winner[6],
-                                    br_winner[7]) + "Today's stats: " + str(
-                                    '{:,}'.format(int(winnertotalpoints))) + " points | " + str(
-                                    wcount) + " wins | " + " " + str('{:,}'.format(int(totalcount))) + " races"
-                            else:
-                                message = "🧃 CROWN WIN! 👑: {} | {} points | {} eliminations | {} damage | ".format(
-                                    br_winner[2], '{:,}'.format(int(br_winner[4])), br_winner[6],
-                                    br_winner[7]) + "Today's stats: " + str(
-                                    '{:,}'.format(int(winnertotalpoints))) + " points | " + str(
-                                    wcount) + " wins | " + " " + str('{:,}'.format(int(totalcount))) + " races"
-                        else:
-                            if br_winner[1] != br_winner[2].lower():
-                                message = "🧃 Battle Royale Champion 🏆: {}({}) | {} points | {} eliminations | {} damage | ".format(
-                                    br_winner[2], br_winner[1], '{:,}'.format(int(br_winner[4])), br_winner[6],
-                                    br_winner[7]) + "Today's stats: " + str(
-                                    '{:,}'.format(int(winnertotalpoints))) + " points | " + str(
-                                    wcount) + " wins | " + " " + str('{:,}'.format(int(totalcount))) + " races"
-                            else:
-                                message = "🧃 Battle Royale Champion 🏆: {} | {} points | {} eliminations | {} damage | ".format(
-                                    br_winner[2], '{:,}'.format(int(br_winner[4])), br_winner[6],
-                                    br_winner[7]) + "Today's stats: " + str(
-                                    '{:,}'.format(int(winnertotalpoints))) + " points | " + str(
-                                    wcount) + " wins | " + " " + str('{:,}'.format(int(totalcount))) + " races"
-                    else:
-                        if crownwin:
-                            if br_winner[1] != br_winner[2].lower():
-                                message = "CROWN WIN! 👑: {}({}) | {} points | {} eliminations | {} damage | ".format(
-                                    br_winner[2], br_winner[1], '{:,}'.format(int(br_winner[4])), br_winner[6],
-                                    br_winner[7]) + "Today's stats: " + str(
-                                    '{:,}'.format(int(winnertotalpoints))) + " points | " + str(
-                                    wcount) + " wins | " + " " + str('{:,}'.format(int(totalcount))) + " races"
-                            else:
-                                message = "CROWN WIN! 👑: {} | {} points | {} eliminations | {} damage | ".format(
-                                    br_winner[2], '{:,}'.format(int(br_winner[4])), br_winner[6],
-                                    br_winner[7]) + "Today's stats: " + str(
-                                    '{:,}'.format(int(winnertotalpoints))) + " points | " + str(
-                                    wcount) + " wins | " + " " + str('{:,}'.format(int(totalcount))) + " races"
-                        else:
-                            if br_winner[1] != br_winner[2].lower():
-                                message = "Battle Royale Champion 🏆: {}({}) | {} points | {} eliminations | {} damage | ".format(
-                                    br_winner[2], br_winner[1], '{:,}'.format(int(br_winner[4])), br_winner[6],
-                                    br_winner[7]) + "Today's stats: " + str(
-                                    '{:,}'.format(int(winnertotalpoints))) + " points | " + str(
-                                    wcount) + " wins | " + " " + str('{:,}'.format(int(totalcount))) + " races"
-                            else:
-                                message = "Battle Royale Champion 🏆: {} | {} points | {} eliminations | {} damage | ".format(
-                                    br_winner[2], '{:,}'.format(int(br_winner[4])), br_winner[6],
-                                    br_winner[7]) + "Today's stats: " + str(
-                                    '{:,}'.format(int(winnertotalpoints))) + " points | " + str(
-                                    wcount) + " wins | " + " " + str('{:,}'.format(int(totalcount))) + " races"
-                    if DEBUG == True:
-                        print('Debug: Chat Message Created, Not Sent')
-                    else:
-                        pass
+                    message = build_br_winner_message(
+                        crownwin=crownwin,
+                        chunk_alert=is_chunk_alert,
+                        winner_label=winner_label,
+                        points=current_score,
+                        kills=winner_kills,
+                        damage=winner_damage,
+                        total_points=winnertotalpoints,
+                        wins=wcount,
+                        races=totalcount,
+                    )
                     if config.get_setting('announcedelay') == 'True':
-                        if DEBUG == True:
-                            print('Debug: Announcement Delay: True')
-                        else:
-                            pass
                         await send_chat_message(bot.channel, message, category="br", apply_delay=True)
                         write_overlays()
                     else:
-                        if DEBUG == True:
-                            print('Debug: Announcement Delay: False')
-                        else:
-                            pass
                         await send_chat_message(bot.channel, message, category="br")
                         write_overlays()
 
@@ -12360,41 +14627,12 @@ async def royale(bot):
                         enqueue_overlay_event('quest_completed', quest_message)
                         await send_chat_message(bot.channel, quest_message, category="br")
 
+                    namecolor = map_name_color(br_winner[3])
                     if crownwin:
-                        # Determine the name color based on the br_winner color code
-                        if br_winner[3] == '6E95FFFF':
-                            namecolor = "blue"
-                        elif br_winner[3] == 'F91ED2FF':
-                            namecolor = "magenta"
-                        elif br_winner[3] == 'FF82D6FF':  # Change to violet
-                            namecolor = "violet"
-                        elif br_winner[3] == '79FFC7FF':
-                            namecolor = "green"
-                        elif br_winner[3] == 'F88688FF':
-                            namecolor = "red"
-                        elif br_winner[3] == 'DA6700FF':
-                            namecolor = "orange"
-                        else:
-                            namecolor = "white"
                         display_battle_royale_crownwinner(text_area, marbcount, wname, wpoints, wkills, wdam, wcount,
                                                           winnertotalpoints, namecolor)
 
                     else:
-                        # Determine the name color based on the br_winner color code
-                        if br_winner[3] == '6E95FFFF':
-                            namecolor = "blue"
-                        elif br_winner[3] == 'F91ED2FF':
-                            namecolor = "magenta"
-                        elif br_winner[3] == 'FF82D6FF':  # Change to violet
-                            namecolor = "violet"
-                        elif br_winner[3] == '79FFC7FF':
-                            namecolor = "green"
-                        elif br_winner[3] == 'F88688FF':
-                            namecolor = "red"
-                        elif br_winner[3] == 'DA6700FF':
-                            namecolor = "orange"
-                        else:
-                            namecolor = "white"
                         display_battle_royale_winner(text_area, marbcount, wname, wpoints, wkills, wdam, wcount,
                                                      winnertotalpoints, namecolor)
                 else:
@@ -12431,7 +14669,7 @@ if __name__ == "__main__":
                 else:
                     break
             except Exception as e:
-                print(f"Bot connection failed: {e}")
+                logger.error("Bot connection failed", exc_info=True)
                 if not BOT_SHOULD_RUN:
                     break
                 print(f"Retrying Twitch connection in {reconnect_delay} seconds...")
