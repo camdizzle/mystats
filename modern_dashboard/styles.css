@@ -128,7 +128,41 @@ body {
 }
 .row-head { display: grid; grid-template-columns: 42px 1fr auto; gap: 6px; align-items: center; }
 .rank { text-align: center; font-weight: 700; background: rgba(0,0,0,.35); border-radius: 8px; padding: 3px 0; font-size: .78rem; }
+.rank--gold {
+  background: linear-gradient(160deg, rgba(255, 222, 89, .9), rgba(211, 153, 20, .9));
+  color: #2a1800;
+  border: 1px solid rgba(255, 235, 156, .65);
+  box-shadow: 0 0 10px rgba(255, 211, 79, .35);
+}
+
+.rank--silver {
+  background: linear-gradient(160deg, rgba(233, 241, 255, .9), rgba(160, 177, 205, .9));
+  color: #12243f;
+  border: 1px solid rgba(232, 242, 255, .62);
+  box-shadow: 0 0 10px rgba(201, 216, 236, .25);
+}
+
+.rank--bronze {
+  background: linear-gradient(160deg, rgba(237, 177, 118, .95), rgba(164, 97, 43, .92));
+  color: #2e1200;
+  border: 1px solid rgba(248, 202, 160, .62);
+  box-shadow: 0 0 10px rgba(210, 134, 75, .28);
+}
 .name { font-weight: 700; font-size: .88rem; }
+.team-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.team-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.2em;
+  line-height: 1;
+  filter: drop-shadow(0 0 4px rgba(0, 0, 0, .35));
+}
 .stat { color: #8be8ae; font-weight: 700; font-size: .77rem; }
 .progress-bar { margin: 6px 0; height: 7px; border-radius: 999px; background: rgba(255,255,255,.1); overflow: hidden; }
 .progress-fill { height: 100%; background: linear-gradient(90deg, #4ec9ff, #3ddc8f); }
