@@ -9913,6 +9913,52 @@ def _launch_installer_process(installer_path, command_args):
     logger.info("Installer process started, PID=%s", proc.pid)
     return proc
 
+def _launch_installer_detached(installer_path, command_args):
+    """Launch installer via an intermediate process so it is not a MyStats child."""
+    if sys.platform != "win32":
+        return _launch_installer_process(installer_path, command_args)
+
+    installer_path_ps = installer_path.replace("'", "''")
+    installer_args_ps = ', '.join("'" + str(arg).replace("'", "''") + "'" for arg in command_args)
+
+    if command_args:
+        start_process_line = "Start-Process -FilePath $installerPath -ArgumentList $installerArgs -WindowStyle Normal"
+    else:
+        start_process_line = "Start-Process -FilePath $installerPath -WindowStyle Normal"
+
+    ps_script = f"""
+$installerPath = '{installer_path_ps}'
+$installerArgs = @({installer_args_ps})
+{start_process_line}
+""".strip()
+
+    powershell_exe = os.path.join(os.environ.get('SystemRoot', r'C:\Windows'), 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+    if not os.path.exists(powershell_exe):
+        powershell_exe = 'powershell.exe'
+
+    creationflags = getattr(subprocess, 'CREATE_NEW_PROCESS_GROUP', 0)
+    creationflags |= getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+
+    try:
+        subprocess.Popen(
+            [powershell_exe, '-NoProfile', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-Command', ps_script],
+            creationflags=creationflags,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+        )
+        logger.info("Detached installer bootstrap process launched via %s", powershell_exe)
+        return None
+    except FileNotFoundError:
+        logger.warning("PowerShell was not found. Falling back to direct installer launch.")
+    except OSError as exc:
+        logger.warning("PowerShell bootstrap launch failed (%s). Falling back to direct installer launch.", exc)
+
+    # Fallback still launches the installer, though as a direct process from MyStats.
+    return _launch_installer_process(installer_path, command_args)
+
+
 def _start_installer_and_exit(installer_path, silent_mode=True):
     if not installer_path or not os.path.exists(installer_path):
         logger.error("Installer not found on disk: %s", installer_path)
@@ -9943,8 +9989,8 @@ def _start_installer_and_exit(installer_path, silent_mode=True):
     file_size = os.path.getsize(installer_path)
     logger.info("Installer validated: %s (%d bytes)", installer_path, file_size)
 
-    # Always use /VERYSILENT. /NORESTART prevents automatic reboots.
-    command_args = ["/VERYSILENT", "/CLOSEAPPLICATIONS", "/SUPPRESSMSGBOXES", "/NORESTART"]
+    # Launch installer with normal interactive behavior.
+    command_args = []
     command = [installer_path, *command_args]
 
     version_label = str(config.get_setting('pending_update_version_label') or '').strip()
@@ -9958,28 +10004,7 @@ def _start_installer_and_exit(installer_path, silent_mode=True):
     try:
         logger.info("Launching installer: %s", command)
 
-        if sys.platform == "win32":
-            # Fresh approach for PyInstaller builds: schedule a Windows Task that
-            # starts after this process exits, so the installer is not tied to our
-            # process tree or job object.
-            _schedule_installer_bootstrap(
-                installer_path,
-                command_args,
-                version_label,
-                os.getpid(),
-            )
-
-            # Task creation succeeded — clear recovery settings and exit so
-            # bootstrap can detect parent shutdown and launch installer.
-            config.set_setting('pending_update_installer_path', '', persistent=True)
-            config.set_setting('pending_update_silent_mode', 'True', persistent=True)
-            config.set_setting('pending_update_version_label', '', persistent=True)
-
-            logger.info("Closing MyStats so scheduled installer bootstrap can proceed.")
-            root.after(500, force_exit_application)
-            return
-
-        proc = _launch_installer_process(installer_path, command_args)
+        proc = _launch_installer_detached(installer_path, command_args)
 
         # Verify direct child launches are still alive (when we have a process
         # handle). ShellExecute launches do not provide a child PID here.
@@ -9999,19 +10024,11 @@ def _start_installer_and_exit(installer_path, silent_mode=True):
                 config.set_setting('pending_update_version_label', '', persistent=True)
                 return
 
-        # Installer is running — clear recovery settings.
+        # Installer launch attempt completed — clear recovery settings.
         config.set_setting('pending_update_installer_path', '', persistent=True)
         config.set_setting('pending_update_silent_mode', 'True', persistent=True)
         config.set_setting('pending_update_version_label', '', persistent=True)
-
-        # Launch the custom splash window (separate process, survives MyStats exit).
-        if proc is not None:
-            _launch_update_splash(version_label or 'latest', proc.pid)
-
-        # Give the splash a moment to appear, then close MyStats so the
-        # installer can replace our files.
-        logger.info("Closing MyStats so installer can proceed.")
-        root.after(500, force_exit_application)
+        logger.info("Installer launched. Leaving MyStats open for installer-managed shutdown.")
 
     except Exception as exc:
         logger.error("Failed to launch installer: %s", exc, exc_info=True)
@@ -10049,24 +10066,15 @@ def recover_pending_update_launch(parent=None):
         config.set_setting('pending_update_version_label', '', persistent=True)
         return False
 
-    command_args = ["/VERYSILENT", "/CLOSEAPPLICATIONS", "/SUPPRESSMSGBOXES", "/NORESTART"]
+    command_args = []
     command = [installer_path, *command_args]
 
     try:
         logger.info("Recovery: launching installer %s", command)
 
-        if sys.platform == "win32":
-            _schedule_installer_bootstrap(
-                installer_path,
-                command_args,
-                version_label,
-                os.getpid(),
-            )
-            logger.info("Recovery: scheduled installer bootstrap task")
-        else:
-            proc = _launch_installer_process(installer_path, command_args)
-            if proc is not None:
-                logger.info("Recovery: installer PID=%s", proc.pid)
+        proc = _launch_installer_detached(installer_path, command_args)
+        if proc is not None:
+            logger.info("Recovery: installer PID=%s", proc.pid)
 
         config.set_setting('pending_update_installer_path', '', persistent=True)
         config.set_setting('pending_update_silent_mode', 'True', persistent=True)
@@ -10239,6 +10247,14 @@ def show_update_message(versioncheck, download_url):
     hyperlink.pack(pady=5)
     hyperlink.bind("<Button-1>", lambda e: open_url("https://mystats.camwow.tv/download"))
 
+    helper_label = tk.Label(
+        popup,
+        text="If you have issues with the updater not installing, download the full version and install.",
+        wraplength=460,
+        justify='center'
+    )
+    helper_label.pack(pady=(4, 0))
+
     button_frame = ttk.Frame(popup)
     button_frame.pack(pady=16)
 
@@ -10252,7 +10268,7 @@ def show_update_message(versioncheck, download_url):
 
     ttk.Button(
         button_frame,
-        text="One-Click Update",
+        text="Update Now",
         command=start_update
     ).pack(side='left', padx=6)
 
