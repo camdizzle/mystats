@@ -18,6 +18,7 @@ MyTeams is MyStats' channel team system (local mode). Viewers form teams, compet
 3. `!recruiting on`
 4. `!renameteam New Team Name` (when needed)
 5. `!myteam`
+6. `!teambonus`
 
 ### Join a team (member)
 - From invite: `!acceptteam Team Name`
@@ -50,6 +51,7 @@ MyTeams is MyStats' channel team system (local mode). Viewers form teams, compet
 
 ### Team standings and status
 - `!myteam [@username]` — Team summary, role, members, points, sub stats, active bonus
+- `!teambonus [@username]` — Bits/TEP bank progress, active bonus source, and TEP cooldown status
 - `!dailyteams` — Top teams (daily points)
 - `!weeklyteams` — Top teams (weekly points)
 
@@ -66,8 +68,11 @@ MyTeams is MyStats' channel team system (local mode). Viewers form teams, compet
 ## Bits bonus (quick explanation)
 
 - Bits from team members are added to that team's bits bank.
-- When the bank crosses the configured threshold, MyTeams rolls a weighted multiplier (2x/3x/4x).
-- Active bonus windows extend/refresh based on settings and appear in team status (for example `⚡3x`).
+- Team races add Team Effort Points (TEP) to an effort bank (participation-based).
+- Dual-track rule: bits and TEP do not overlap; only one bonus window can be active at a time.
+- Bits bank crossing threshold rolls weighted bonus tiers (+15%/+25%/+35%/+67%), with 67% reserved for paid bits track.
+- TEP bank crossing threshold triggers fixed +15% for 15m by default, and is blocked for 60m after bits bonus windows.
+- Active bonus windows appear in team status (for example `⚡+35%`).
 
 ---
 
@@ -92,4 +97,4 @@ MyTeams is MyStats' channel team system (local mode). Viewers form teams, compet
 
 ## Chat blurb for streamers
 
-"MyTeams is live! Type `!tcommands` for team commands. Use `!createteam` to start a team, `!invite` to recruit, `!renameteam` to rename your team (captain only), and `!dailyteams` / `!weeklyteams` / `!myteam` to track standings."
+"MyTeams is live! Type `!tcommands` for team commands. Use `!createteam` to start a team, `!invite` to recruit, `!renameteam` to rename your team (captain only), and `!dailyteams` / `!weeklyteams` / `!myteam` / `!teambonus` to track standings and bonus progress."

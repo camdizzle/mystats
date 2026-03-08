@@ -33,7 +33,7 @@ Open **Settings → MyTeams**.
 
 - **Bonus Bits Threshold**: bits required to activate a team bonus roll.
 - **Bonus Duration (min)**: minutes added per activation.
-- **Bonus Weights 2x/3x/4x**: weighted odds for multiplier result.
+- **Bonus Weights 15%/25%/35%/67%**: weighted odds for multiplier result.
 
 ### MyTeams admin table/actions
 
@@ -60,6 +60,7 @@ Actions:
 6. `!inactive 14` (optional)
 7. `!renameteam New Team Name` (captain only)
 8. `!myteam`
+9. `!teambonus`
 
 ### B) Member quickstart
 
@@ -67,6 +68,7 @@ Actions:
 - Deny invite: `!denyteam Team Name`
 - Auto-join open team: `!join`
 - Check status: `!myteam`
+- Check bonus progress: `!teambonus`
 - Leave: `!leave`
 
 ### C) Streamer/admin quickstart
@@ -128,6 +130,8 @@ Actions:
 
 - `!myteam [@username]`
   - Shows team name, rank, season/daily points, subscriber breakdown, active bonus, bonus races, recruiting state, role, captain tier, and member list.
+- `!teambonus [@username]`
+  - Shows bits/TEP bank progress, active bonus source, and TEP cooldown status.
 - `!dailyteams`
   - Top MyTeams leaderboard (daily window).
 - `!weeklyteams`
@@ -165,9 +169,11 @@ Displayed windows:
 ## 7) Bits bonus behavior
 
 - Team member bits add to team bits bank.
-- On threshold hit, MyTeams rolls weighted multiplier (2x/3x/4x).
-- A bonus window is activated/extended using configured duration.
-- Active bonus appears as `⚡Nx` in team status and leaderboard surfaces.
+- Team races also add Team Effort Points (TEP) to a separate effort bank (participation-driven).
+- Bits and TEP are dual-track and non-overlapping: only one active bonus window at a time.
+- Bits track rolls weighted bonus tiers (+15%/+25%/+35%/+67%), where 67% is paid-track only.
+- TEP track triggers a fixed +15% bonus for 15 minutes by default, and cannot trigger if a bits bonus was active in the last hour.
+- Active bonus appears as `⚡+N%` in team status and leaderboard surfaces.
 
 ---
 
