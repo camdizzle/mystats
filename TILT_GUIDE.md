@@ -26,7 +26,7 @@ Use the dashboard as your operator/control view:
 ### Overlay (OBS)
 Use the overlays as viewer-facing Browser Sources in OBS:
 
-- Tilt overlay URL: `http://127.0.0.1:<overlay_server_port>/overlay/tilt`
+- Tilt overlay URL (unified overlay with mode switching): `http://127.0.0.1:<overlay_server_port>/overlay`
 - Main overlay URL: `http://127.0.0.1:<overlay_server_port>/overlay`
 
 ---
@@ -38,11 +38,10 @@ Use the overlays as viewer-facing Browser Sources in OBS:
 3. Confirm **Server Port** (default is usually `5000`).
 4. Open in a browser to verify:
    - Dashboard: `http://127.0.0.1:<port>/dashboard`
-   - Tilt overlay page: `http://127.0.0.1:<port>/overlay/tilt`
+   - Tilt overlay page: `http://127.0.0.1:<port>/overlay`
 5. In OBS, add a **Browser Source**.
 6. Use one of these URLs:
-   - `http://127.0.0.1:<port>/overlay/tilt` (Tilt scene)
-   - `http://127.0.0.1:<port>/overlay` (main race scene)
+   - `http://127.0.0.1:<port>/overlay` (all scenes; mode switches between Race/BR/Tilt)
 7. If port changes, restart MyStats and update OBS Browser Source URLs.
 
 ---
@@ -173,6 +172,6 @@ Pressure is a ranking/highlight metric and is separate from expertise.
 ## TL;DR
 
 - Dashboard: `http://127.0.0.1:<port>/dashboard`
-- OBS Tilt Browser Source: `http://127.0.0.1:<port>/overlay/tilt`
+- OBS Browser Source (all modes): `http://127.0.0.1:<port>/overlay`
 - Tilt chat commands: `!mytilts`, `!xp`, `!toptiltees`, `!top10tiltees`, `!tiltsurvivors`, `!top10xp`
 - Expertise = survivor-count × level multiplier, accumulated into run/day/lifetime totals.
