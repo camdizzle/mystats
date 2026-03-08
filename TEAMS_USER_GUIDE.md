@@ -1,6 +1,6 @@
-# MyStats MyTeams — Complete User Guide
+# MyStats MyTeams — User Guide (Current State)
 
-This guide explains how to use the **MyTeams** feature end-to-end in MyStats: setup, commands, moderation, scoring, bonus multipliers, dashboard/overlay views, and troubleshooting.
+This guide reflects the current MyTeams implementation in MyStats (local channel mode): setup, commands, team management, scoring/bonus behavior, dashboard visibility, and troubleshooting.
 
 ---
 
@@ -8,11 +8,10 @@ This guide explains how to use the **MyTeams** feature end-to-end in MyStats: se
 
 MyTeams is a channel-scoped competition layer in MyStats.
 
-- MyTeams currently runs in local channel mode.
-- Chat commands manage team membership and moderation.
-- Team points are computed from member race/BR activity (with optional bonus/sub logic).
-
-> Tip: Use this guide for stream setup and to share with captains/co-captains.
+- Teams are stored locally per channel in MyStats data files.
+- Chat commands handle creation, invites, joining, moderation, and status.
+- Team standings are calculated from member race points using configured point mode.
+- Optional bits-driven bonus windows can temporarily multiply team points.
 
 ---
 
@@ -20,95 +19,88 @@ MyTeams is a channel-scoped competition layer in MyStats.
 
 Open **Settings → MyTeams**.
 
-### Core toggles
+### Core controls
 
-- **Enable MyTeams Commands**: enables/disables all team chat commands.
-- **Rollout Phase**:
-  - Keep this set to `local` for the current command-driven MyTeams experience.
-
-### Scoring and size controls
-
-- **Points Counting Mode**:
-  - `season` = count members' full season points.
-  - `active` = count points only after team creation/join timing.
-- **Max Team Size**: hard cap on team size.
+- **Enable MyTeams Commands**
+  - Master toggle for MyTeams chat commands.
+- **Points Counting Mode**
+  - `active`: counts points from member join/create timing onward.
+  - `season`: counts full season points.
+- **Max Team Size**
+  - Hard cap for captain + co-captains + members.
 
 ### Bits bonus controls
 
-- **Bonus Bits Threshold**: bits required to trigger a team bonus roll.
-- **Bonus Duration (min)**: minutes added per successful activation.
-- **Bonus Weights 2x/3x/4x**: weighted odds for multiplier selection.
+- **Bonus Bits Threshold**: bits required to activate a team bonus roll.
+- **Bonus Duration (min)**: minutes added per activation.
+- **Bonus Weights 2x/3x/4x**: weighted odds for multiplier result.
 
 ### MyTeams admin table/actions
 
-The MyMyTeams table shows: captain, size, recruiting state, active bonus label, daily/weekly/season points.
+The MyTeams table shows each team's captain, size, recruiting state, active bonus label, and daily/weekly/season points.
 
-Buttons:
+Actions:
 - **Refresh**
-- **Generate Team Name** (copies generated name to clipboard)
-- **Toggle Recruiting** (for selected team)
-- **Delete Team** (also removes associated invites/cache entries)
+- **Generate Team Name** (copies a generated name to clipboard)
+- **Toggle Recruiting** (selected team)
+- **Delete Team** (also clears related invites/cache entries)
 
 ---
 
 ## 3) Quickstart flows
 
-## A) Captain quickstart
+### A) Captain quickstart
 
-1. Ensure you are a subscriber (or broadcaster), then run:
-   - `!createteam Your Team Name`
-2. Invite people:
-   - `!invite username`
-3. Appoint trusted helper:
-   - `!cocaptain username`
-4. Open recruiting:
-   - `!recruiting on`
-5. Set team logo/emote:
-   - `!logo :your_emote:`
-6. Set inactivity policy:
-   - `!inactive 14`
-7. Check status:
-   - `!myteam`
+1. `!createteam Your Team Name`
+2. `!invite username`
+3. `!cocaptain username` (optional)
+4. `!recruiting on`
+5. `!logo :your_emote:` (optional)
+6. `!inactive 14` (optional)
+7. `!myteam`
 
-## B) Member quickstart
+### B) Member quickstart
 
-- Join from invite: `!acceptteam Team Name`
-- Reject invite: `!denyteam Team Name`
-- Auto-join open recruiting: `!join`
-- View team: `!myteam`
-- Leave team: `!leave`
+- Join invite: `!acceptteam Team Name`
+- Deny invite: `!denyteam Team Name`
+- Auto-join open team: `!join`
+- Check status: `!myteam`
+- Leave: `!leave`
 
-## C) Streamer moderation quickstart
+### C) Streamer/admin quickstart
 
-- In UI: select team in MyTeams table, **Toggle Recruiting** or **Delete Team**.
-- In chat (captain/co-captain): `!kick username`, `!inactive X`.
+- Use Settings → MyTeams table actions for fast admin operations.
+- Captains/co-captains can moderate in chat via `!kick`, `!recruiting`, and `!inactive`.
 
 ---
 
-## 4) Complete command reference
+## 4) Current command reference
 
-> All commands use `!` prefix.
+> Commands use `!` prefix.
 
 ### Discovery
 
-- `!teamhelp` — Quick MyTeams how-to blurb for chat.
-- `!tcommands` — Shows all team commands.
+- `!teamhelp` — short MyTeams chat explainer.
+- `!tcommands` — lists currently available MyTeams commands.
 
-### Team creation and joining
+### Team creation + joining
 
 - `!createteam [team name]`
-  - Creates a team if you are not already on one.
   - Subscriber-only (broadcaster exempt).
-  - If name omitted, MyStats auto-generates one.
+  - Fails if user is already in a team.
+  - If no name is supplied, MyStats generates one.
 - `!invite <username>`
   - Captain/co-captain only.
-  - Sends invite (expires after 7 days).
+  - Invite expires after 7 days.
 - `!acceptteam <team name>`
-  - Accept a pending invite if team exists and has room.
+  - Accept a pending invite if valid and team has space.
 - `!denyteam <team name>`
   - Deny a pending invite.
 - `!join`
-  - Auto-joins the best available recruiting team with space.
+  - Auto-joins the best available recruiting team with room.
+- `!leave`
+  - Leaves current team.
+  - If captain leaves, captaincy is handed off when possible; empty teams are archived.
 
 ### Team management
 
@@ -117,164 +109,108 @@ Buttons:
   - Promotes existing member to co-captain.
 - `!kick <username>`
   - Captain/co-captain only.
-  - Removes member/co-captain (captain cannot be kicked).
-- `!leave`
-  - Leave your current team.
-  - If captain leaves:
-    - first co-captain is promoted, else first member, else team is archived.
+  - Removes co-captain or member (captain cannot be kicked).
 - `!recruiting on|off`
   - Captain/co-captain only.
 - `!logo <emote>`
   - Captain/co-captain only.
-  - Sets team logo shown in `!myteam`.
+  - Sets logo/emote shown in status and overlays.
 - `!inactive <days>`
   - Captain/co-captain only.
-  - Stores inactivity threshold and performs immediate lightweight sweep of stale members.
+  - Sets inactivity threshold and runs an immediate stale-member sweep.
 
-### Team info and standings
+### Team status + leaderboards
 
 - `!myteam [@username]`
-  - Detailed status for your team, or for the tagged user's team:
-  - rank, season/daily points, sub points, active bonus label, bonus races, kick policy, recruiting state, captain + member list.
+  - Shows team name, rank, season/daily points, subscriber breakdown, active bonus, bonus races, recruiting state, role, captain tier, and member list.
 - `!dailyteams`
-  - Top 5 teams by today points.
+  - Top MyTeams leaderboard (daily window).
 - `!weeklyteams`
-  - Top 5 teams by 7-day points.
+  - Top MyTeams leaderboard (weekly window).
 
 ---
 
 ## 5) Roles and permissions
 
 - **Captain**
-  - Full team control (invite, promote co-captain, kick, logo, recruiting, inactive policy).
+  - Full team control.
 - **Co-captain**
-  - Operational control (invite, kick, logo, recruiting, inactive policy).
-  - Cannot assign co-captain.
+  - Invite, kick, recruiting, logo, inactive-policy controls.
 - **Member**
-  - Can view/leave, accept/deny own invites.
+  - Accept/deny invites, view team, leave.
 
 ---
 
-## 6) How scoring works
+## 6) Scoring model (current)
 
-Team points combine:
+MyTeams scores are computed from member points with configurable mode:
 
-1. **Member race/BR points** from historical allraces data.
-2. **Optional subscriber contribution effects** from member metadata.
-3. **Team bonus windows** (bits-triggered multipliers).
+- **active mode**: member points counted from join/create timestamp.
+- **season mode**: member full-season points counted.
 
-### Points windows
+Displayed windows:
+- Daily
+- Weekly
+- Season
 
-- **Daily**: today only.
-- **Weekly**: rolling 7 days.
-- **Season**: full season.
-
-### Points mode
-
-- `season`: member's full season history counts.
-- `active`: member points count from team join/create timing.
-
-### Caching behavior
-
-MyStats stores computed team points in `team_points_cache.json` for faster leaderboard reads.
+`!myteam` and UI leaderboard snapshots surface these values.
 
 ---
 
-## 7) Bits bonus system
+## 7) Bits bonus behavior
 
-When a chatter donates bits:
-
-1. Bits are attributed to donor's current team.
-2. Team accumulates `bits_bank`.
-3. Each time `bits_bank >= threshold`, a bonus activation occurs:
-   - choose multiplier (2x/3x/4x) from configured weights,
-   - start/extend active bonus duration,
-   - update label (e.g., `⚡3x`),
-   - emit activation chat message.
-
-Notes:
-- Multiple threshold crossings can occur from one large bits event.
-- Existing active bonus may be extended and/or increased.
+- Team member bits add to team bits bank.
+- On threshold hit, MyTeams rolls weighted multiplier (2x/3x/4x).
+- A bonus window is activated/extended using configured duration.
+- Active bonus appears as `⚡Nx` in team status and leaderboard surfaces.
 
 ---
 
 ## 8) Dashboard + overlay integration
 
-## Dashboard
-
-- Open `/dashboard` and use the **MyTeams** tab.
-- MyTeams panel shows:
-  - KPI cards (tracked teams, recruiting teams, average points),
-  - highlight cards (season leader, today leader),
-  - team leaderboard rows (captain, size, recruiting, bonus label).
-
-## Overlay
-
-- `/api/overlay/top3` now includes team views in rotation when team data exists:
-  - **Top MyTeams Today**
-  - **Top MyTeams Season**
-- `/api/overlay/myteams` returns team lists explicitly:
-  - `top_today`, `top_weekly`, `top_season`.
+- **Dashboard** (`/dashboard`)
+  - Includes MyTeams leaderboard cards/snapshot.
+- **Overlay** (`/overlay`)
+  - Rotation includes Top MyTeams Today and Top MyTeams Season cards.
 
 ---
 
-## 9) Data files (local persistence)
+## 9) Local data files
 
 - `teams_data.json`
-  - MyTeams records, invites, role/membership, metadata, recruiting flags, bonus state.
+  - Teams, members, invites, role data, recruiting state, bonus state.
 - `team_points_cache.json`
-  - Cached daily/weekly/season team points and bonus race counters.
+  - Cached team points/bonus race counters.
 
-If teams are deleted/archived, MyStats cleans associated invites and cache entries.
+When teams are deleted/archived, related invite and cache entries are cleaned.
 
 ---
 
 ## 10) Operational best practices
 
-- Start with `Max Team Size` around 15–25.
-- Keep recruiting closed by default; open during active community windows.
-- Assign 1–2 co-captains per high-volume team.
-- Use `!inactive` policies to keep teams fresh.
-- Keep bonus threshold high enough to feel special (e.g., 1000+ bits).
-- Share `!tcommands` in chat periodically for discoverability.
+- Start with team size cap around 15–25.
+- Keep recruiting closed by default; open intentionally.
+- Assign co-captains for larger teams.
+- Use `!inactive` policies to keep teams active.
+- Tune bonus threshold high enough to feel meaningful.
+- Periodically post `!tcommands` in chat.
 
 ---
 
 ## 11) Troubleshooting
 
 ### "Nothing happens when I use team commands"
-
-- Check **Enable MyTeams Commands** in Settings → MyTeams.
-- Confirm you are in `local` phase for full command flow.
+- Confirm **Enable MyTeams Commands** is on in Settings → MyTeams.
 
 ### "I can't create a team"
-
-- `!createteam` is subscriber-only (except broadcaster).
-- You also cannot create if already in a team.
+- `!createteam` requires subscriber status (except broadcaster).
+- You cannot create a new team while already in one.
 
 ### "Invite won't accept"
+- Invite may be expired/denied.
+- Team may be full.
+- You may already be on a team.
+- Target team may have been removed.
 
-- Invite may have expired (7 days) or been denied.
-- Team may be full (max size reached).
-- Team might have been deleted.
-
-### "`!join` says no recruiting teams"
-
-- All recruiting teams may be closed or full.
-- Captains/co-captains must run `!recruiting on`.
-
-### "Bonus isn't triggering"
-
-- Donor must be in a team.
-- Bits amount must cross configured threshold (possibly cumulative via `bits_bank`).
-
-### "My team points look stale"
-
-- Cached values are used for speed; they refresh as activity and reads occur.
-- Use UI **Refresh** in MyTeams tab and verify ingest is running.
-
----
-
-## 12) Suggested streamer announcement
-
-"MyTeams is live in MyStats! Use `!tcommands` to see commands. Subs can create teams with `!createteam`, captains can invite with `!invite`, and everyone can track standings with `!dailyteams`, `!weeklyteams`, and `!myteam`."
+### "!join says no teams available"
+- No teams are currently both recruiting **and** under max team size.
