@@ -4525,6 +4525,7 @@ def _build_overlay_settings_payload():
         'horizontal_feed_brs_season': str(config.get_setting('overlay_horizontal_feed_brs_season') or 'True'),
         'horizontal_feed_races_today': str(config.get_setting('overlay_horizontal_feed_races_today') or 'True'),
         'horizontal_feed_brs_today': str(config.get_setting('overlay_horizontal_feed_brs_today') or 'True'),
+        'horizontal_feed_myteams': str(config.get_setting('overlay_horizontal_feed_myteams') or 'True'),
         'horizontal_feed_previous_race': str(config.get_setting('overlay_horizontal_feed_previous_race') or 'True'),
         'horizontal_feed_events': str(config.get_setting('overlay_horizontal_feed_events') or 'True'),
         'horizontal_feed_tilt_current': str(config.get_setting('overlay_horizontal_feed_tilt_current') or 'True'),
@@ -7012,6 +7013,7 @@ def open_settings_window():
     overlay_horizontal_feed_brs_season_var = tk.BooleanVar(value=str(config.get_setting("overlay_horizontal_feed_brs_season") or "True") == "True")
     overlay_horizontal_feed_races_today_var = tk.BooleanVar(value=str(config.get_setting("overlay_horizontal_feed_races_today") or "True") == "True")
     overlay_horizontal_feed_brs_today_var = tk.BooleanVar(value=str(config.get_setting("overlay_horizontal_feed_brs_today") or "True") == "True")
+    overlay_horizontal_feed_myteams_var = tk.BooleanVar(value=str(config.get_setting("overlay_horizontal_feed_myteams") or "True") == "True")
     overlay_horizontal_feed_previous_race_var = tk.BooleanVar(value=str(config.get_setting("overlay_horizontal_feed_previous_race") or "True") == "True")
     overlay_horizontal_feed_events_var = tk.BooleanVar(value=str(config.get_setting("overlay_horizontal_feed_events") or "True") == "True")
 
@@ -7025,8 +7027,9 @@ def open_settings_window():
     ttk.Checkbutton(race_feed_frame, text="Top 10 BRs (Season)", variable=overlay_horizontal_feed_brs_season_var).grid(row=4, column=0, sticky="w", pady=(0, 2))
     ttk.Checkbutton(race_feed_frame, text="Top 10 Races (Today)", variable=overlay_horizontal_feed_races_today_var).grid(row=5, column=0, sticky="w", pady=(0, 2))
     ttk.Checkbutton(race_feed_frame, text="Top 10 BRs (Today)", variable=overlay_horizontal_feed_brs_today_var).grid(row=6, column=0, sticky="w", pady=(0, 2))
-    ttk.Checkbutton(race_feed_frame, text="Top 10 Previous Race", variable=overlay_horizontal_feed_previous_race_var).grid(row=7, column=0, sticky="w", pady=(0, 2))
-    ttk.Checkbutton(race_feed_frame, text="Ticker Events", variable=overlay_horizontal_feed_events_var).grid(row=8, column=0, sticky="w")
+    ttk.Checkbutton(race_feed_frame, text="Top MyTeams", variable=overlay_horizontal_feed_myteams_var).grid(row=7, column=0, sticky="w", pady=(0, 2))
+    ttk.Checkbutton(race_feed_frame, text="Top 10 Previous Race", variable=overlay_horizontal_feed_previous_race_var).grid(row=8, column=0, sticky="w", pady=(0, 2))
+    ttk.Checkbutton(race_feed_frame, text="Ticker Events", variable=overlay_horizontal_feed_events_var).grid(row=9, column=0, sticky="w")
 
     overlay_horizontal_feed_tilt_current_var = tk.BooleanVar(value=str(config.get_setting("overlay_horizontal_feed_tilt_current") or "True") == "True")
     overlay_horizontal_feed_tilt_today_var = tk.BooleanVar(value=str(config.get_setting("overlay_horizontal_feed_tilt_today") or "True") == "True")
@@ -7203,6 +7206,7 @@ def open_settings_window():
         overlay_horizontal_feed_brs_season_var.set(True)
         overlay_horizontal_feed_races_today_var.set(True)
         overlay_horizontal_feed_brs_today_var.set(True)
+        overlay_horizontal_feed_myteams_var.set(True)
         overlay_horizontal_feed_previous_race_var.set(True)
         overlay_horizontal_feed_events_var.set(True)
         overlay_horizontal_feed_tilt_current_var.set(True)
@@ -7332,6 +7336,7 @@ def open_settings_window():
         config.set_setting("overlay_horizontal_feed_brs_season", str(overlay_horizontal_feed_brs_season_var.get()), persistent=True)
         config.set_setting("overlay_horizontal_feed_races_today", str(overlay_horizontal_feed_races_today_var.get()), persistent=True)
         config.set_setting("overlay_horizontal_feed_brs_today", str(overlay_horizontal_feed_brs_today_var.get()), persistent=True)
+        config.set_setting("overlay_horizontal_feed_myteams", str(overlay_horizontal_feed_myteams_var.get()), persistent=True)
         config.set_setting("overlay_horizontal_feed_previous_race", str(overlay_horizontal_feed_previous_race_var.get()), persistent=True)
         config.set_setting("overlay_horizontal_feed_events", str(overlay_horizontal_feed_events_var.get()), persistent=True)
         config.set_setting("overlay_horizontal_feed_tilt_current", str(overlay_horizontal_feed_tilt_current_var.get()), persistent=True)
@@ -8395,7 +8400,7 @@ class ConfigManager:
                                 'overlay_card_opacity', 'overlay_text_scale', 'overlay_show_medals',
                                 'overlay_compact_rows', 'overlay_horizontal_layout', 'overlay_horizontal_feed_season', 'overlay_horizontal_feed_today',
                                 'overlay_horizontal_feed_races_season', 'overlay_horizontal_feed_brs_season', 'overlay_horizontal_feed_races_today',
-                                'overlay_horizontal_feed_brs_today', 'overlay_horizontal_feed_previous_race', 'overlay_horizontal_feed_events',
+                                'overlay_horizontal_feed_brs_today', 'overlay_horizontal_feed_myteams', 'overlay_horizontal_feed_previous_race', 'overlay_horizontal_feed_events',
                                 'overlay_horizontal_feed_tilt_current', 'overlay_horizontal_feed_tilt_today',
                                 'overlay_horizontal_feed_tilt_season', 'overlay_horizontal_feed_tilt_last_run',
                                 'overlay_server_port', 'tilt_lifetime_base_xp',
@@ -8490,6 +8495,7 @@ class ConfigManager:
             'overlay_horizontal_feed_brs_season': 'True',
             'overlay_horizontal_feed_races_today': 'True',
             'overlay_horizontal_feed_brs_today': 'True',
+            'overlay_horizontal_feed_myteams': 'True',
             'overlay_horizontal_feed_previous_race': 'True',
             'overlay_horizontal_feed_events': 'True',
             'overlay_horizontal_feed_tilt_current': 'True',

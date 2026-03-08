@@ -123,6 +123,7 @@ const defaultSettings = {
   horizontalFeedBrsSeason: true,
   horizontalFeedRacesToday: true,
   horizontalFeedBrsToday: true,
+  horizontalFeedMyteams: true,
   horizontalFeedPreviousRace: true,
   horizontalFeedEvents: true,
   horizontalFeedTiltCurrent: true,
@@ -746,12 +747,16 @@ function renderCombinedRows(views) {
       const emote = settings.showMedals ? getPlacementEmote(r.placement) : '';
       const isTeamView = String(view?.id || '').startsWith('teams-');
       const teamIcon = isTeamView ? String(r?.icon || '').trim() : '';
-      const decoratedName = teamIcon
+      const teamIconUrl = isTeamView ? String(r?.icon_url || '').trim() : '';
+      const fallbackTeamName = teamIcon
         ? `${teamIcon} ${r.name}`
-        : (emote ? `${emote} ${r.name}` : r.name);
+        : r.name;
+      const decoratedName = teamIconUrl
+        ? `<img class="team-icon" src="${escapeHtml(teamIconUrl)}" alt="${escapeHtml(teamIcon || r.name || 'team icon')}" loading="lazy" decoding="async" referrerpolicy="no-referrer" /> ${escapeHtml(r.name)}`
+        : escapeHtml(isTeamView ? fallbackTeamName : (emote ? `${emote} ${r.name}` : r.name));
       const podiumClass = rowIndex < 3 ? ` leaderboard-row--podium-${rowIndex + 1}` : '';
       const recordClass = isRecordRaceView ? ' leaderboard-row--record-race' : '';
-      return `<li class="leaderboard-row${podiumClass}${recordClass}"><span class="row-rank">#${escapeHtml(r.placement)}</span><span>${escapeHtml(decoratedName)}</span><span>${fmt(r.points)} pts</span></li>`;
+      return `<li class="leaderboard-row${podiumClass}${recordClass}"><span class="row-rank">#${escapeHtml(r.placement)}</span><span>${decoratedName}</span><span>${fmt(r.points)} pts</span></li>`;
     }).join('');
 
     const gap = viewIndex > 0 ? '<li class="leaderboard-gap" aria-hidden="true"></li>' : '';
@@ -817,6 +822,8 @@ function filterViewsForHorizontalFeed(views = [], overlayEvents = []) {
     'brs-season': settings.horizontalFeedBrsSeason,
     'races-today': settings.horizontalFeedRacesToday,
     'brs-today': settings.horizontalFeedBrsToday,
+    'teams-today': settings.horizontalFeedMyteams,
+    'teams-season': settings.horizontalFeedMyteams,
     previous: settings.horizontalFeedPreviousRace,
     'tilt-current': settings.horizontalFeedTiltCurrent,
     'tilt-today': settings.horizontalFeedTiltToday,
@@ -892,6 +899,7 @@ function applyServerSettings(raw = {}) {
     horizontalFeedBrsSeason: String(raw.horizontal_feed_brs_season).toLowerCase() !== 'false',
     horizontalFeedRacesToday: String(raw.horizontal_feed_races_today).toLowerCase() !== 'false',
     horizontalFeedBrsToday: String(raw.horizontal_feed_brs_today).toLowerCase() !== 'false',
+    horizontalFeedMyteams: String(raw.horizontal_feed_myteams).toLowerCase() !== 'false',
     horizontalFeedPreviousRace: String(raw.horizontal_feed_previous_race).toLowerCase() !== 'false',
     horizontalFeedEvents: String(raw.horizontal_feed_events).toLowerCase() !== 'false',
     horizontalFeedTiltCurrent: String(raw.horizontal_feed_tilt_current).toLowerCase() !== 'false',
@@ -920,7 +928,7 @@ function syncViews(views = []) {
   }
 
   const renderableViews = getRenderableViews(currentViews);
-  const nextRenderKey = `${settings.showMedals}::${settings.horizontalLayout}::${settings.horizontalFeedSeason}::${settings.horizontalFeedToday}::${settings.horizontalFeedRacesSeason}::${settings.horizontalFeedBrsSeason}::${settings.horizontalFeedRacesToday}::${settings.horizontalFeedBrsToday}::${settings.horizontalFeedPreviousRace}::${settings.horizontalFeedEvents}::${settings.horizontalFeedTiltCurrent}::${settings.horizontalFeedTiltToday}::${settings.horizontalFeedTiltSeason}::${settings.horizontalFeedTiltLastRun}::${getViewsRenderKey(renderableViews)}`;
+  const nextRenderKey = `${settings.showMedals}::${settings.horizontalLayout}::${settings.horizontalFeedSeason}::${settings.horizontalFeedToday}::${settings.horizontalFeedRacesSeason}::${settings.horizontalFeedBrsSeason}::${settings.horizontalFeedRacesToday}::${settings.horizontalFeedBrsToday}::${settings.horizontalFeedMyteams}::${settings.horizontalFeedPreviousRace}::${settings.horizontalFeedEvents}::${settings.horizontalFeedTiltCurrent}::${settings.horizontalFeedTiltToday}::${settings.horizontalFeedTiltSeason}::${settings.horizontalFeedTiltLastRun}::${getViewsRenderKey(renderableViews)}`;
 
   if (nextRenderKey === lastRenderedViewsKey) {
     updateBoardTitleFromScroll();
