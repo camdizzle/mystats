@@ -43,6 +43,7 @@ Actions:
 - **Refresh**
 - **Generate Team Name** (copies a generated name to clipboard)
 - **Toggle Recruiting** (selected team)
+- **Rename Team** (selected team; preserves roster/invites/points cache under the new name)
 - **Delete Team** (also clears related invites/cache entries)
 
 ---
@@ -57,7 +58,8 @@ Actions:
 4. `!recruiting on`
 5. `!logo :your_emote:` (optional)
 6. `!inactive 14` (optional)
-7. `!myteam`
+7. `!renameteam New Team Name` (captain only)
+8. `!myteam`
 
 ### B) Member quickstart
 
@@ -112,6 +114,9 @@ Actions:
   - Removes co-captain or member (captain cannot be kicked).
 - `!recruiting on|off`
   - Captain/co-captain only.
+- `!renameteam <new team name>`
+  - Captain only.
+  - Renames the current team while keeping members, invites, and cached points aligned to the new name.
 - `!logo <emote>`
   - Captain/co-captain only.
   - Sets logo/emote shown in status and overlays.
@@ -133,7 +138,7 @@ Actions:
 ## 5) Roles and permissions
 
 - **Captain**
-  - Full team control.
+  - Full team control, including `!renameteam`.
 - **Co-captain**
   - Invite, kick, recruiting, logo, inactive-policy controls.
 - **Member**
