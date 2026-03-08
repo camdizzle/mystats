@@ -6,6 +6,23 @@ It is split by responsibilities so desktop/bot, backend/web, and data layers can
 
 ---
 
+## Delivery Phases
+
+## Phase 1: Local Teams (single channel)
+- Implement team lifecycle and moderation commands in-stream.
+- Add local scoring model and leaderboards (`!dailyteams`, `!weeklyteams`).
+- Add desktop Teams management UI tab (settings, roster visibility, moderation helpers).
+- Add team points mode toggle:
+  - `season`: use full season contribution.
+  - `active`: only count points while team membership is active.
+
+## Phase 2: Global Teams (cross-channel)
+- Introduce global team identity and channel-team linking.
+- Aggregate linked team points in real-time global leaderboards.
+- Add global admin APIs, reconciliation, and anti-cheat cross-channel validation.
+
+---
+
 ## 1) Product goals
 
 - Let users create and manage teams inside a channel.
@@ -385,3 +402,14 @@ All mutating endpoints must verify both:
 7. Reconciliation jobs + admin rebuild endpoint.
 
 This order gets a functional in-channel team system first, then adds global federation.
+
+---
+
+## 12) Competitive advantages (recommended extras)
+
+- **Captain analytics card:** show team contribution %, retention %, and avg points/member to help captains coach better.
+- **Smart recruiting quality score:** prefer joining teams with balanced activity and recent positive momentum, not just lowest member count.
+- **Fraud resistance:** flag suspicious point spikes with source trace and moderation review queue.
+- **Season portability:** allow optional team carry-over package between seasons (name/logo/roster template).
+- **Goal systems:** team quests (daily/weekly) that stack with individual quests for dual progression.
+- **Narrative hooks for stream:** auto-generated “rival team challenge” prompts to improve viewer engagement.

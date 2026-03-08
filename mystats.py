@@ -51,6 +51,7 @@ import tempfile
 import subprocess
 import warnings
 import html
+import hashlib
 
 if sys.platform == "win32":
     import ctypes
@@ -114,6 +115,9 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s"
 )
 logger = logging.getLogger("mystats")
+
+TEAM_DATA_FILE = "teams_data.json"
+TEAM_DATA_LOCK = threading.Lock()
 
 SUPPORTED_UI_LANGUAGES = {'en', 'es', 'fr', 'de', 'pt', 'au'}
 
@@ -795,6 +799,227 @@ def format_user_tag(value, default='unknown'):
     if not username:
         username = default
     return f"@{username}"
+
+
+def _team_data_path():
+    base_dir = config.get_setting('directory') or '.'
+    return os.path.join(base_dir, TEAM_DATA_FILE)
+
+
+def _load_team_data():
+    path = _team_data_path()
+    if not os.path.exists(path):
+        return {'channels': {}}
+
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            payload = json.load(f)
+        if not isinstance(payload, dict):
+            return {'channels': {}}
+        channels = payload.get('channels')
+        if not isinstance(channels, dict):
+            payload['channels'] = {}
+        return payload
+    except Exception as exc:
+        logger.warning("Failed to load team data: %s", exc)
+        return {'channels': {}}
+
+
+def _save_team_data(payload):
+    path = _team_data_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump(payload, f, indent=2)
+
+
+def _normalize_team_name(name):
+    return re.sub(r'\s+', ' ', str(name or '').strip())
+
+
+def _normalize_username(name):
+    return str(name or '').strip().lower().lstrip('@')
+
+
+def _generate_team_name(seed_text=''):
+    prefixes = [
+        'Turbo', 'Neon', 'Cosmic', 'Iron', 'Velocity', 'Quantum', 'Marble', 'Apex', 'Pulse', 'Nova'
+    ]
+    suffixes = [
+        'Racers', 'Orbit', 'Legends', 'Storm', 'Dynasty', 'Squad', 'Alliance', 'Crew', 'Circuit', 'Titans'
+    ]
+    seed = f"{seed_text}-{datetime.now(timezone.utc).isoformat()}-{uuid.uuid4()}"
+    digest = hashlib.sha256(seed.encode('utf-8')).hexdigest()
+    prefix = prefixes[int(digest[:4], 16) % len(prefixes)]
+    suffix = suffixes[int(digest[4:8], 16) % len(suffixes)]
+    return f"{prefix} {suffix}"
+
+
+def _get_channel_team_state(payload, channel_name):
+    channels = payload.setdefault('channels', {})
+    channel_key = _normalize_username(channel_name)
+    if channel_key not in channels:
+        channels[channel_key] = {
+            'teams': {},
+            'invites': [],
+            'settings': {
+                'points_mode': 'season',
+                'max_team_size': 25,
+            }
+        }
+    channel_state = channels[channel_key]
+    channel_state.setdefault('teams', {})
+    channel_state.setdefault('invites', [])
+    channel_state.setdefault('settings', {'points_mode': 'season', 'max_team_size': 25})
+    channel_state['settings'].setdefault('points_mode', 'season')
+    channel_state['settings'].setdefault('max_team_size', 25)
+    return channel_state
+
+
+def _find_team_for_user(channel_state, username):
+    user_key = _normalize_username(username)
+    for team_name, team in channel_state.get('teams', {}).items():
+        if team.get('captain') == user_key:
+            return team_name, 'captain'
+        if user_key in team.get('co_captains', []):
+            return team_name, 'co_captain'
+        if user_key in team.get('members', []):
+            return team_name, 'member'
+    return None, None
+
+
+def _extract_subscriber_status(author):
+    if not author:
+        return False
+
+    badges = getattr(author, 'badges', None)
+    if isinstance(badges, dict):
+        if 'subscriber' in badges or 'broadcaster' in badges:
+            return True
+    elif isinstance(badges, (list, tuple)):
+        for badge in badges:
+            token = str(badge).lower()
+            if 'subscriber' in token or 'broadcaster' in token:
+                return True
+
+    is_sub = getattr(author, 'is_subscriber', None)
+    if isinstance(is_sub, bool):
+        return is_sub
+
+    return False
+
+
+def _sum_points_from_allraces(username, *, days=None, since_dt=None):
+    username_key = _normalize_username(username)
+    total = 0
+    data_dir = config.get_setting('directory')
+    if not data_dir:
+        return 0
+
+    cutoff = None
+    if days is not None:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=max(1, int(days)))
+    if since_dt is not None:
+        cutoff = max(cutoff, since_dt) if cutoff else since_dt
+
+    for allraces in glob.glob(os.path.join(data_dir, "allraces_*.csv")):
+        file_basename = os.path.basename(allraces)
+        file_date = None
+        date_match = re.search(r"allraces_(\d{4}-\d{2}-\d{2})\.csv$", file_basename)
+        if date_match:
+            try:
+                file_date = datetime.strptime(date_match.group(1), "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            except ValueError:
+                file_date = None
+
+        if cutoff and file_date and file_date < cutoff.replace(hour=0, minute=0, second=0, microsecond=0):
+            continue
+
+        try:
+            with open(allraces, 'r', encoding='utf-8', errors='ignore') as f:
+                reader = csv.reader(f)
+                for row in reader:
+                    if len(row) < 4:
+                        continue
+                    if _normalize_username(row[1]) != username_key:
+                        continue
+                    try:
+                        total += int(row[3])
+                    except (TypeError, ValueError):
+                        continue
+        except Exception:
+            continue
+
+    return total
+
+
+def _compute_team_points(channel_state, team_name, window='season'):
+    team = channel_state.get('teams', {}).get(team_name)
+    if not team:
+        return 0
+
+    members = [team.get('captain')] + list(team.get('co_captains', [])) + list(team.get('members', []))
+    members = [m for m in {_normalize_username(v) for v in members} if m]
+
+    points_mode = channel_state.get('settings', {}).get('points_mode', 'season')
+    created_at = team.get('created_at')
+    created_dt = None
+    if created_at:
+        try:
+            created_dt = parser.parse(created_at)
+            if created_dt.tzinfo is None:
+                created_dt = created_dt.replace(tzinfo=timezone.utc)
+            else:
+                created_dt = created_dt.astimezone(timezone.utc)
+        except Exception:
+            created_dt = None
+
+    total_points = 0
+    for username in members:
+        if window == 'daily':
+            total_points += _sum_points_from_allraces(username, days=1, since_dt=created_dt if points_mode == 'active' else None)
+        elif window == 'weekly':
+            total_points += _sum_points_from_allraces(username, days=7, since_dt=created_dt if points_mode == 'active' else None)
+        else:
+            total_points += _sum_points_from_allraces(username, since_dt=created_dt if points_mode == 'active' else None)
+
+    return total_points
+
+
+def _get_top_players_points(days=1, limit=5):
+    data_dir = config.get_setting('directory')
+    if not data_dir:
+        return []
+    cutoff = datetime.now(timezone.utc) - timedelta(days=max(1, int(days)))
+    points = defaultdict(int)
+    display_names = {}
+    for allraces in glob.glob(os.path.join(data_dir, "allraces_*.csv")):
+        file_basename = os.path.basename(allraces)
+        date_match = re.search(r"allraces_(\d{4}-\d{2}-\d{2})\.csv$", file_basename)
+        if date_match:
+            try:
+                file_date = datetime.strptime(date_match.group(1), "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                if file_date < cutoff.replace(hour=0, minute=0, second=0, microsecond=0):
+                    continue
+            except ValueError:
+                pass
+        try:
+            with open(allraces, 'r', encoding='utf-8', errors='ignore') as f:
+                reader = csv.reader(f)
+                for row in reader:
+                    if len(row) < 4:
+                        continue
+                    user_key = _normalize_username(row[1])
+                    if not user_key:
+                        continue
+                    display_names[user_key] = row[2].strip() if len(row) > 2 and row[2].strip() else user_key
+                    try:
+                        points[user_key] += int(row[3])
+                    except (TypeError, ValueError):
+                        continue
+        except Exception:
+            continue
+    top_rows = sorted(points.items(), key=lambda item: item[1], reverse=True)[:max(1, int(limit))]
+    return [(display_names.get(user, user), score) for user, score in top_rows]
 
 
 def _walk_payload_nodes(payload):
@@ -4040,6 +4265,7 @@ def open_settings_window():
     season_quests_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
     rivals_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
     mycycle_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
+    teams_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
     appearance_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
     overlay_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
 
@@ -4049,6 +4275,7 @@ def open_settings_window():
     notebook.add(season_quests_tab, text=tr("Season Quests"))
     notebook.add(rivals_tab, text=tr("Rivals"))
     notebook.add(mycycle_tab, text=tr("MyCycle"))
+    notebook.add(teams_tab, text="Teams")
     notebook.add(appearance_tab, text=tr("Appearance"))
     notebook.add(overlay_tab, text=tr("Overlay"))
     notebook.add(tilt_tab, text=tr("Tilt"))
@@ -4471,6 +4698,123 @@ def open_settings_window():
     ttk.Button(mycycle_tab, text="View Leaderboard", command=lambda: open_mycycle_leaderboard_window(settings_window)).grid(row=7, column=1, sticky="w", pady=(8, 0))
     ttk.Label(mycycle_tab, text="Tip: Primary session is shown first in leaderboard pagination across active sessions.", style="Small.TLabel").grid(row=8, column=0, columnspan=4, sticky="w", pady=(8, 0))
 
+    # --- Teams tab ---
+    ttk.Label(teams_tab, text="Phase 1: Local channel teams • Phase 2: Global team federation", style="Small.TLabel").grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 8))
+    teams_enabled_var = tk.BooleanVar(value=parse_boolean_token(config.get_setting("teams_enabled"), default=True))
+    ttk.Checkbutton(teams_tab, text="Enable Team Commands", variable=teams_enabled_var).grid(row=1, column=0, sticky="w", pady=(0, 6), columnspan=2)
+
+    ttk.Label(teams_tab, text="Rollout Phase").grid(row=2, column=0, sticky="w", pady=(0, 4))
+    teams_phase_var = tk.StringVar(value=config.get_setting("teams_phase") or "local")
+    ttk.Combobox(teams_tab, textvariable=teams_phase_var, values=["local", "global"], width=14, state="readonly").grid(row=2, column=1, sticky="w", pady=(0, 4))
+
+    ttk.Label(teams_tab, text="Points Counting Mode").grid(row=3, column=0, sticky="w", pady=(0, 4))
+    teams_points_mode_var = tk.StringVar(value=config.get_setting("teams_points_mode") or "season")
+    ttk.Combobox(
+        teams_tab,
+        textvariable=teams_points_mode_var,
+        values=["season", "active"],
+        width=14,
+        state="readonly"
+    ).grid(row=3, column=1, sticky="w", pady=(0, 4))
+    ttk.Label(teams_tab, text="season = include full season points; active = count only after team created", style="Small.TLabel").grid(row=4, column=0, columnspan=4, sticky="w", pady=(0, 8))
+
+    ttk.Label(teams_tab, text="Max Team Size").grid(row=5, column=0, sticky="w", pady=(0, 4))
+    teams_max_size_entry = ttk.Entry(teams_tab, width=12, justify='center')
+    teams_max_size_entry.grid(row=5, column=1, sticky="w", pady=(0, 4))
+    teams_max_size_entry.insert(0, config.get_setting("teams_max_size") or "25")
+
+    teams_tree = ttk.Treeview(teams_tab, columns=("captain", "size", "recruiting", "daily", "weekly", "season"), show='headings', height=10)
+    for key, label, width in [
+        ("captain", "Captain", 120),
+        ("size", "Members", 70),
+        ("recruiting", "Recruiting", 90),
+        ("daily", "Daily Pts", 90),
+        ("weekly", "Weekly Pts", 100),
+        ("season", "Season Pts", 110),
+    ]:
+        teams_tree.heading(key, text=label)
+        teams_tree.column(key, width=width, anchor='center')
+    teams_tree.grid(row=6, column=0, columnspan=4, sticky="nsew", pady=(8, 4))
+
+    teams_tab.grid_columnconfigure(3, weight=1)
+    teams_tab.grid_rowconfigure(6, weight=1)
+
+    def refresh_teams_tree():
+        for item in teams_tree.get_children():
+            teams_tree.delete(item)
+
+        with TEAM_DATA_LOCK:
+            data = _load_team_data()
+            channel_state = _get_channel_team_state(data, config.get_setting('CHANNEL'))
+            channel_state['settings']['points_mode'] = teams_points_mode_var.get() or 'season'
+            try:
+                channel_state['settings']['max_team_size'] = max(2, int(teams_max_size_entry.get() or 25))
+            except ValueError:
+                channel_state['settings']['max_team_size'] = 25
+            _save_team_data(data)
+
+        for team_name, team in sorted(channel_state.get('teams', {}).items()):
+            size = 1 + len(team.get('co_captains', [])) + len(team.get('members', []))
+            daily_points = _compute_team_points(channel_state, team_name, window='daily')
+            weekly_points = _compute_team_points(channel_state, team_name, window='weekly')
+            season_points = _compute_team_points(channel_state, team_name, window='season')
+            teams_tree.insert('', 'end', iid=team_name, values=(
+                format_user_tag(team.get('captain')),
+                size,
+                'Yes' if team.get('is_recruiting') else 'No',
+                f"{daily_points:,}",
+                f"{weekly_points:,}",
+                f"{season_points:,}",
+            ))
+
+    def generate_team_name_for_clipboard():
+        name = _generate_team_name(config.get_setting('CHANNEL'))
+        settings_window.clipboard_clear()
+        settings_window.clipboard_append(name)
+        messagebox.showinfo("Teams", f"Generated team name copied to clipboard:\n{name}", parent=settings_window)
+
+    def delete_selected_team():
+        selected = teams_tree.selection()
+        if not selected:
+            messagebox.showinfo("Teams", "Select a team to delete.", parent=settings_window)
+            return
+        team_name = selected[0]
+        if not messagebox.askyesno("Teams", f"Delete team '{team_name}'?", parent=settings_window):
+            return
+
+        with TEAM_DATA_LOCK:
+            data = _load_team_data()
+            channel_state = _get_channel_team_state(data, config.get_setting('CHANNEL'))
+            channel_state.get('teams', {}).pop(team_name, None)
+            channel_state['invites'] = [inv for inv in channel_state.get('invites', []) if inv.get('team') != team_name]
+            _save_team_data(data)
+
+        refresh_teams_tree()
+
+    def toggle_selected_team_recruiting():
+        selected = teams_tree.selection()
+        if not selected:
+            messagebox.showinfo("Teams", "Select a team to toggle recruiting.", parent=settings_window)
+            return
+        team_name = selected[0]
+        with TEAM_DATA_LOCK:
+            data = _load_team_data()
+            channel_state = _get_channel_team_state(data, config.get_setting('CHANNEL'))
+            team = channel_state.get('teams', {}).get(team_name)
+            if team:
+                team['is_recruiting'] = not bool(team.get('is_recruiting'))
+                _save_team_data(data)
+        refresh_teams_tree()
+
+    teams_actions = ttk.Frame(teams_tab, style="App.TFrame")
+    teams_actions.grid(row=7, column=0, columnspan=4, sticky="w", pady=(4, 0))
+    ttk.Button(teams_actions, text="Refresh", command=refresh_teams_tree).pack(side="left", padx=(0, 6))
+    ttk.Button(teams_actions, text="Generate Team Name", command=generate_team_name_for_clipboard).pack(side="left", padx=(0, 6))
+    ttk.Button(teams_actions, text="Toggle Recruiting", command=toggle_selected_team_recruiting).pack(side="left", padx=(0, 6))
+    ttk.Button(teams_actions, text="Delete Team", command=delete_selected_team).pack(side="left", padx=(0, 6))
+
+    refresh_teams_tree()
+
     # --- Appearance tab ---
     ttk.Label(appearance_tab, text="Theme and visual preferences", style="Small.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 8))
     ttk.Label(appearance_tab, text="UI Theme").grid(row=1, column=0, sticky="w", pady=(0, 4))
@@ -4725,6 +5069,10 @@ def open_settings_window():
         config.set_setting("mycycle_include_br", str(mycycle_include_br_var.get()), persistent=True)
         config.set_setting("mycycle_min_place", mycycle_min_place_entry.get(), persistent=True)
         config.set_setting("mycycle_max_place", mycycle_max_place_entry.get(), persistent=True)
+        config.set_setting("teams_enabled", str(teams_enabled_var.get()), persistent=True)
+        config.set_setting("teams_phase", teams_phase_var.get(), persistent=True)
+        config.set_setting("teams_points_mode", teams_points_mode_var.get(), persistent=True)
+        config.set_setting("teams_max_size", teams_max_size_entry.get(), persistent=True)
         selected_session_id = session_names.get(selected_session_name.get())
         if selected_session_id:
             config.set_setting("mycycle_primary_session_id", selected_session_id, persistent=True)
@@ -5786,6 +6134,7 @@ class ConfigManager:
                                 'mycycle_enabled', 'mycycle_announcements_enabled', 'mycycle_include_br',
                                 'mycycle_min_place', 'mycycle_max_place', 'mycycle_primary_session_id',
                                 'mycycle_cyclestats_rotation_index',
+                                'teams_enabled', 'teams_phase', 'teams_points_mode', 'teams_max_size',
                                 'overlay_rotation_seconds', 'overlay_refresh_seconds', 'overlay_theme',
                                 'overlay_card_opacity', 'overlay_text_scale', 'overlay_show_medals',
                                 'overlay_compact_rows', 'overlay_horizontal_layout', 'overlay_server_port', 'tilt_lifetime_base_xp',
@@ -5850,6 +6199,10 @@ class ConfigManager:
             'mycycle_min_place': '1',
             'mycycle_max_place': '10',
             'mycycle_cyclestats_rotation_index': '0',
+            'teams_enabled': 'True',
+            'teams_phase': 'local',
+            'teams_points_mode': 'season',
+            'teams_max_size': '25',
             'UI_THEME': DEFAULT_UI_THEME,
             'announcedelay': 'False',
             'announcedelayseconds': '0',
@@ -7305,6 +7658,371 @@ class Bot(commands.Bot):
 
     async def send_command_response(self, ctx, message):
         await send_chat_message(ctx.channel, message, category="mystats")
+
+    def _teams_feature_enabled(self):
+        return parse_boolean_token(config.get_setting("teams_enabled"), default=True)
+
+    def _teams_phase(self):
+        phase = (config.get_setting("teams_phase") or "local").strip().lower()
+        if phase not in {"local", "global"}:
+            phase = "local"
+        return phase
+
+    async def _with_channel_team_state(self):
+        with TEAM_DATA_LOCK:
+            data = _load_team_data()
+            channel_state = _get_channel_team_state(data, self.channel_name)
+            channel_state['settings']['points_mode'] = (config.get_setting("teams_points_mode") or "season").strip().lower()
+            try:
+                channel_state['settings']['max_team_size'] = max(2, int(config.get_setting("teams_max_size") or 25))
+            except ValueError:
+                channel_state['settings']['max_team_size'] = 25
+            return data, channel_state
+
+    async def _save_channel_team_state(self, data):
+        with TEAM_DATA_LOCK:
+            _save_team_data(data)
+
+    def _is_team_admin(self, team, username):
+        user_key = _normalize_username(username)
+        return team.get('captain') == user_key or user_key in team.get('co_captains', [])
+
+    @commands.command(name='createteam')
+    async def createteam(self, ctx, *, team_name: str = None):
+        if not self._teams_feature_enabled():
+            return
+        if self._teams_phase() != 'local':
+            await self.send_command_response(ctx, "Teams are in global phase rollout. Use the Teams panel for linked setup.")
+            return
+
+        creator = _normalize_username(ctx.author.name)
+        if not _extract_subscriber_status(ctx.author) and creator != self.channel_name:
+            await self.send_command_response(ctx, "!createteam is subscriber-only right now.")
+            return
+
+        data, channel_state = await self._with_channel_team_state()
+        existing_team, _ = _find_team_for_user(channel_state, creator)
+        if existing_team:
+            await self.send_command_response(ctx, f"{format_user_tag(creator)} you are already in team '{existing_team}'.")
+            return
+
+        normalized_name = _normalize_team_name(team_name) if team_name else ''
+        if not normalized_name:
+            normalized_name = _generate_team_name(creator)
+
+        taken = any(_normalize_team_name(name).lower() == normalized_name.lower() for name in channel_state.get('teams', {}))
+        if taken:
+            await self.send_command_response(ctx, f"Team name '{normalized_name}' already exists.")
+            return
+
+        channel_state['teams'][normalized_name] = {
+            'captain': creator,
+            'co_captains': [],
+            'members': [],
+            'logo': None,
+            'is_recruiting': False,
+            'inactive_days': None,
+            'created_at': datetime.now(timezone.utc).isoformat(),
+        }
+        await self._save_channel_team_state(data)
+        await self.send_command_response(ctx, f"✅ Team '{normalized_name}' created. Captain: {format_user_tag(creator)}")
+
+    @commands.command(name='invite')
+    async def invite(self, ctx, target: str = None):
+        if not self._teams_feature_enabled() or not target:
+            return
+        actor = _normalize_username(ctx.author.name)
+        target_user = _normalize_username(target)
+        if not target_user or target_user == actor:
+            return
+
+        data, channel_state = await self._with_channel_team_state()
+        actor_team_name, actor_role = _find_team_for_user(channel_state, actor)
+        if actor_role not in {'captain', 'co_captain'}:
+            await self.send_command_response(ctx, "Only captains/co-captains can invite.")
+            return
+        target_team_name, _ = _find_team_for_user(channel_state, target_user)
+        if target_team_name:
+            await self.send_command_response(ctx, f"{format_user_tag(target_user)} is already in a team.")
+            return
+
+        invites = channel_state.get('invites', [])
+        for invite in invites:
+            if invite.get('team') == actor_team_name and invite.get('invitee') == target_user and invite.get('status') == 'pending':
+                await self.send_command_response(ctx, f"Invite already pending for {format_user_tag(target_user)}.")
+                return
+
+        invites.append({
+            'team': actor_team_name,
+            'inviter': actor,
+            'invitee': target_user,
+            'status': 'pending',
+            'created_at': datetime.now(timezone.utc).isoformat(),
+        })
+        channel_state['invites'] = invites
+        await self._save_channel_team_state(data)
+        await self.send_command_response(ctx, f"📨 {format_user_tag(target_user)} invited to '{actor_team_name}'. Use !acceptteam {actor_team_name}")
+
+    @commands.command(name='acceptteam')
+    async def acceptteam(self, ctx, *, team_name: str = None):
+        if not self._teams_feature_enabled() or not team_name:
+            return
+        username = _normalize_username(ctx.author.name)
+        lookup = _normalize_team_name(team_name).lower()
+        data, channel_state = await self._with_channel_team_state()
+        current_team, _ = _find_team_for_user(channel_state, username)
+        if current_team:
+            await self.send_command_response(ctx, f"You are already in '{current_team}'.")
+            return
+
+        selected_invite = None
+        for invite in channel_state.get('invites', []):
+            if invite.get('invitee') == username and invite.get('status') == 'pending' and _normalize_team_name(invite.get('team')).lower() == lookup:
+                selected_invite = invite
+                break
+        if not selected_invite:
+            await self.send_command_response(ctx, "No pending invite for that team.")
+            return
+
+        actual_team_name = selected_invite.get('team')
+        team = channel_state.get('teams', {}).get(actual_team_name)
+        if not team:
+            await self.send_command_response(ctx, "That team no longer exists.")
+            return
+
+        max_size = int(channel_state.get('settings', {}).get('max_team_size', 25))
+        size = 1 + len(team.get('co_captains', [])) + len(team.get('members', []))
+        if size >= max_size:
+            await self.send_command_response(ctx, f"'{actual_team_name}' is full ({max_size}).")
+            return
+
+        team.setdefault('members', []).append(username)
+        selected_invite['status'] = 'accepted'
+        selected_invite['responded_at'] = datetime.now(timezone.utc).isoformat()
+        await self._save_channel_team_state(data)
+        await self.send_command_response(ctx, f"✅ {format_user_tag(username)} joined '{actual_team_name}'.")
+
+    @commands.command(name='denyteam')
+    async def denyteam(self, ctx, *, team_name: str = None):
+        if not self._teams_feature_enabled() or not team_name:
+            return
+        username = _normalize_username(ctx.author.name)
+        lookup = _normalize_team_name(team_name).lower()
+        data, channel_state = await self._with_channel_team_state()
+        for invite in channel_state.get('invites', []):
+            if invite.get('invitee') == username and invite.get('status') == 'pending' and _normalize_team_name(invite.get('team')).lower() == lookup:
+                invite['status'] = 'denied'
+                invite['responded_at'] = datetime.now(timezone.utc).isoformat()
+                await self._save_channel_team_state(data)
+                await self.send_command_response(ctx, f"Invite to '{invite.get('team')}' denied.")
+                return
+        await self.send_command_response(ctx, "No pending invite found.")
+
+    @commands.command(name='cocaptain')
+    async def cocaptain(self, ctx, target: str = None):
+        if not self._teams_feature_enabled() or not target:
+            return
+        actor = _normalize_username(ctx.author.name)
+        target_user = _normalize_username(target)
+        data, channel_state = await self._with_channel_team_state()
+        team_name, role = _find_team_for_user(channel_state, actor)
+        if role != 'captain':
+            await self.send_command_response(ctx, "Only captains can assign co-captains.")
+            return
+        team = channel_state.get('teams', {}).get(team_name)
+        if target_user not in team.get('members', []):
+            await self.send_command_response(ctx, "Target must be a current team member.")
+            return
+        team['members'] = [m for m in team.get('members', []) if m != target_user]
+        if target_user not in team.get('co_captains', []):
+            team.setdefault('co_captains', []).append(target_user)
+        await self._save_channel_team_state(data)
+        await self.send_command_response(ctx, f"{format_user_tag(target_user)} is now co-captain of '{team_name}'.")
+
+    @commands.command(name='kick')
+    async def kick(self, ctx, target: str = None):
+        if not self._teams_feature_enabled() or not target:
+            return
+        actor = _normalize_username(ctx.author.name)
+        target_user = _normalize_username(target)
+        data, channel_state = await self._with_channel_team_state()
+        team_name, role = _find_team_for_user(channel_state, actor)
+        if role not in {'captain', 'co_captain'}:
+            await self.send_command_response(ctx, "Only captains/co-captains can kick members.")
+            return
+        team = channel_state.get('teams', {}).get(team_name)
+        if not team:
+            return
+        if team.get('captain') == target_user:
+            await self.send_command_response(ctx, "Captain cannot be kicked.")
+            return
+        if target_user in team.get('co_captains', []):
+            team['co_captains'] = [u for u in team.get('co_captains', []) if u != target_user]
+        elif target_user in team.get('members', []):
+            team['members'] = [u for u in team.get('members', []) if u != target_user]
+        else:
+            await self.send_command_response(ctx, "Target is not in your team.")
+            return
+        await self._save_channel_team_state(data)
+        await self.send_command_response(ctx, f"{format_user_tag(target_user)} was removed from '{team_name}'.")
+
+    @commands.command(name='leave')
+    async def leave(self, ctx):
+        if not self._teams_feature_enabled():
+            return
+        actor = _normalize_username(ctx.author.name)
+        data, channel_state = await self._with_channel_team_state()
+        team_name, role = _find_team_for_user(channel_state, actor)
+        if not team_name:
+            await self.send_command_response(ctx, "You are not in a team.")
+            return
+        team = channel_state.get('teams', {}).get(team_name)
+        if role == 'captain':
+            if team.get('co_captains'):
+                team['captain'] = team['co_captains'].pop(0)
+            elif team.get('members'):
+                team['captain'] = team['members'].pop(0)
+            else:
+                channel_state['teams'].pop(team_name, None)
+                await self._save_channel_team_state(data)
+                await self.send_command_response(ctx, f"Team '{team_name}' archived (no members left).")
+                return
+        elif role == 'co_captain':
+            team['co_captains'] = [u for u in team.get('co_captains', []) if u != actor]
+        else:
+            team['members'] = [u for u in team.get('members', []) if u != actor]
+        await self._save_channel_team_state(data)
+        await self.send_command_response(ctx, f"{format_user_tag(actor)} left '{team_name}'.")
+
+    @commands.command(name='team')
+    async def team(self, ctx, username: str = None):
+        if not self._teams_feature_enabled():
+            return
+        lookup_user = _normalize_username(username or ctx.author.name)
+        data, channel_state = await self._with_channel_team_state()
+        team_name, role = _find_team_for_user(channel_state, lookup_user)
+        if not team_name:
+            await self.send_command_response(ctx, f"{format_user_tag(lookup_user)} is not currently on a team.")
+            return
+        team = channel_state['teams'][team_name]
+        size = 1 + len(team.get('co_captains', [])) + len(team.get('members', []))
+        season_points = _compute_team_points(channel_state, team_name, window='season')
+        await self.send_command_response(ctx, f"Team {team_name} | {format_user_tag(lookup_user)} role: {role} | Members: {size} | Season: {season_points:,} pts")
+
+    @commands.command(name='myteam')
+    async def myteam(self, ctx):
+        await self.team(ctx, username=ctx.author.name)
+
+    @commands.command(name='logo')
+    async def logo(self, ctx, emote: str = None):
+        if not self._teams_feature_enabled() or not emote:
+            return
+        actor = _normalize_username(ctx.author.name)
+        data, channel_state = await self._with_channel_team_state()
+        team_name, role = _find_team_for_user(channel_state, actor)
+        if role not in {'captain', 'co_captain'}:
+            await self.send_command_response(ctx, "Only captains/co-captains can set logo.")
+            return
+        channel_state['teams'][team_name]['logo'] = emote.strip()
+        await self._save_channel_team_state(data)
+        await self.send_command_response(ctx, f"Team '{team_name}' logo set to {emote.strip()}")
+
+    @commands.command(name='inactive')
+    async def inactive(self, ctx, days: str = None):
+        if not self._teams_feature_enabled() or not days:
+            return
+        actor = _normalize_username(ctx.author.name)
+        data, channel_state = await self._with_channel_team_state()
+        team_name, role = _find_team_for_user(channel_state, actor)
+        if role not in {'captain', 'co_captain'}:
+            await self.send_command_response(ctx, "Only captains/co-captains can set inactive policy.")
+            return
+        try:
+            value = max(1, int(days))
+        except ValueError:
+            await self.send_command_response(ctx, "Usage: !inactive X")
+            return
+        channel_state['teams'][team_name]['inactive_days'] = value
+        await self._save_channel_team_state(data)
+        await self.send_command_response(ctx, f"'{team_name}' inactive policy set to {value} days.")
+
+    @commands.command(name='join')
+    async def join(self, ctx):
+        if not self._teams_feature_enabled():
+            return
+        username = _normalize_username(ctx.author.name)
+        data, channel_state = await self._with_channel_team_state()
+        existing_team, _ = _find_team_for_user(channel_state, username)
+        if existing_team:
+            await self.send_command_response(ctx, f"You are already in '{existing_team}'.")
+            return
+        max_size = int(channel_state.get('settings', {}).get('max_team_size', 25))
+        candidates = []
+        for team_name, team in channel_state.get('teams', {}).items():
+            if not team.get('is_recruiting'):
+                continue
+            size = 1 + len(team.get('co_captains', [])) + len(team.get('members', []))
+            if size >= max_size:
+                continue
+            candidates.append((size, team.get('created_at', ''), team_name))
+        if not candidates:
+            await self.send_command_response(ctx, "No recruiting teams are currently available.")
+            return
+        candidates.sort(key=lambda item: (item[0], item[1], item[2].lower()))
+        selected_name = candidates[0][2]
+        channel_state['teams'][selected_name].setdefault('members', []).append(username)
+        await self._save_channel_team_state(data)
+        await self.send_command_response(ctx, f"✅ {format_user_tag(username)} joined recruiting team '{selected_name}'.")
+
+    @commands.command(name='dailyteams')
+    async def dailyteams(self, ctx):
+        if not self._teams_feature_enabled():
+            return
+        _, channel_state = await self._with_channel_team_state()
+        rows = []
+        for team_name in channel_state.get('teams', {}):
+            rows.append((team_name, _compute_team_points(channel_state, team_name, window='daily')))
+        if not rows:
+            await self.send_command_response(ctx, "No teams found.")
+            return
+        rows.sort(key=lambda item: item[1], reverse=True)
+        top = rows[:5]
+        await self.send_command_response(ctx, "Daily Teams: " + " | ".join([f"#{idx} {name} ({pts:,})" for idx, (name, pts) in enumerate(top, 1)]))
+
+    @commands.command(name='weeklyteams')
+    async def weeklyteams(self, ctx):
+        if not self._teams_feature_enabled():
+            return
+        _, channel_state = await self._with_channel_team_state()
+        rows = []
+        for team_name in channel_state.get('teams', {}):
+            rows.append((team_name, _compute_team_points(channel_state, team_name, window='weekly')))
+        if not rows:
+            await self.send_command_response(ctx, "No teams found.")
+            return
+        rows.sort(key=lambda item: item[1], reverse=True)
+        top = rows[:5]
+        await self.send_command_response(ctx, "Weekly Teams: " + " | ".join([f"#{idx} {name} ({pts:,})" for idx, (name, pts) in enumerate(top, 1)]))
+
+    @commands.command(name='daily')
+    async def daily(self, ctx):
+        if not self._teams_feature_enabled():
+            return
+        top = _get_top_players_points(days=1, limit=5)
+        if not top:
+            await self.send_command_response(ctx, "No daily data available yet.")
+            return
+        await self.send_command_response(ctx, "Daily: " + " | ".join([f"#{idx} {format_user_tag(name)} ({pts:,})" for idx, (name, pts) in enumerate(top, 1)]))
+
+    @commands.command(name='weekly')
+    async def weekly(self, ctx):
+        if not self._teams_feature_enabled():
+            return
+        top = _get_top_players_points(days=7, limit=5)
+        if not top:
+            await self.send_command_response(ctx, "No weekly data available yet.")
+            return
+        await self.send_command_response(ctx, "Weekly: " + " | ".join([f"#{idx} {format_user_tag(name)} ({pts:,})" for idx, (name, pts) in enumerate(top, 1)]))
 
 
     @commands.command(name='info')
