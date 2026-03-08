@@ -1074,7 +1074,7 @@ function renderTeamsRows(data) {
     <div class="row">
       <div class="row-head">
         ${renderRankBadge(idx + 1)}
-        <span class="name team-name"><span class="team-icon">${escapeHtml(row?.icon || '🏁')}</span>${escapeHtml(row?.name || '-')}</span>
+        <span class="name team-name"><span class="team-icon">${renderTeamIcon(row)}</span>${escapeHtml(row?.name || '-')}</span>
         <span class="stat">${escapeHtml(`${fmt(row?.points || 0)} pts`)}</span>
       </div>
       <div class="quest-metrics">
