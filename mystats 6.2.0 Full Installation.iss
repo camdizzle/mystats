@@ -77,6 +77,7 @@ Type: filesandordirs; Name: "{app}\obs_overlay"
 [Files]
 ; Updated: use portable relative paths instead of machine-specific absolute paths.
 Source: "{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion; BeforeInstall: "PrepareForMyStatsInstall"
+Source: "README.html"; DestDir: "{app}"; Flags: ignoreversion
 Source: "*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs onlyifdoesntexist; Excludes: "*.iss,obs_overlay\*,modern_dashboard\*"
 Source: "circle1.ico"; DestDir: "{app}"; Flags: ignoreversion
 ; Updated: include assets required by current MyStats versions.
@@ -88,6 +89,7 @@ Source: "modern_dashboard\*"; DestDir: "{app}\modern_dashboard"; Flags: ignoreve
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\circle1.ico"
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\README.html"; Description: "Open User Guide"; Flags: postinstall shellexec skipifsilent unchecked
 
 
 [Code]

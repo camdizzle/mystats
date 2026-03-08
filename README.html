@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MyStats User Guide</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: Segoe UI, Arial, sans-serif; margin: 2rem auto; max-width: 980px; padding: 0 1rem; line-height: 1.6; }
+    h1, h2, h3, h4, h5, h6 { line-height: 1.25; margin-top: 1.5rem; }
+    code { font-family: Consolas, monospace; padding: 0.1rem 0.35rem; border-radius: 4px; background: rgba(127,127,127,0.15); }
+    hr { margin: 1.5rem 0; }
+  </style>
+</head>
+<body>
+<h1>MyStats — All-in-One User Guide (Current State)</h1>
+<p>This README is the single quick-reference guide for using <strong>MyStats</strong> in its current state, including setup, daily use, and the major feature systems:</p>
+<ul>
+  <li>General MyStats use</li>
+  <li>MyCycle</li>
+  <li>MyTeams</li>
+  <li>Rivals</li>
+  <li>Season Quests</li>
+  <li>Tilt</li>
+  <li>Events</li>
+  <li>Event Management</li>
+  <li>Overlays</li>
+  <li>Dashboards</li>
+</ul>
+<hr />
+<h2>1) General MyStats use</h2>
+<h3>What MyStats does</h3>
+<p>MyStats is a local companion app for Marbles on Stream creators that tracks race, BR, and Tilt data, drives chat commands, and powers browser-based overlays and dashboards.</p>
+<h3>First-time setup checklist</h3>
+<ol>
+  <li>Launch MyStats.</li>
+  <li>Open <strong>Settings</strong> and configure your channel/account.</li>
+  <li>If using your own account connection, use the app link/connect flow in the top-right of the app.</li>
+  <li>If you get token/auth startup errors, close the app, delete <code>token.json</code>, then restart and reconnect.</li>
+  <li>If you use the default account mode, make sure <code>mystats_results</code> is a moderator in your Twitch chat.</li>
+</ol>
+<h3>Core runtime behavior</h3>
+<ul>
+  <li>MyStats reads and processes your local output/stat files continuously.</li>
+  <li>MyStats runs a built-in local Flask server for:</li>
+  <li>OBS overlays</li>
+  <li>Modern web dashboard</li>
+  <li>JSON API endpoints used by those pages</li>
+</ul>
+<h3>Overlay + dashboard server basics</h3>
+<ul>
+  <li>Default server URL pattern: <code>http://127.0.0.1:&lt;overlay_server_port&gt;/...</code></li>
+  <li>Default port is typically <code>5000</code> unless changed in <strong>Settings → Overlay</strong>.</li>
+  <li>After changing server port, restart MyStats and update any OBS/browser links.</li>
+</ul>
+<h3>2-PC streaming setup</h3>
+<p>If OBS runs on a separate streaming PC, use the gaming PC local IP instead of localhost:</p>
+<p><code>http://&lt;your_local_ip&gt;:&lt;overlay_server_port&gt;/overlay</code></p>
+<p>Also allow the chosen port in Windows Defender Firewall inbound TCP rules.</p>
+<hr />
+<h2>2) MyCycle</h2>
+<p>MyCycle tracks repeated session progression loops for racers and exposes both personal and leaderboard-style summaries.</p>
+<h3>What users get</h3>
+<ul>
+  <li>Personal cycle progress and completion tracking via <code>!mycycle</code></li>
+  <li>Cycle performance summary metrics via <code>!cyclestats</code></li>
+  <li>Chat event announcements when users complete cycles</li>
+</ul>
+<h3>Key chat commands</h3>
+<ul>
+  <li><code>!mycycle [username]</code></li>
+  <li>Shows session name, completed cycle count, current cycle progress, and missing placements (if any).</li>
+  <li><code>!cyclestats</code></li>
+  <li>Shows fastest/slowest cycle performance and rotating aggregate metrics.</li>
+</ul>
+<h3>Typical use on stream</h3>
+<ul>
+  <li>Let viewers check their own grind progress with <code>!mycycle</code>.</li>
+  <li>Use <code>!cyclestats</code> to spotlight consistency and completion speed.</li>
+  <li>Keep MyCycle enabled as a recurring progression objective during longer sessions.</li>
+</ul>
+<hr />
+<h2>3) MyTeams</h2>
+<p>MyTeams is MyStats&#x27; local, channel-scoped team competition system.</p>
+<h3>Core concept</h3>
+<ul>
+  <li>Viewers create/join teams.</li>
+  <li>Teams compete on daily/weekly/season points.</li>
+  <li>Captains/co-captains manage recruiting and membership.</li>
+  <li>Teams can activate temporary point bonuses (Bits and TEP systems).</li>
+</ul>
+<h3>Streamer setup path</h3>
+<p>Open <strong>Settings → MyTeams</strong> and configure:</p>
+<ul>
+  <li>Enable/disable MyTeams commands</li>
+  <li>Points counting mode (<code>active</code> or <code>season</code>)</li>
+  <li>Max team size</li>
+  <li>TEP values (threshold, per-race gain, bonus %, cooldown, caps)</li>
+  <li>Bits bonus threshold/duration/weights</li>
+</ul>
+<h3>Most-used chat commands</h3>
+<ul>
+  <li>Discovery: <code>!teamhelp</code>, <code>!tcommands</code></li>
+  <li>Create/join: <code>!createteam</code>, <code>!invite</code>, <code>!acceptteam</code>, <code>!denyteam</code>, <code>!join</code>, <code>!leave</code></li>
+  <li>Management: <code>!cocaptain</code>, <code>!kick</code>, <code>!recruiting on|off</code>, <code>!renameteam</code>, <code>!logo</code>, <code>!inactive</code></li>
+  <li>Status/boards: <code>!myteam</code>, <code>!teambonus</code>, <code>!dailyteams</code>, <code>!weeklyteams</code></li>
+</ul>
+<h3>Roles</h3>
+<ul>
+  <li><strong>Captain</strong>: full team control</li>
+  <li><strong>Co-captain</strong>: invite/kick/recruiting/logo/inactivity management</li>
+  <li><strong>Member</strong>: join/leave/status actions</li>
+</ul>
+<h3>Bonus system summary</h3>
+<ul>
+  <li><strong>Bits track</strong>: team bits bank can trigger weighted bonus tiers.</li>
+  <li><strong>TEP track</strong> (Team Effort Points): participation-driven bank can trigger configured bonus windows.</li>
+  <li>Only one bonus window can be active at a time.</li>
+</ul>
+<hr />
+<h2>4) Rivals</h2>
+<p>Rivals identifies close competitors using season performance similarity and allows direct head-to-head checks.</p>
+<h3>What it does</h3>
+<ul>
+  <li>Detects likely rival matchups based on configurable qualification rules.</li>
+  <li>Supports user-level rival lookups and direct pair comparisons.</li>
+  <li>Surfaces rivalry data in both chat and dashboard views.</li>
+</ul>
+<h3>Key chat commands</h3>
+<ul>
+  <li><code>!rivals</code></li>
+  <li>Global or user-targeted rivalry output depending on arguments.</li>
+  <li><code>!h2h &lt;user1&gt; &lt;user2&gt;</code></li>
+  <li>Direct side-by-side comparison with leader and gap summary.</li>
+</ul>
+<h3>Typical stream use</h3>
+<ul>
+  <li>Call out “closest race” narratives during leaderboard swings.</li>
+  <li>Use <code>!h2h</code> for on-demand matchup storylines between top grinders.</li>
+</ul>
+<hr />
+<h2>5) Season Quests</h2>
+<p>Season Quests provide long-form progression goals that users can track and complete over time.</p>
+<h3>What users see</h3>
+<ul>
+  <li>Personal quest progress summaries via <code>!myquests</code>.</li>
+  <li>Completion announcements in chat when thresholds are reached.</li>
+</ul>
+<h3>Key chat command</h3>
+<ul>
+  <li><code>!myquests</code></li>
+  <li>Displays completed quest count and progress toward tracked objectives (for example races, points, and Tilt-related goals).</li>
+</ul>
+<h3>Event behavior</h3>
+<p>When a quest completes, MyStats can emit a completion line in chat using the <code>🎯 Season Quest Complete</code> style message.</p>
+<hr />
+<h2>6) Tilt</h2>
+<p>Tilt is a dedicated MyStats mode for run-based progression, survival tracking, expertise accumulation, and Tilt-specific leaderboards.</p>
+<h3>What Tilt includes</h3>
+<ul>
+  <li>Current run monitoring (level, elapsed time, leader, and top tiltee context)</li>
+  <li>Run/day/season Tilt points and death tracking</li>
+  <li>Tilt expertise progression and leaderboard output</li>
+  <li>Dashboard and overlay support for stream-facing visualization</li>
+</ul>
+<h3>Key Tilt commands</h3>
+<ul>
+  <li><code>!mytilts [username]</code> — run/today/season Tilt stats and last completed level</li>
+  <li><code>!thisrun</code> — active (or last) run snapshot</li>
+  <li><code>!xp</code> — expertise totals (last level/run, today, season, lifetime)</li>
+  <li><code>!toptiltees</code>, <code>!top10tiltees</code>, <code>!tiltsurvivors</code>, <code>!top10xp</code> — Tilt leaderboard commands</li>
+</ul>
+<h3>Tilt views</h3>
+<ul>
+  <li>Dashboard: <code>http://127.0.0.1:&lt;overlay_server_port&gt;/dashboard</code></li>
+  <li>Tilt overlay: <code>http://127.0.0.1:&lt;overlay_server_port&gt;/overlay/tilt</code></li>
+</ul>
+<hr />
+<h2>7) Events</h2>
+<p>MyStats emits automatic chat events for major milestones and run outcomes.</p>
+<h3>Common automated event categories</h3>
+<ul>
+  <li>Marble day reset notifications</li>
+  <li>Checkpoint winner summaries</li>
+  <li>Race milestone celebrations</li>
+  <li>Winner/narrative alerts for race momentum</li>
+  <li>BR winner announcements (including crown variants)</li>
+  <li>Tilt level recap and run completion messages</li>
+  <li>MyCycle completion announcements</li>
+  <li>Season quest completion announcements</li>
+  <li>Competitive raid queue/live/cancel/summary status messages</li>
+</ul>
+<h3>Why these matter</h3>
+<p>These system-generated events reduce manual moderation overhead and keep chat informed with consistent, structured updates.</p>
+<hr />
+<h2>8) Event Management</h2>
+<p>MyStats also includes <strong>Event Management</strong> capabilities that are separate from automated chat/overlay event triggers. This area is focused on running structured competitions and managing standings across organized event formats.</p>
+<h3>In-app Event Management (MyStats desktop app)</h3>
+<p>Within MyStats, event management workflows include functionality similar to local leaderboard management, including:</p>
+<ul>
+  <li>Creating events</li>
+  <li>Activating/deactivating events</li>
+  <li>Managing event state during live operations</li>
+  <li>Coordinating leaderboard-oriented event tracking locally</li>
+</ul>
+<h3>Web platform integration</h3>
+<p>For expanded event operations, MyStats integrates with the web interface at:</p>
+<ul>
+  <li>https://mystats.camwow.tv</li>
+</ul>
+<p>The web experience provides robust tools for advanced organizers, including support for:</p>
+<ul>
+  <li>Event management workflows</li>
+  <li>Leaderboard management</li>
+  <li>Multi-streamer events</li>
+  <li>Multi-event seasons</li>
+  <li>Additional platform features for larger structured competitions</li>
+</ul>
+<h3>Partnership note</h3>
+<p>If you are planning an event, we want to partner with you early so MyStats can deliver the setup, tracking, and output behavior your event needs. Reach out ahead of time so we can align configuration and coverage before launch.</p>
+<hr />
+<h2>9) Overlays</h2>
+<p>MyStats serves OBS-ready overlays from its built-in local Flask server so you can add them as Browser Sources without managing manual text files.</p>
+<h3>Overlay URLs</h3>
+<ul>
+  <li>Unified overlay (Race/BR/Tilt auto-rotation):</li>
+  <li><code>http://127.0.0.1:&lt;overlay_server_port&gt;/overlay</code></li>
+  <li>Tilt-focused overlay:</li>
+  <li><code>http://127.0.0.1:&lt;overlay_server_port&gt;/overlay/tilt</code></li>
+</ul>
+<h3>OBS setup quickstart</h3>
+<ol>
+  <li>Start MyStats.</li>
+  <li>Open <strong>Settings → Overlay</strong> and confirm the <strong>Server Port</strong>.</li>
+  <li>In OBS, add a <strong>Browser Source</strong>.</li>
+  <li>Paste one of the overlay URLs above.</li>
+  <li>If you change the server port, restart MyStats and update OBS URLs.</li>
+</ol>
+<h3>Overlay behavior summary</h3>
+<ul>
+  <li>Overlay pages poll local API endpoints and auto-refresh data.</li>
+  <li>Overlay visual options (such as theme/text/spacing/rotation choices) are controlled from <strong>Settings → Overlay</strong>.</li>
+  <li>If using a 2-PC setup, replace <code>127.0.0.1</code> with your gaming-PC local IP.</li>
+</ul>
+<h3>Overlay troubleshooting</h3>
+<ul>
+  <li>If an overlay page returns <strong>Not Found</strong>, confirm your install includes the <code>obs_overlay</code> folder.</li>
+  <li>If an overlay on another PC cannot connect, confirm firewall inbound TCP rule for the selected port.</li>
+</ul>
+<hr />
+<h2>10) Dashboards</h2>
+<p>MyStats includes web dashboards served from the local Flask server for monitoring live state and presenting stream-ready information.</p>
+<h3>Modern Dashboard</h3>
+<ul>
+  <li>URL: <code>http://127.0.0.1:&lt;overlay_server_port&gt;/dashboard</code></li>
+  <li>Intended for live monitoring and scene/operator prep.</li>
+  <li>Pulls data from API endpoints such as <code>/api/dashboard/main</code>.</li>
+</ul>
+<h3>Dashboard quickstart</h3>
+<ol>
+  <li>Start MyStats.</li>
+  <li>Confirm <strong>Settings → Overlay → Server Port</strong>.</li>
+  <li>Open <code>http://127.0.0.1:&lt;overlay_server_port&gt;/dashboard</code>.</li>
+  <li>If data appears stale/missing, verify API output directly in browser.</li>
+</ol>
+<hr />
+<h2>11) Command families at a glance</h2>
+<p>Depending on your enabled modules/settings, commonly used command groups include:</p>
+<ul>
+  <li>General/profile: <code>!info</code>, <code>!mystats</code>, <code>!commands</code></li>
+  <li>Leaderboards: <code>!top10season</code>, <code>!top10today</code>, <code>!top10wins</code>, <code>!top10races</code>, <code>!top10ppr</code>, etc.</li>
+  <li>Tilt: <code>!mytilts</code>, <code>!xp</code>, <code>!toptiltees</code>, <code>!top10tiltees</code>, <code>!tiltsurvivors</code>, <code>!top10xp</code>, <code>!thisrun</code></li>
+  <li>Rivals: <code>!rivals</code>, <code>!h2h</code></li>
+  <li>MyCycle: <code>!mycycle</code>, <code>!cyclestats</code></li>
+  <li>Season Quests: <code>!myquests</code></li>
+  <li>MyTeams: <code>!teamhelp</code>, <code>!tcommands</code>, <code>!myteam</code>, <code>!teambonus</code>, and team-management commands</li>
+</ul>
+<hr />
+<h2>12) Troubleshooting quick list</h2>
+<ul>
+  <li><strong>Auth/token errors at startup</strong></li>
+  <li>Delete <code>token.json</code>, restart MyStats, reconnect account.</li>
+  <li><strong>Overlay page shows Not Found</strong></li>
+  <li>Confirm installation includes <code>obs_overlay</code> folder and verify server port.</li>
+  <li><strong>Dashboard missing data</strong></li>
+  <li>Open <code>/api/dashboard/main</code> and verify JSON is returned.</li>
+  <li><strong>MyTeams commands do nothing</strong></li>
+  <li>Enable MyTeams in <strong>Settings → MyTeams</strong>.</li>
+  <li><strong>Cannot join/accept team invite</strong></li>
+  <li>Check invite validity, team capacity, and current team membership state.</li>
+</ul>
+<hr />
+</body>
+</html>
