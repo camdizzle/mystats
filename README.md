@@ -1,93 +1,241 @@
-ALL SETTINGS ARE UPDATED IN settings.txt
+# MyStats — All-in-One User Guide (Current State)
 
-You can link your own account to mystats via the app.  Click the button in the top right corner.  If you have any token errors and the app will not open, then delete token.json file from your mystats folder and restart the app.
+This README is the single quick-reference guide for using **MyStats** in its current state, including setup, daily use, and the major feature systems:
 
-If you use the default account, you need to make mystats_results a moderator in your twitch chat
+- General MyStats use
+- MyCycle
+- MyTeams
+- Rivals
+- Season Quests
+- Events
+- Overlays
+- Dashboards
 
-Manual OBS OVERLAY FILES:
-CountofRaces.txt (The number of races recorded in the results file for today)
-AvgPointsToday.txt (Avg of points earned / Races completed)
-HighScore.txt (Name and Points of the high score of the day!)
-LatestWinner.txt (Text output displaying the last race winner)
-TotalPointsToday.txt (Total points earned today)
-WinnerTotalPoints.txt (Total points of the last race winner)
+---
 
-## Version 6.1.0 Enhancements
+## 1) General MyStats use
 
-### Overlays (Race + Tilt)
-MyStats ships with a built-in Flask web server that serves overlays directly to OBS Browser Sources. The overlays auto-refresh from MyStats API endpoints, so once the Browser Source is connected you do not need to manually refresh files.
+### What MyStats does
+MyStats is a local companion app for Marbles on Stream creators that tracks race, BR, and Tilt data, drives chat commands, and powers browser-based overlays and dashboards.
 
-**How overlays work:**
-- MyStats reads race and tilt data from your local output files.
-- The local web server exposes the unified UI page (`/overlay`) and JSON APIs.
-- Overlay pages poll those APIs on an interval and repaint cards/pills/leaderboards.
-- Overlay visual settings (theme, text scale, spacing, rotation speed, etc.) come from Settings → Overlay and are pushed into the page payload.
+### First-time setup checklist
+1. Launch MyStats.
+2. Open **Settings** and configure your channel/account.
+3. If using your own account connection, use the app link/connect flow in the top-right of the app.
+4. If you get token/auth startup errors, close the app, delete `token.json`, then restart and reconnect.
+5. If you use the default account mode, make sure `mystats_results` is a moderator in your Twitch chat.
 
-**How to connect overlays in OBS:**
+### Core runtime behavior
+- MyStats reads and processes your local output/stat files continuously.
+- MyStats runs a built-in local Flask server for:
+  - OBS overlays
+  - Modern web dashboard
+  - JSON API endpoints used by those pages
+
+### Overlay + dashboard server basics
+- Default server URL pattern: `http://127.0.0.1:<overlay_server_port>/...`
+- Default port is typically `5000` unless changed in **Settings → Overlay**.
+- After changing server port, restart MyStats and update any OBS/browser links.
+
+### 2-PC streaming setup
+If OBS runs on a separate streaming PC, use the gaming PC local IP instead of localhost:
+
+`http://<your_local_ip>:<overlay_server_port>/overlay`
+
+Also allow the chosen port in Windows Defender Firewall inbound TCP rules.
+
+---
+
+## 2) MyCycle
+
+MyCycle tracks repeated session progression loops for racers and exposes both personal and leaderboard-style summaries.
+
+### What users get
+- Personal cycle progress and completion tracking via `!mycycle`
+- Cycle performance summary metrics via `!cyclestats`
+- Chat event announcements when users complete cycles
+
+### Key chat commands
+- `!mycycle [username]`
+  - Shows session name, completed cycle count, current cycle progress, and missing placements (if any).
+- `!cyclestats`
+  - Shows fastest/slowest cycle performance and rotating aggregate metrics.
+
+### Typical use on stream
+- Let viewers check their own grind progress with `!mycycle`.
+- Use `!cyclestats` to spotlight consistency and completion speed.
+- Keep MyCycle enabled as a recurring progression objective during longer sessions.
+
+---
+
+## 3) MyTeams
+
+MyTeams is MyStats' local, channel-scoped team competition system.
+
+### Core concept
+- Viewers create/join teams.
+- Teams compete on daily/weekly/season points.
+- Captains/co-captains manage recruiting and membership.
+- Teams can activate temporary point bonuses (Bits and TEP systems).
+
+### Streamer setup path
+Open **Settings → MyTeams** and configure:
+- Enable/disable MyTeams commands
+- Points counting mode (`active` or `season`)
+- Max team size
+- TEP values (threshold, per-race gain, bonus %, cooldown, caps)
+- Bits bonus threshold/duration/weights
+
+### Most-used chat commands
+- Discovery: `!teamhelp`, `!tcommands`
+- Create/join: `!createteam`, `!invite`, `!acceptteam`, `!denyteam`, `!join`, `!leave`
+- Management: `!cocaptain`, `!kick`, `!recruiting on|off`, `!renameteam`, `!logo`, `!inactive`
+- Status/boards: `!myteam`, `!teambonus`, `!dailyteams`, `!weeklyteams`
+
+### Roles
+- **Captain**: full team control
+- **Co-captain**: invite/kick/recruiting/logo/inactivity management
+- **Member**: join/leave/status actions
+
+### Bonus system summary
+- **Bits track**: team bits bank can trigger weighted bonus tiers.
+- **TEP track** (Team Effort Points): participation-driven bank can trigger configured bonus windows.
+- Only one bonus window can be active at a time.
+
+---
+
+## 4) Rivals
+
+Rivals identifies close competitors using season performance similarity and allows direct head-to-head checks.
+
+### What it does
+- Detects likely rival matchups based on configurable qualification rules.
+- Supports user-level rival lookups and direct pair comparisons.
+- Surfaces rivalry data in both chat and dashboard views.
+
+### Key chat commands
+- `!rivals`
+  - Global or user-targeted rivalry output depending on arguments.
+- `!h2h <user1> <user2>`
+  - Direct side-by-side comparison with leader and gap summary.
+
+### Typical stream use
+- Call out “closest race” narratives during leaderboard swings.
+- Use `!h2h` for on-demand matchup storylines between top grinders.
+
+---
+
+## 5) Season Quests
+
+Season Quests provide long-form progression goals that users can track and complete over time.
+
+### What users see
+- Personal quest progress summaries via `!myquests`.
+- Completion announcements in chat when thresholds are reached.
+
+### Key chat command
+- `!myquests`
+  - Displays completed quest count and progress toward tracked objectives (for example races, points, and Tilt-related goals).
+
+### Event behavior
+When a quest completes, MyStats can emit a completion line in chat using the `🎯 Season Quest Complete` style message.
+
+---
+
+## 6) Events
+
+MyStats emits automatic chat events for major milestones and run outcomes.
+
+### Common automated event categories
+- Marble day reset notifications
+- Checkpoint winner summaries
+- Race milestone celebrations
+- Winner/narrative alerts for race momentum
+- BR winner announcements (including crown variants)
+- Tilt level recap and run completion messages
+- MyCycle completion announcements
+- Season quest completion announcements
+- Competitive raid queue/live/cancel/summary status messages
+
+### Why these matter
+These system-generated events reduce manual moderation overhead and keep chat informed with consistent, structured updates.
+
+---
+
+## 7) Overlays
+
+MyStats serves OBS-ready overlays from its built-in local Flask server so you can add them as Browser Sources without managing manual text files.
+
+### Overlay URLs
+- Unified overlay (Race/BR/Tilt auto-rotation):
+  - `http://127.0.0.1:<overlay_server_port>/overlay`
+- Tilt-focused overlay:
+  - `http://127.0.0.1:<overlay_server_port>/overlay/tilt`
+
+### OBS setup quickstart
 1. Start MyStats.
-2. In MyStats, open **Settings → Overlay** and confirm the **Server Port** (default `5000`).
+2. Open **Settings → Overlay** and confirm the **Server Port**.
 3. In OBS, add a **Browser Source**.
-4. Use one of these URLs:
-   - Unified overlay (Race/BR/Tilt auto-switch): `http://127.0.0.1:<overlay_server_port>/overlay`
-5. If you change the server port, restart MyStats and update the OBS source URL.
-6. If you run a 2 PC setup, use `http://<your_local_ip>:<overlay_server_port>/overlay` in OBS on the streaming PC (example: `http://192.168.1.25:5000/overlay`).
-7. On the server PC (Windows), open **Windows Defender Firewall** → **Advanced Settings**, then add a new **Inbound Rule** → **Port** → **TCP** → `5000` (or your custom overlay port) → **Allow**.
+4. Paste one of the overlay URLs above.
+5. If you change the server port, restart MyStats and update OBS URLs.
 
-If an overlay page returns Not Found, open Settings once and confirm your install includes the `obs_overlay` folder.
+### Overlay behavior summary
+- Overlay pages poll local API endpoints and auto-refresh data.
+- Overlay visual options (such as theme/text/spacing/rotation choices) are controlled from **Settings → Overlay**.
+- If using a 2-PC setup, replace `127.0.0.1` with your gaming-PC local IP.
+
+### Overlay troubleshooting
+- If an overlay page returns **Not Found**, confirm your install includes the `obs_overlay` folder.
+- If an overlay on another PC cannot connect, confirm firewall inbound TCP rule for the selected port.
+
+---
+
+## 8) Dashboards
+
+MyStats includes web dashboards served from the local Flask server for monitoring live state and presenting stream-ready information.
 
 ### Modern Dashboard
-The modern dashboard is also served by the same local Flask server and is intended for live monitoring, scene prep, and stream management.
+- URL: `http://127.0.0.1:<overlay_server_port>/dashboard`
+- Intended for live monitoring and scene/operator prep.
+- Pulls data from API endpoints such as `/api/dashboard/main`.
 
-**How dashboard data works:**
-- Dashboard page: `http://127.0.0.1:<overlay_server_port>/dashboard`
-
-**How to connect/open dashboard:**
+### Dashboard quickstart
 1. Start MyStats.
-2. Confirm Settings → Overlay **Server Port**.
-3. Open **Dashboards (Modern)** from the app, or paste the dashboard URL above in a browser.
-4. If data is missing, open `/api/dashboard/main` directly and verify JSON is returned.
+2. Confirm **Settings → Overlay → Server Port**.
+3. Open `http://127.0.0.1:<overlay_server_port>/dashboard`.
+4. If data appears stale/missing, verify API output directly in browser.
 
-### Tilt Dashboard Highlight: Pressure Score
-In the Tilt leaderboard, the right-side **pressure** value is a weighted performance score used for ranking highlights and row order. It combines production, clutch finishes, and survivability:
+---
 
-`pressure = (tilt_points * 1.5) + (tilt_top_tiltee * 25) - (deaths * 8)`
+## 9) Command families at a glance
 
-Where:
-- `deaths = max(0, tilt_levels - tilt_top_tiltee)`
-- Higher tilt points increase pressure.
-- More top-tiltee finishes increase pressure significantly.
-- More deaths reduce pressure.
+Depending on your enabled modules/settings, commonly used command groups include:
 
-This gives you a quick “who is applying the most pressure right now” signal, instead of only sorting by one raw stat.
+- General/profile: `!info`, `!mystats`, `!commands`
+- Leaderboards: `!top10season`, `!top10today`, `!top10wins`, `!top10races`, `!top10ppr`, etc.
+- Tilt: `!mytilts`, `!xp`, `!toptiltees`, `!top10tiltees`, `!tiltsurvivors`, `!top10xp`, `!thisrun`
+- Rivals: `!rivals`, `!h2h`
+- MyCycle: `!mycycle`, `!cyclestats`
+- Season Quests: `!myquests`
+- MyTeams: `!teamhelp`, `!tcommands`, `!myteam`, `!teambonus`, and team-management commands
 
+---
 
-## OBS Overlay (Built-in Flask)
-Use Browser Source: `http://127.0.0.1:5000/overlay`
+## 10) Troubleshooting quick list
 
-If port `5000` is already in use, open Settings → Overlay and change **Server Port** (default `5000`).
-After changing the port, restart MyStats and update the OBS Browser Source URL to match.
+- **Auth/token errors at startup**
+  - Delete `token.json`, restart MyStats, reconnect account.
+- **Overlay page shows Not Found**
+  - Confirm installation includes `obs_overlay` folder and verify server port.
+- **Dashboard missing data**
+  - Open `/api/dashboard/main` and verify JSON is returned.
+- **MyTeams commands do nothing**
+  - Enable MyTeams in **Settings → MyTeams**.
+- **Cannot join/accept team invite**
+  - Check invite validity, team capacity, and current team membership state.
 
-If `/overlay` returns Not Found, open desktop app Settings once and confirm your install includes the `obs_overlay` folder (the app now checks multiple locations automatically, including packaged and working-directory paths).
+---
 
-Header stats now show 6 pills:
-- Avg Pts Today
-- Avg Pts Season
-- Unique Racers Today
-- Unique Racers Season
-- Total Races Today
-- Total Races Season
+## 11) Current-state note
 
-Responsive tweaks are included for smaller OBS source sizes.
-
-Header pills rotate every 10 seconds between Today stats and Season stats.
-
-Overlay settings are controlled from the desktop app (Settings → Overlay) and pushed to the browser source:
-- Top stat rotation speed (default 10s)
-- Data refresh interval
-- Background theme presets
-- Card opacity
-- Text scale
-- Top-3 medal emote visibility
-- Compact row spacing
-
-2 PC setup note: Use `http://<your_local_ip>:<overlay_server_port>/overlay` in OBS instead of localhost (for example, `http://192.168.1.25:5000/overlay`).
+This README summarizes the current implemented feature behavior for MyStats as an all-in-one operational guide. If future releases expand commands or settings, update this file so streamers/mods always have a single reliable reference.
