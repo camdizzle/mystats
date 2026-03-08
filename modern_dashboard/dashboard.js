@@ -883,10 +883,13 @@ function renderRaceDashboardKpis(rows = [], filterMode = 'both', payload = null)
 
   const labels = getRaceFilterLabels(filterMode);
   const filteredRows = rows.filter((row) => getRaceRowTotals(row, filterMode).events > 0);
-  const dedupedTotalRaces = Number(payload?.race_totals?.total_events || 0);
-  const totalRaces = filterMode === 'both'
-    ? (dedupedTotalRaces || filteredRows.reduce((acc, row) => acc + getRaceRowTotals(row, filterMode).events, 0))
-    : filteredRows.reduce((acc, row) => acc + getRaceRowTotals(row, filterMode).events, 0);
+  const dedupedTotals = {
+    both: Number(payload?.race_totals?.total_events || 0),
+    race: Number(payload?.race_totals?.race_events || 0),
+    br: Number(payload?.race_totals?.br_events || 0),
+  };
+  const fallbackTotalRaces = filteredRows.reduce((acc, row) => acc + getRaceRowTotals(row, filterMode).events, 0);
+  const totalRaces = dedupedTotals[filterMode] || fallbackTotalRaces;
   const totalPoints = filteredRows.reduce((acc, row) => acc + getRaceRowTotals(row, filterMode).points, 0);
   const avgPoints = totalRaces > 0 ? (totalPoints / totalRaces) : 0;
 

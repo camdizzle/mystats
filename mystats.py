@@ -5323,12 +5323,12 @@ def _extract_race_br_trend_rows_from_directory(directory):
     for allraces_file in glob.glob(os.path.join(directory, 'allraces_*.csv')):
         try:
             with open(allraces_file, 'r', encoding='utf-8', errors='ignore') as f:
-                for row in iter_csv_rows(f):
+                for line_no, row in enumerate(iter_csv_rows(f), start=1):
                     if len(row) < 6:
                         continue
                     # allraces rows are per-player results; keep only first-place rows
                     # so trend race/BR counts represent distinct events.
-                    if str(row[0] or '').strip() != '1':
+                    if not _is_first_place_row(row):
                         continue
                     mode = str(row[4] or '').strip().lower()
                     if mode not in ('race', 'br'):
@@ -5339,16 +5339,14 @@ def _extract_race_br_trend_rows_from_directory(directory):
                     display_name = str(row[2] or '').strip() or username
                     points = _safe_int(row[3])
                     race_ts = _parse_overlay_timestamp(row[5])
-                    if race_ts is None:
-                        continue
                     race_id = str(row[10] or '').strip() if len(row) > 10 else ''
-                    race_event_key = f"{mode}|{race_id}|{row[5]}" if (race_id or row[5]) else None
+                    race_event_key = race_id or f"{os.path.basename(allraces_file)}:{line_no}"
                     rows.append({
                         'mode': mode,
                         'username': username,
                         'display_name': display_name,
                         'points': points,
-                        'date_key': race_ts.strftime('%Y-%m-%d'),
+                        'date_key': race_ts.strftime('%Y-%m-%d') if race_ts else None,
                         'race_event_key': race_event_key,
                     })
         except Exception:
@@ -5374,8 +5372,8 @@ def _build_dashboard_race_trends_payload():
     for directory in all_season_dirs:
         trend_rows = _extract_race_br_trend_rows_from_directory(directory)
         unique_racers = len({row['display_name'] for row in trend_rows})
-        race_count = len({row['race_event_key'] for row in trend_rows if row['mode'] == 'race' and row.get('race_event_key')})
-        br_count = len({row['race_event_key'] for row in trend_rows if row['mode'] == 'br' and row.get('race_event_key')})
+        race_count = sum(1 for row in trend_rows if row['mode'] == 'race')
+        br_count = sum(1 for row in trend_rows if row['mode'] == 'br')
         total_races = race_count + br_count
         total_points = sum(_safe_int(row.get('points', 0)) for row in trend_rows)
         season_series.append({
@@ -5400,6 +5398,8 @@ def _build_dashboard_race_trends_payload():
     })
     for row in current_rows:
         day = row['date_key']
+        if not day:
+            continue
         bucket = day_groups[day]
         bucket['date'] = day
         bucket['unique_racers'].add(row['display_name'])
