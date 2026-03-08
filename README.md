@@ -7,7 +7,9 @@ This README is the single quick-reference guide for using **MyStats** in its cur
 - MyTeams
 - Rivals
 - Season Quests
+- Tilt
 - Events
+- Event Management
 - Overlays
 - Dashboards
 
@@ -142,7 +144,29 @@ When a quest completes, MyStats can emit a completion line in chat using the `�
 
 ---
 
-## 6) Events
+## 6) Tilt
+
+Tilt is a dedicated MyStats mode for run-based progression, survival tracking, expertise accumulation, and Tilt-specific leaderboards.
+
+### What Tilt includes
+- Current run monitoring (level, elapsed time, leader, and top tiltee context)
+- Run/day/season Tilt points and death tracking
+- Tilt expertise progression and leaderboard output
+- Dashboard and overlay support for stream-facing visualization
+
+### Key Tilt commands
+- `!mytilts [username]` — run/today/season Tilt stats and last completed level
+- `!thisrun` — active (or last) run snapshot
+- `!xp` — expertise totals (last level/run, today, season, lifetime)
+- `!toptiltees`, `!top10tiltees`, `!tiltsurvivors`, `!top10xp` — Tilt leaderboard commands
+
+### Tilt views
+- Dashboard: `http://127.0.0.1:<overlay_server_port>/dashboard`
+- Tilt overlay: `http://127.0.0.1:<overlay_server_port>/overlay/tilt`
+
+---
+
+## 7) Events
 
 MyStats emits automatic chat events for major milestones and run outcomes.
 
@@ -162,7 +186,34 @@ These system-generated events reduce manual moderation overhead and keep chat in
 
 ---
 
-## 7) Overlays
+## 8) Event Management
+
+MyStats also includes **Event Management** capabilities that are separate from automated chat/overlay event triggers. This area is focused on running structured competitions and managing standings across organized event formats.
+
+### In-app Event Management (MyStats desktop app)
+Within MyStats, event management workflows include functionality similar to local leaderboard management, including:
+- Creating events
+- Activating/deactivating events
+- Managing event state during live operations
+- Coordinating leaderboard-oriented event tracking locally
+
+### Web platform integration
+For expanded event operations, MyStats integrates with the web interface at:
+- https://mystats.camwow.tv
+
+The web experience provides robust tools for advanced organizers, including support for:
+- Event management workflows
+- Leaderboard management
+- Multi-streamer events
+- Multi-event seasons
+- Additional platform features for larger structured competitions
+
+### Partnership note
+If you are planning an event, we want to partner with you early so MyStats can deliver the setup, tracking, and output behavior your event needs. Reach out ahead of time so we can align configuration and coverage before launch.
+
+---
+
+## 9) Overlays
 
 MyStats serves OBS-ready overlays from its built-in local Flask server so you can add them as Browser Sources without managing manual text files.
 
@@ -190,7 +241,7 @@ MyStats serves OBS-ready overlays from its built-in local Flask server so you ca
 
 ---
 
-## 8) Dashboards
+## 10) Dashboards
 
 MyStats includes web dashboards served from the local Flask server for monitoring live state and presenting stream-ready information.
 
@@ -207,7 +258,7 @@ MyStats includes web dashboards served from the local Flask server for monitorin
 
 ---
 
-## 9) Command families at a glance
+## 11) Command families at a glance
 
 Depending on your enabled modules/settings, commonly used command groups include:
 
@@ -221,7 +272,7 @@ Depending on your enabled modules/settings, commonly used command groups include
 
 ---
 
-## 10) Troubleshooting quick list
+## 12) Troubleshooting quick list
 
 - **Auth/token errors at startup**
   - Delete `token.json`, restart MyStats, reconnect account.
@@ -236,6 +287,6 @@ Depending on your enabled modules/settings, commonly used command groups include
 
 ---
 
-## 11) Current-state note
+## 13) Current-state note
 
 This README summarizes the current implemented feature behavior for MyStats as an all-in-one operational guide. If future releases expand commands or settings, update this file so streamers/mods always have a single reliable reference.
