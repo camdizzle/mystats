@@ -74,6 +74,13 @@ MyTeams is MyStats' channel team system (local mode). Viewers form teams, compet
 - TEP bank crossing threshold triggers fixed +15% for 15m by default, and is blocked for 60m after bits bonus windows.
 - Active bonus windows appear in team status (for example `⚡+35%`).
 
+### TEP settings cheat sheet
+
+- **TEP Threshold**: total Team Effort Points needed to trigger the automatic TEP bonus.
+- **TEP per Race**: Team Effort Points gained from each qualifying team race.
+- **TEP Bonus %/Cooldown (min)**: TEP boost amount and cooldown after bits activity.
+- **TEP Cap Member/Team (daily)**: daily ceiling for per-member and team-wide TEP gain.
+
 ---
 
 ## Dashboard and overlay visibility
