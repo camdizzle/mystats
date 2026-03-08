@@ -6113,16 +6113,18 @@ def callback():
         return "Failed to retrieve or validate access token.", 400
 
 
-def verify_token(token):
+def verify_token(token, emit_console=True):
     verify_url = "https://id.twitch.tv/oauth2/validate"
     headers = {"Authorization": f"OAuth {token}"}
     logger.info("API call: Twitch token validation")
     response = requests.get(verify_url, headers=headers)
     if response.status_code == 200:
-        print("\nToken is valid.")
+        if emit_console:
+            print("\nToken is valid.")
         return True
     else:
-        print(f"Token validation failed: {response.text}")
+        if emit_console:
+            print(f"Token validation failed: {response.text}")
         return False
 
 
@@ -10510,6 +10512,7 @@ class Bot(commands.Bot):
 
     def __init__(self):
         self.channel_name = config.get_setting('CHANNEL').lower()
+        self._initial_token_validation_logged = False
         token = self.get_valid_token()  # Get the valid token at initialization
         prefix = '!'
 
@@ -10529,18 +10532,22 @@ class Bot(commands.Bot):
         self.team_command_last_seen = {}
 
     def get_valid_token(self):
+        emit_validation_console = not self._initial_token_validation_logged
+
         # Load token from the token file if it exists, otherwise fallback to config token
         token_data = load_token_data()
 
         if token_data:
             file_access_token = token_data.get('access_token')
-            if file_access_token and not is_token_expired(token_data) and verify_token(file_access_token):
+            if file_access_token and not is_token_expired(token_data) and verify_token(file_access_token, emit_console=emit_validation_console):
+                self._initial_token_validation_logged = True
                 return file_access_token
 
             print("Stored custom token is expired or invalid, attempting token refresh...")
             new_token = refresh_access_token()  # Try to refresh the token
-            if new_token and verify_token(new_token):
+            if new_token and verify_token(new_token, emit_console=emit_validation_console):
                 print("Token refreshed successfully.")
+                self._initial_token_validation_logged = True
                 return new_token  # Return the refreshed token
 
             clear_invalid_token_data("custom token expired/invalid and refresh failed")
@@ -10553,6 +10560,7 @@ class Bot(commands.Bot):
         if config_token:
             print("Using ConfigManager token.")
             set_default_bot_login_button("Using MyStats default account token")
+            self._initial_token_validation_logged = True
             return config_token  # Use the token from config if no token file exists
 
         raise Exception("No valid token found in ConfigManager. Please authenticate.")
