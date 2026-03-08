@@ -56,7 +56,7 @@ const I18N = {
     'No competitors found for this filter.': 'No se encontraron competidores para este filtro.',
     'Updated now': 'Actualizado ahora',
     'Updated': 'Actualizado',
-    'Unable to load MyCycle data.': 'No se pudieron cargar los datos de MyCycle.',
+    'Unable to load MyStats data.': 'No se pudieron cargar los datos de MyStats.',
     'No rivals currently qualify. Try lowering Minimum Season Races or increasing Maximum Point Gap in Settings → Rivals.': 'No hay rivales que califiquen ahora. Baja Carreras mínimas o sube Brecha máxima en Ajustes → Rivals.',
     'Current closest rivalry': 'Rivalidad más cercana actual',
     'Rivals Highlights': 'Resumen de rivales',
@@ -101,7 +101,7 @@ const I18N = {
     'No competitors found for this filter.': 'No competitors for this filter, try another one.',
     'Updated now': 'Updated just now, fresh as',
     'Updated': 'Updated, fresh off the barbie',
-    'Unable to load MyCycle data.': 'Could not load MyCycle data, bit crook.',
+    'Unable to load MyStats data.': 'Could not load MyStats data, bit crook.',
     'No rivals currently qualify. Try lowering Minimum Season Races or increasing Maximum Point Gap in Settings → Rivals.': 'No rivals qualify right now. Lower min races or lift max gap in Settings → Rivals, mate.',
     'Current closest rivalry': 'Current closest rivalry',
     'Rivals Highlights': 'Rivals Highlights',
@@ -870,26 +870,29 @@ function getRaceFilterLabels(filterMode = 'both') {
     };
   }
   return {
-    totalLabel: 'Total Events',
-    countLabel: 'Events',
-    avgLabel: 'Avg Points/Event',
-    rowAvgLabel: 'Avg/Event',
+    totalLabel: 'Total Races',
+    countLabel: 'Races',
+    avgLabel: 'Avg Points/Race',
+    rowAvgLabel: 'Avg/Race',
   };
 }
 
-function renderRaceDashboardKpis(rows = [], filterMode = 'both') {
+function renderRaceDashboardKpis(rows = [], filterMode = 'both', payload = null) {
   const host = el('races-kpis');
   if (!host) return;
 
   const labels = getRaceFilterLabels(filterMode);
   const filteredRows = rows.filter((row) => getRaceRowTotals(row, filterMode).events > 0);
-  const totalEvents = filteredRows.reduce((acc, row) => acc + getRaceRowTotals(row, filterMode).events, 0);
+  const dedupedTotalRaces = Number(payload?.race_totals?.total_events || 0);
+  const totalRaces = filterMode === 'both'
+    ? (dedupedTotalRaces || filteredRows.reduce((acc, row) => acc + getRaceRowTotals(row, filterMode).events, 0))
+    : filteredRows.reduce((acc, row) => acc + getRaceRowTotals(row, filterMode).events, 0);
   const totalPoints = filteredRows.reduce((acc, row) => acc + getRaceRowTotals(row, filterMode).points, 0);
-  const avgPoints = totalEvents > 0 ? (totalPoints / totalEvents) : 0;
+  const avgPoints = totalRaces > 0 ? (totalPoints / totalRaces) : 0;
 
   host.innerHTML = [
     { label: t('Tracked Racers'), value: fmt(filteredRows.length) },
-    { label: labels.totalLabel, value: fmt(totalEvents) },
+    { label: labels.totalLabel, value: fmt(totalRaces) },
     { label: 'Total Points', value: fmt(totalPoints) },
     { label: labels.avgLabel, value: avgPoints.toFixed(1) },
   ].map((kpi) => (
@@ -941,7 +944,7 @@ function renderRaceDashboardRows(data) {
       return b.totals.highScore - a.totals.highScore;
     });
 
-  renderRaceDashboardKpis(allRows, raceDashboardFilter);
+  renderRaceDashboardKpis(allRows, raceDashboardFilter, data);
   renderRaceDashboardHighlights(allRows, raceDashboardFilter);
 
   const modeLabel = raceDashboardFilter === 'race' ? 'Races' : (raceDashboardFilter === 'br' ? 'BR' : 'Both modes');
@@ -1306,7 +1309,7 @@ async function refresh() {
     renderRaceTrends(data);
   } catch (error) {
     console.error('dashboard refresh failed', error);
-    const fallback = `<div class="empty">${escapeHtml(t('Unable to load MyCycle data.'))}</div>`;
+    const fallback = `<div class="empty">${escapeHtml(t('Unable to load MyStats data.'))}</div>`;
     ['mycycle', 'season-quests', 'tilt-leaderboard', 'rivals-leaderboard', 'races-leaderboard', 'trend-charts'].forEach((id) => {
       const node = el(id);
       if (node) node.innerHTML = fallback;
