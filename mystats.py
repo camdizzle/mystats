@@ -6892,37 +6892,48 @@ def open_settings_window():
     teams_sections.add(teams_settings_tab, text="Team Settings")
     teams_sections.add(teams_management_tab, text="Team Management")
 
+    teams_settings_tab.grid_columnconfigure(0, weight=1)
     teams_enabled_var = tk.BooleanVar(value=parse_boolean_token(config.get_setting("teams_enabled"), default=True))
-    ttk.Checkbutton(teams_settings_tab, text="Enable MyTeams Commands", variable=teams_enabled_var).grid(row=0, column=0, sticky="w", pady=(0, 6), columnspan=2)
+    ttk.Checkbutton(teams_settings_tab, text="Enable MyTeams Commands", variable=teams_enabled_var).grid(row=0, column=0, sticky="w", pady=(0, 10))
 
-    ttk.Label(teams_settings_tab, text="Points Counting Mode").grid(row=1, column=0, sticky="w", pady=(0, 4))
+    settings_columns = ttk.Frame(teams_settings_tab, style="App.TFrame")
+    settings_columns.grid(row=1, column=0, sticky="ew")
+    settings_columns.grid_columnconfigure(0, weight=1)
+    settings_columns.grid_columnconfigure(1, weight=1)
+
+    tep_settings_frame = ttk.LabelFrame(settings_columns, text="TEP Settings", padding=10)
+    tep_settings_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+    bonus_settings_frame = ttk.LabelFrame(settings_columns, text="Bonus Settings", padding=10)
+    bonus_settings_frame.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
+
+    ttk.Label(tep_settings_frame, text="Points Counting Mode").grid(row=0, column=0, sticky="w", pady=(0, 6))
     teams_points_mode_var = tk.StringVar(value=config.get_setting("teams_points_mode") or "active")
     ttk.Combobox(
-        teams_settings_tab,
+        tep_settings_frame,
         textvariable=teams_points_mode_var,
         values=["season", "active"],
         width=14,
         state="readonly"
-    ).grid(row=1, column=1, sticky="w", pady=(0, 4))
+    ).grid(row=0, column=1, sticky="w", pady=(0, 6), padx=(8, 0))
 
-    ttk.Label(teams_settings_tab, text="Max Team Size").grid(row=2, column=0, sticky="w", pady=(0, 4))
-    teams_max_size_entry = ttk.Entry(teams_settings_tab, width=12, justify='center')
-    teams_max_size_entry.grid(row=2, column=1, sticky="w", pady=(0, 4))
+    ttk.Label(tep_settings_frame, text="Max Team Size").grid(row=1, column=0, sticky="w", pady=(0, 6))
+    teams_max_size_entry = ttk.Entry(tep_settings_frame, width=12, justify='center')
+    teams_max_size_entry.grid(row=1, column=1, sticky="w", pady=(0, 6), padx=(8, 0))
     teams_max_size_entry.insert(0, config.get_setting("teams_max_size") or "25")
 
-    ttk.Label(teams_settings_tab, text="TEP Threshold").grid(row=3, column=0, sticky="w", pady=(0, 4))
-    teams_tep_threshold_entry = ttk.Entry(teams_settings_tab, width=12, justify='center')
-    teams_tep_threshold_entry.grid(row=3, column=1, sticky="w", pady=(0, 4))
+    ttk.Label(tep_settings_frame, text="TEP Threshold").grid(row=2, column=0, sticky="w", pady=(0, 6))
+    teams_tep_threshold_entry = ttk.Entry(tep_settings_frame, width=12, justify='center')
+    teams_tep_threshold_entry.grid(row=2, column=1, sticky="w", pady=(0, 6), padx=(8, 0))
     teams_tep_threshold_entry.insert(0, config.get_setting("teams_tep_threshold") or "40")
 
-    ttk.Label(teams_settings_tab, text="TEP per Race").grid(row=4, column=0, sticky="w", pady=(0, 4))
-    teams_tep_per_race_entry = ttk.Entry(teams_settings_tab, width=12, justify='center')
-    teams_tep_per_race_entry.grid(row=4, column=1, sticky="w", pady=(0, 4))
+    ttk.Label(tep_settings_frame, text="TEP per Race").grid(row=3, column=0, sticky="w", pady=(0, 6))
+    teams_tep_per_race_entry = ttk.Entry(tep_settings_frame, width=12, justify='center')
+    teams_tep_per_race_entry.grid(row=3, column=1, sticky="w", pady=(0, 6), padx=(8, 0))
     teams_tep_per_race_entry.insert(0, config.get_setting("teams_tep_per_race") or "1")
 
-    ttk.Label(teams_settings_tab, text="TEP Bonus %/Cooldown (min)").grid(row=5, column=0, sticky="w", pady=(0, 4))
-    tep_bonus_frame = ttk.Frame(teams_settings_tab, style="App.TFrame")
-    tep_bonus_frame.grid(row=5, column=1, sticky="w", pady=(0, 4))
+    ttk.Label(tep_settings_frame, text="TEP Bonus %/Cooldown (min)").grid(row=4, column=0, sticky="w", pady=(0, 6))
+    tep_bonus_frame = ttk.Frame(tep_settings_frame, style="App.TFrame")
+    tep_bonus_frame.grid(row=4, column=1, sticky="w", pady=(0, 6), padx=(8, 0))
     teams_tep_bonus_duration_entry = ttk.Entry(tep_bonus_frame, width=5, justify='center')
     teams_tep_bonus_duration_entry.pack(side="left")
     teams_tep_bonus_duration_entry.insert(0, config.get_setting("teams_tep_bonus_duration_minutes") or "15")
@@ -6930,15 +6941,9 @@ def open_settings_window():
     teams_tep_bits_cooldown_entry = ttk.Entry(tep_bonus_frame, width=5, justify='center')
     teams_tep_bits_cooldown_entry.pack(side="left")
     teams_tep_bits_cooldown_entry.insert(0, config.get_setting("teams_tep_bits_cooldown_minutes") or "60")
-    ttk.Label(
-        teams_settings_tab,
-        text="TEP (Team Effort Points) is earned from team races and triggers an automatic bonus once the threshold is reached.",
-        style="Small.TLabel"
-    ).grid(row=5, column=2, columnspan=2, sticky="w", padx=(8, 0), pady=(0, 4))
-
-    ttk.Label(teams_settings_tab, text="TEP Cap Member/Team (daily)").grid(row=6, column=0, sticky="w", pady=(0, 4))
-    tep_caps_frame = ttk.Frame(teams_settings_tab, style="App.TFrame")
-    tep_caps_frame.grid(row=6, column=1, sticky="w", pady=(0, 4))
+    ttk.Label(tep_settings_frame, text="TEP Cap Member/Team (daily)").grid(row=5, column=0, sticky="w", pady=(0, 6))
+    tep_caps_frame = ttk.Frame(tep_settings_frame, style="App.TFrame")
+    tep_caps_frame.grid(row=5, column=1, sticky="w", pady=(0, 6), padx=(8, 0))
     teams_tep_member_daily_cap_entry = ttk.Entry(tep_caps_frame, width=5, justify='center')
     teams_tep_member_daily_cap_entry.pack(side="left")
     teams_tep_member_daily_cap_entry.insert(0, config.get_setting("teams_tep_member_daily_cap") or "10")
@@ -6947,24 +6952,25 @@ def open_settings_window():
     teams_tep_team_daily_cap_entry.pack(side="left")
     teams_tep_team_daily_cap_entry.insert(0, config.get_setting("teams_tep_team_daily_cap") or "100")
     ttk.Label(
-        teams_settings_tab,
+        tep_settings_frame,
         text="TEP CAP limits daily TEP gain per member/team to prevent runaway bonus loops.",
-        style="Small.TLabel"
-    ).grid(row=7, column=0, columnspan=2, sticky="w", pady=(0, 4))
+        style="Small.TLabel",
+        wraplength=360
+    ).grid(row=6, column=0, columnspan=2, sticky="w", pady=(2, 0))
 
-    ttk.Label(teams_settings_tab, text="Bonus Bits Threshold").grid(row=2, column=2, sticky="w", pady=(0, 4), padx=(8, 0))
-    teams_bonus_bits_threshold_entry = ttk.Entry(teams_settings_tab, width=10, justify='center')
-    teams_bonus_bits_threshold_entry.grid(row=2, column=3, sticky="w", pady=(0, 4))
+    ttk.Label(bonus_settings_frame, text="Bonus Bits Threshold").grid(row=0, column=0, sticky="w", pady=(0, 6))
+    teams_bonus_bits_threshold_entry = ttk.Entry(bonus_settings_frame, width=10, justify='center')
+    teams_bonus_bits_threshold_entry.grid(row=0, column=1, sticky="w", pady=(0, 6), padx=(8, 0))
     teams_bonus_bits_threshold_entry.insert(0, config.get_setting("teams_bonus_bits_threshold") or "1000")
 
-    ttk.Label(teams_settings_tab, text="Bonus Duration (min)").grid(row=5, column=2, sticky="w", pady=(0, 4), padx=(8, 0))
-    teams_bonus_duration_entry = ttk.Entry(teams_settings_tab, width=10, justify='center')
-    teams_bonus_duration_entry.grid(row=5, column=3, sticky="w", pady=(0, 4))
+    ttk.Label(bonus_settings_frame, text="Bonus Duration (min)").grid(row=1, column=0, sticky="w", pady=(0, 6))
+    teams_bonus_duration_entry = ttk.Entry(bonus_settings_frame, width=10, justify='center')
+    teams_bonus_duration_entry.grid(row=1, column=1, sticky="w", pady=(0, 6), padx=(8, 0))
     teams_bonus_duration_entry.insert(0, config.get_setting("teams_bonus_duration_minutes") or "20")
 
-    ttk.Label(teams_settings_tab, text="Bonus Weights 15%/25%/35%/67%").grid(row=6, column=2, sticky="nw", pady=(0, 4), padx=(8, 0))
-    bonus_weights_frame = ttk.Frame(teams_settings_tab, style="App.TFrame")
-    bonus_weights_frame.grid(row=6, column=3, sticky="w", pady=(0, 4))
+    ttk.Label(bonus_settings_frame, text="Bonus Weights 15%/25%/35%/67%").grid(row=2, column=0, sticky="nw", pady=(0, 6))
+    bonus_weights_frame = ttk.Frame(bonus_settings_frame, style="App.TFrame")
+    bonus_weights_frame.grid(row=2, column=1, sticky="w", pady=(0, 6), padx=(8, 0))
     ttk.Label(bonus_weights_frame, text="15%", width=4, anchor="w").grid(row=0, column=0, sticky="w")
     teams_bonus_weight_15_entry = ttk.Entry(bonus_weights_frame, width=4, justify='center')
     teams_bonus_weight_15_entry.grid(row=0, column=1, sticky="w", pady=(0, 2))
@@ -6982,7 +6988,12 @@ def open_settings_window():
     teams_bonus_weight_67_entry.grid(row=3, column=1, sticky="w")
     teams_bonus_weight_67_entry.insert(0, config.get_setting("teams_bonus_weight_67") or "1")
 
-    teams_settings_tab.grid_columnconfigure(3, weight=1)
+    ttk.Label(
+        bonus_settings_frame,
+        text="TEP (Team Effort Points) is earned from team races and triggers an automatic bonus once the threshold is reached.",
+        style="Small.TLabel",
+        wraplength=360
+    ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(2, 0))
 
     teams_tree = ttk.Treeview(teams_management_tab, columns=("team", "captain", "size", "recruiting", "bonus", "daily", "weekly", "season"), show='headings', height=10)
     for key, label, width in [
