@@ -2,6 +2,7 @@ const el = (id) => document.getElementById(id);
 
 let activeView = 'mycycle';
 let raceDashboardFilter = 'both';
+let teamsDashboardWindow = 'season';
 let tiltSortBy = 'tilt_points';
 let tiltSortOrder = 'desc';
 let rivalsGuideCollapsed = false;
@@ -460,6 +461,96 @@ function renderTiltRows(data) {
   }).join('');
 }
 
+function renderTeamsKpis(rows = [], recruitingRows = []) {
+  const host = el('teams-kpis');
+  if (!host) return;
+
+  const totalPoints = rows.reduce((acc, row) => acc + Number(row.points || 0), 0);
+  const avgTeamPoints = rows.length ? totalPoints / rows.length : 0;
+
+  host.innerHTML = [
+    { label: t('Tracked MyTeams'), value: fmt(rows.length) },
+    { label: t('Recruiting MyTeams'), value: fmt(recruitingRows.length) },
+    { label: t('Avg Team Points'), value: fmt(Math.round(avgTeamPoints)) },
+  ].map((kpi) => (
+    `<div class="kpi"><div class="kpi-label">${escapeHtml(kpi.label)}</div><div class="kpi-value">${escapeHtml(kpi.value)}</div></div>`
+  )).join('');
+}
+
+function renderTeamsHighlights(rows = [], topTodayRows = []) {
+  const host = el('teams-highlights');
+  if (!host) return;
+
+  if (!rows.length) {
+    host.innerHTML = '<div class="highlight-card"><div class="highlight-title">MyTeams Highlights</div><div class="highlight-main">No MyTeams yet</div></div>';
+    return;
+  }
+
+  const seasonLeader = rows[0] || null;
+  const todayLeader = topTodayRows[0] || null;
+
+  host.innerHTML = [
+    `<div class="highlight-card"><div class="highlight-title">Season Leader</div><div class="highlight-main">${escapeHtml(seasonLeader?.name || '—')}</div><div class="highlight-detail">${escapeHtml(`${fmt(seasonLeader?.points || 0)} pts`)}</div></div>`,
+    `<div class="highlight-card"><div class="highlight-title">Today Leader</div><div class="highlight-main">${escapeHtml(todayLeader?.name || '—')}</div><div class="highlight-detail">${escapeHtml(`${fmt(todayLeader?.points || 0)} pts`)}</div></div>`,
+  ].join('');
+}
+
+function renderTeamsRows(data) {
+  const rowsHost = el('teams-leaderboard');
+  if (!rowsHost) return;
+
+  const topSeason = Array.isArray(data?.teams?.top_season) ? data.teams.top_season : [];
+  const topWeekly = Array.isArray(data?.teams?.top_weekly) ? data.teams.top_weekly : [];
+  const topToday = Array.isArray(data?.teams?.top_today) ? data.teams.top_today : [];
+  const selectedRows = teamsDashboardWindow === 'today'
+    ? topToday
+    : (teamsDashboardWindow === 'weekly' ? topWeekly : topSeason);
+  const recruitingRows = selectedRows.filter((row) => Boolean(row.recruiting));
+
+  renderTeamsKpis(selectedRows, recruitingRows);
+  renderTeamsHighlights(topSeason, topToday);
+
+  if (!selectedRows.length) {
+    rowsHost.innerHTML = `<div class="empty">${escapeHtml(t('No MyTeams yet.'))}</div>`;
+    return;
+  }
+
+  const rangeLabel = teamsDashboardWindow === 'today' ? 'Today' : (teamsDashboardWindow === 'weekly' ? 'Weekly' : 'Season');
+  el('teams-range-pill').textContent = `${rangeLabel} • Top ${Math.min(20, selectedRows.length)}`;
+
+  rowsHost.innerHTML = selectedRows.slice(0, 20).map((row, idx) => {
+    const recruiting = row.recruiting ? 'Open' : 'Closed';
+    const bonus = row.bonus_label && row.bonus_label !== '—' ? row.bonus_label : '—';
+    return `
+      <div class="row">
+        <div class="row-head">
+          <span class="rank">#${idx + 1}</span>
+          <span class="name">${escapeHtml(row.name || '-')}</span>
+          <span class="stat">${escapeHtml(`${fmt(row.points)} pts`)}</span>
+        </div>
+        <div class="quest-metrics">
+          <span>Captain: ${escapeHtml(row.captain || '—')}</span>
+          <span>Size: ${escapeHtml(fmt(row.size || 0))}</span>
+          <span>Recruiting: ${escapeHtml(recruiting)}</span>
+          <span>Bonus: ${escapeHtml(bonus)}</span>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function wireTeamsWindowButtons() {
+  document.querySelectorAll('.mini-filter-btn[data-team-window]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      teamsDashboardWindow = btn.dataset.teamWindow || 'season';
+      document.querySelectorAll('.mini-filter-btn[data-team-window]').forEach((candidate) => {
+        candidate.classList.toggle('mini-filter-btn--active', candidate.dataset.teamWindow === teamsDashboardWindow);
+      });
+      refresh();
+    });
+  });
+}
+
 
 function getRivalsOnboardingSteps(settings = {}) {
   const minRaces = Math.max(1, Number(settings?.min_races || 0) || 50);
@@ -649,12 +740,19 @@ function getRaceRowTotals(row, filterMode = 'both') {
   };
 }
 
-function renderRaceDashboardKpis(rows = [], filterMode = 'both') {
+function renderRaceDashboardKpis(rows = [], filterMode = 'both', data = {}) {
   const host = el('races-kpis');
   if (!host) return;
 
   const filteredRows = rows.filter((row) => getRaceRowTotals(row, filterMode).events > 0);
-  const totalEvents = filteredRows.reduce((acc, row) => acc + getRaceRowTotals(row, filterMode).events, 0);
+  const racesSummary = data?.races_summary || {};
+  const raceEvents = Number(racesSummary.race_events || 0);
+  const brEvents = Number(racesSummary.br_events || 0);
+  const totalEventsFromPlacements = Number(racesSummary.total_events || (raceEvents + brEvents));
+  const totalEventsFallback = filteredRows.reduce((acc, row) => acc + getRaceRowTotals(row, filterMode).events, 0);
+  const totalEvents = filterMode === 'race'
+    ? (raceEvents || totalEventsFallback)
+    : (filterMode === 'br' ? (brEvents || totalEventsFallback) : (totalEventsFromPlacements || totalEventsFallback));
   const totalPoints = filteredRows.reduce((acc, row) => acc + getRaceRowTotals(row, filterMode).points, 0);
   const avgPoints = totalEvents > 0 ? (totalPoints / totalEvents) : 0;
 
@@ -712,7 +810,7 @@ function renderRaceDashboardRows(data) {
       return b.totals.highScore - a.totals.highScore;
     });
 
-  renderRaceDashboardKpis(allRows, raceDashboardFilter);
+  renderRaceDashboardKpis(allRows, raceDashboardFilter, data);
   renderRaceDashboardHighlights(allRows, raceDashboardFilter);
 
   const modeLabel = raceDashboardFilter === 'race' ? 'Races' : (raceDashboardFilter === 'br' ? 'BR' : 'Both modes');
@@ -779,7 +877,7 @@ function wireTiltSortControls() {
 
 function getRequestedViewFromLocation() {
   const hashView = String(window.location.hash || '').replace('#', '').trim();
-  const validViews = new Set(['mycycle', 'season-quests', 'tilt', 'rivals', 'races']);
+  const validViews = new Set(['mycycle', 'season-quests', 'tilt', 'teams', 'rivals', 'races']);
   if (validViews.has(hashView)) return hashView;
 
   const viewFromQuery = new URLSearchParams(window.location.search).get('view');
@@ -817,6 +915,7 @@ async function refresh() {
     renderMyCycleRows(data);
     renderSeasonQuestRows(data);
     renderTiltRows(data);
+    renderTeamsRows(data);
     renderRivalsRows(data);
     renderRaceDashboardRows(data);
   } catch (error) {
@@ -834,6 +933,7 @@ if (requestedView) {
 refresh();
 wireViewTabs();
 wireRaceFilterButtons();
+wireTeamsWindowButtons();
 wireTiltSortControls();
 wireRivalsOnboardingToggle();
 window.addEventListener('hashchange', () => {

@@ -33,6 +33,7 @@ body {
 .mycycle-shell,
 .season-shell,
 .tilt-shell,
+.teams-shell,
 .rivals-shell,
 .races-shell { display: grid; grid-template-columns: 280px 1fr; gap: 10px; min-height: 76vh; }
 .summary-panel, .leaderboard-panel {
