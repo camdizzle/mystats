@@ -986,7 +986,7 @@ function buildAnalyticsGroupsMarkup(data) {
   const groupOrder = ['race_br_combined', 'tilt', 'race_only', 'br_only', 'mycycle'];
   const metricMap = {
     race_br_combined: [
-      ['Races', 'events'], ['Points', 'points'], ['Wins', 'wins'], ['Win Rate %', 'win_rate'], ['Unique Racers', 'unique_racers'],
+      ['Races', 'race_events'], ['Points', 'points'], ['Wins', 'wins'], ['Win Rate %', 'win_rate'], ['Unique Racers', 'unique_racers'],
       ['High Score', 'high_score'], ['PPR', 'ppr'], ['Top PPR Racer', 'top_ppr_name'], ['Top PPR', 'top_ppr'], ['Top PPR Races', 'top_ppr_events'],
     ],
     tilt: [
@@ -994,11 +994,11 @@ function buildAnalyticsGroupsMarkup(data) {
       ['Deaths', 'deaths'], ['Survival Rate %', 'survival_rate'], ['PPR', 'ppr'],
     ],
     race_only: [
-      ['Race Count', 'events'], ['Race Points', 'points'], ['Race Wins', 'wins'], ['Win Rate %', 'win_rate'], ['Unique Racers', 'unique_racers'],
+      ['Race Count', 'race_events'], ['Race Points', 'points'], ['Race Wins', 'wins'], ['Win Rate %', 'win_rate'], ['Unique Racers', 'unique_racers'],
       ['Race High Score', 'high_score'], ['Race PPR', 'ppr'], ['Top PPR Racer', 'top_ppr_name'], ['Top PPR', 'top_ppr'], ['Top PPR Races', 'top_ppr_events'],
     ],
     br_only: [
-      ['BR Races', 'events'], ['BR Points', 'points'], ['BR Wins', 'wins'], ['Win Rate %', 'win_rate'], ['Unique Racers', 'unique_racers'],
+      ['BR Races', 'race_events'], ['BR Points', 'points'], ['BR Wins', 'wins'], ['Win Rate %', 'win_rate'], ['Unique Racers', 'unique_racers'],
       ['BR High Score', 'high_score'], ['BR PPR', 'ppr'], ['Top PPR Racer', 'top_ppr_name'], ['Top PPR', 'top_ppr'], ['Top PPR Races', 'top_ppr_events'],
     ],
     mycycle: [
