@@ -5031,6 +5031,11 @@ def _build_main_dashboard_payload():
         'rivals': get_global_rivalries(limit=RIVALS_MAX_PAIRS),
         'races': get_race_dashboard_leaderboard(limit=250),
         'race_totals': get_race_event_totals(),
+        'teams': {
+            'top_daily': _build_team_leaderboard_rows(window='daily', limit=100),
+            'top_weekly': _build_team_leaderboard_rows(window='weekly', limit=100),
+            'top_season': _build_team_leaderboard_rows(window='season', limit=100),
+        },
         'mycycle': {
             'session': mycycle_session or {},
             'rows': mycycle_rows,
