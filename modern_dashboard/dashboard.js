@@ -168,6 +168,29 @@ function escapeHtml(value) {
     .replace(/'/g, '&#039;');
 }
 
+
+function podiumClassForRank(rank = 0) {
+  if (rank === 1) return 'rank--gold';
+  if (rank === 2) return 'rank--silver';
+  if (rank === 3) return 'rank--bronze';
+  return '';
+}
+
+function renderRankBadge(rank = 0) {
+  const safeRank = Math.max(1, Number(rank || 0));
+  const podiumClass = podiumClassForRank(safeRank);
+  return `<span class="rank ${podiumClass}">#${safeRank}</span>`;
+}
+
+function renderTeamIcon(row = {}) {
+  const iconUrl = String(row?.icon_url || '').trim();
+  const iconFallback = String(row?.icon || '🏁').trim() || '🏁';
+  if (iconUrl) {
+    return `<img class="team-icon-image" src="${escapeHtml(iconUrl)}" alt="${escapeHtml(iconFallback)}" loading="lazy" decoding="async">`;
+  }
+  return `<span class="team-icon-text">${escapeHtml(iconFallback)}</span>`;
+}
+
 function uniqueParticipantCount(rows = []) {
   return new Set(
     rows
@@ -279,7 +302,7 @@ function renderMyCycleRows(data) {
     return `
       <div class="row">
         <div class="row-head">
-          <span class="rank">#${idx + 1 + ((pageInfo?.page || 1) - 1) * (pageInfo?.page_size || rows.length)}</span>
+          ${renderRankBadge(idx + 1 + ((pageInfo?.page || 1) - 1) * (pageInfo?.page_size || rows.length))}
           <span class="name">${escapeHtml(row.display_name || row.username || '-')}</span>
           <span class="stat">${escapeHtml(`${fmt(row.cycles_completed)} cycles`)}</span>
         </div>
@@ -390,7 +413,7 @@ function renderSeasonQuestRows(data) {
     return `
       <div class="row">
         <div class="row-head">
-          <span class="rank">#${idx + 1}</span>
+          ${renderRankBadge(idx + 1)}
           <span class="name">${escapeHtml(row.display_name || row.username || '-')}</span>
           <span class="stat">${escapeHtml(`${completedText} ${t('complete')}`)}</span>
         </div>
@@ -538,7 +561,7 @@ function renderTiltRows(data) {
     return `
       <div class="row">
         <div class="row-head">
-          <span class="rank">#${idx + 1}</span>
+          ${renderRankBadge(idx + 1)}
           <span class="name">${escapeHtml(row.display_name || row.username || '-')}</span>
           <span class="stat">${escapeHtml(tiltSortBy === 'pressure_score' ? `${fmt(Math.round(row.pressure_score))} pressure` : `${fmt(row.tilt_points)} pts`)}</span>
         </div>
@@ -804,7 +827,7 @@ function renderRivalsRows(data) {
     return `
       <div class="row">
         <div class="row-head">
-          <span class="rank">#${idx + 1}</span>
+          ${renderRankBadge(idx + 1)}
           <span class="name">${escapeHtml(`${row.display_a || row.user_a || '-'} vs ${row.display_b || row.user_b || '-'}`)}</span>
           <span class="stat">${escapeHtml(`${leaderName} +${fmt(leadValue)}`)}</span>
         </div>
@@ -965,7 +988,7 @@ function renderRaceDashboardRows(data) {
     return `
       <div class="row">
         <div class="row-head">
-          <span class="rank">#${idx + 1}</span>
+          ${renderRankBadge(idx + 1)}
           <span class="name">${escapeHtml(row.display_name || row.username || '-')}</span>
           <span class="stat">${escapeHtml(`${fmt(row.totals.points)} pts`)}</span>
         </div>
@@ -1050,8 +1073,8 @@ function renderTeamsRows(data) {
   rowsHost.innerHTML = rows.slice(0, 100).map((row, idx) => `
     <div class="row">
       <div class="row-head">
-        <span class="rank">#${idx + 1}</span>
-        <span class="name">${escapeHtml(row?.name || '-')}</span>
+        ${renderRankBadge(idx + 1)}
+        <span class="name team-name"><span class="team-icon">${renderTeamIcon(row)}</span>${escapeHtml(row?.name || '-')}</span>
         <span class="stat">${escapeHtml(`${fmt(row?.points || 0)} pts`)}</span>
       </div>
       <div class="quest-metrics">
