@@ -44,8 +44,7 @@ MyTeams is MyStats' local channel team system. Viewers can form teams, compete o
 
 ### Team info + standings
 - `!teamhelp` — Quick MyTeams overview blurb
-- `!myteam` — Your full team status
-- `!team [username]` — Team summary for a user
+- `!myteam [@username]` — Team status for you or a tagged user
 - `!dailyteams` — Top teams today
 - `!weeklyteams` — Top teams this week
 - `!tcommands` — List MyTeams commands
