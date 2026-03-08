@@ -20,6 +20,7 @@
       <button class="dashboard-nav-btn" data-view="season-quests" type="button" role="tab" aria-selected="false" aria-controls="panel-season-quests">Season Quests</button>
       <button class="dashboard-nav-btn" data-view="tilt" type="button" role="tab" aria-selected="false" aria-controls="panel-tilt">Tilt Dashboard</button>
       <button class="dashboard-nav-btn" data-view="rivals" type="button" role="tab" aria-selected="false" aria-controls="panel-rivals">Rivals</button>
+      <button class="dashboard-nav-btn" data-view="teams" type="button"  role="tab" aria-selected="false" aria-controls="panel-teams">MyTeams</button>
       <button class="dashboard-nav-btn" data-view="races" type="button" role="tab" aria-selected="false" aria-controls="panel-races">Race Dashboard</button>
       <button class="dashboard-nav-btn" data-view="trends" type="button" role="tab" aria-selected="false" aria-controls="panel-trends">Race/BR Trends</button>
     </section>
@@ -115,6 +116,27 @@
           </div>
         </div>
         <div id="tilt-leaderboard" class="rows"></div>
+      </article>
+    </section>
+
+    <section class="teams-shell is-hidden" data-panel="teams">
+      <article class="summary-panel">
+        <div class="meta">MyTeams snapshot</div>
+        <div id="teams-kpis" class="kpis"></div>
+        <div id="teams-highlights" class="cycle-highlights"></div>
+      </article>
+
+      <article class="leaderboard-panel">
+        <div class="panel-title-row">
+          <h2>MyTeams Leaderboard</h2>
+          <div class="tilt-sort-controls">
+            <button class="mini-filter-btn mini-filter-btn--active" type="button" data-team-window="season">Season</button>
+            <button class="mini-filter-btn" type="button" data-team-window="weekly">Weekly</button>
+            <button class="mini-filter-btn" type="button" data-team-window="today">Today</button>
+            <span id="teams-range-pill" class="range-pill">Season • Top 20</span>
+          </div>
+        </div>
+        <div id="teams-leaderboard" class="rows"></div>
       </article>
     </section>
 
