@@ -182,6 +182,15 @@ function renderRankBadge(rank = 0) {
   return `<span class="rank ${podiumClass}">#${safeRank}</span>`;
 }
 
+function renderTeamIcon(row = {}) {
+  const iconUrl = String(row?.icon_url || '').trim();
+  const iconFallback = String(row?.icon || '🏁').trim() || '🏁';
+  if (iconUrl) {
+    return `<img class="team-icon-image" src="${escapeHtml(iconUrl)}" alt="${escapeHtml(iconFallback)}" loading="lazy" decoding="async">`;
+  }
+  return `<span class="team-icon-text">${escapeHtml(iconFallback)}</span>`;
+}
+
 function uniqueParticipantCount(rows = []) {
   return new Set(
     rows

@@ -248,6 +248,9 @@ TEAM_DATA_FILE = "teams_data.json"
 TEAM_DATA_LOCK = threading.Lock()
 TEAM_POINTS_CACHE_FILE = "team_points_cache.json"
 TEAM_POINTS_CACHE_LOCK = threading.Lock()
+TEAM_EMOTE_CACHE_LOCK = threading.Lock()
+TEAM_EMOTE_CACHE_TTL_SECONDS = 900
+TEAM_EMOTE_CACHE = {'expires_at': 0.0, 'channel': '', 'lookup': {}}
 
 SUPPORTED_UI_LANGUAGES = {'en', 'es', 'fr', 'de', 'pt', 'au'}
 
@@ -1575,6 +1578,124 @@ def _overlay_team_icon(team):
     return logo or _random_overlay_team_emote()
 
 
+def _fetch_twitch_emotes_page(url, headers, params):
+    lookup = {}
+    cursor = None
+    for _ in range(8):
+        query = dict(params or {})
+        if cursor:
+            query['after'] = cursor
+        try:
+            response = requests.get(url, headers=headers, params=query, timeout=8)
+        except Exception:
+            break
+        if response.status_code != 200:
+            break
+        try:
+            payload = response.json() or {}
+        except Exception:
+            break
+
+        for emote in payload.get('data', []) or []:
+            if not isinstance(emote, dict):
+                continue
+            name = str(emote.get('name') or '').strip().lower()
+            if not name:
+                continue
+            images = emote.get('images') if isinstance(emote.get('images'), dict) else {}
+            emote_url = str(images.get('url_2x') or images.get('url_1x') or images.get('url_4x') or '').strip()
+            if emote_url:
+                lookup[name] = emote_url
+
+        cursor = (((payload.get('pagination') or {}).get('cursor')) or '').strip()
+        if not cursor:
+            break
+    return lookup
+
+
+def _build_twitch_emote_lookup(channel_name):
+    token = get_oauth_token()
+    if not token:
+        return {}
+
+    headers = {
+        'Authorization': f'Bearer {token}',
+        'Client-Id': CLIENT_ID,
+    }
+
+    lookup = {}
+    lookup.update(_fetch_twitch_emotes_page('https://api.twitch.tv/helix/chat/emotes/global', headers, {'first': 100}))
+
+    broadcaster_id = ''
+    normalized_channel = _normalize_username(channel_name)
+    if normalized_channel:
+        try:
+            user_response = requests.get(
+                'https://api.twitch.tv/helix/users',
+                headers=headers,
+                params={'login': normalized_channel},
+                timeout=8,
+            )
+            if user_response.status_code == 200:
+                user_payload = user_response.json() or {}
+                users = user_payload.get('data') or []
+                if users:
+                    broadcaster_id = str((users[0] or {}).get('id') or '').strip()
+        except Exception:
+            broadcaster_id = ''
+
+    if broadcaster_id:
+        lookup.update(_fetch_twitch_emotes_page(
+            'https://api.twitch.tv/helix/chat/emotes',
+            headers,
+            {'first': 100, 'broadcaster_id': broadcaster_id},
+        ))
+
+    return lookup
+
+
+def _get_twitch_emote_lookup_cached(channel_name):
+    now_ts = time.time()
+    normalized_channel = _normalize_username(channel_name)
+    with TEAM_EMOTE_CACHE_LOCK:
+        if (
+            TEAM_EMOTE_CACHE.get('lookup')
+            and TEAM_EMOTE_CACHE.get('channel') == normalized_channel
+            and now_ts <= float(TEAM_EMOTE_CACHE.get('expires_at') or 0.0)
+        ):
+            return dict(TEAM_EMOTE_CACHE.get('lookup') or {})
+
+    lookup = _build_twitch_emote_lookup(normalized_channel)
+    with TEAM_EMOTE_CACHE_LOCK:
+        TEAM_EMOTE_CACHE['lookup'] = dict(lookup)
+        TEAM_EMOTE_CACHE['channel'] = normalized_channel
+        TEAM_EMOTE_CACHE['expires_at'] = now_ts + TEAM_EMOTE_CACHE_TTL_SECONDS
+    return lookup
+
+
+def _team_logo_icon_url(logo_text, channel_name):
+    logo = str(logo_text or '').strip()
+    if not logo:
+        return None
+
+    if logo.startswith('http://') or logo.startswith('https://'):
+        return logo
+
+    lookup = _get_twitch_emote_lookup_cached(channel_name)
+    if not lookup:
+        return None
+
+    candidates = [logo.lower()]
+    if logo.startswith(':') and logo.endswith(':') and len(logo) > 2:
+        candidates.append(logo[1:-1].strip().lower())
+
+    for candidate in candidates:
+        if candidate in lookup:
+            return lookup[candidate]
+
+    return None
+
+
 def _build_team_leaderboard_rows(*, window='season', limit=10):
     if not _is_teams_enabled_flag():
         return []
@@ -1603,6 +1724,7 @@ def _build_team_leaderboard_rows(*, window='season', limit=10):
     rows = []
     for team_name, team in teams_snapshot.items():
         points = _safe_int(_compute_team_points(channel_state_for_points, team_name, window=window))
+        logo_text = _overlay_team_icon(team)
         rows.append({
             'name': team_name,
             'points': points,
@@ -1610,7 +1732,8 @@ def _build_team_leaderboard_rows(*, window='season', limit=10):
             'size': 1 + len(team.get('co_captains', [])) + len(team.get('members', [])),
             'recruiting': bool(team.get('is_recruiting')),
             'bonus_label': team.get('active_bonus_label') or '—',
-            'icon': _overlay_team_icon(team),
+            'icon': logo_text,
+            'icon_url': _team_logo_icon_url(logo_text, channel_name),
         })
 
     rows.sort(key=lambda row: (-_safe_int(row.get('points')), str(row.get('name', '')).lower()))
@@ -14113,9 +14236,11 @@ async def royale(bot):
     def build_br_winner_message(*, crownwin, chunk_alert, winner_label, points, kills, damage, total_points, wins, races):
         prefix = "🧃 " if chunk_alert else ""
         event_text = "CROWN WIN! 👑" if crownwin else "Battle Royale Champion 🏆"
+        wins_int = _safe_int(wins)
+        races_int = _safe_int(races)
         return (
-            f"{prefix}{event_text}: {winner_label} | {points:,} points | {kills} eliminations | {damage} damage | "
-            f"Today's stats: {total_points:,} points | {wins} wins | {races:,} races"
+            f"{prefix}{event_text}: {winner_label} +{points:,} points, +{kills:,} eliminations, +{damage:,} damage | "
+            f"Today's stats: {total_points:,} points, {wins_int} {pluralize(wins_int, 'win')}, {races_int:,} {pluralize(races_int, 'race')}"
         )
 
     def load_br_user_totals_from_allraces():
