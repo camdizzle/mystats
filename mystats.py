@@ -5317,6 +5317,10 @@ def _extract_race_br_trend_rows_from_directory(directory):
                 for row in iter_csv_rows(f):
                     if len(row) < 6:
                         continue
+                    # allraces rows are per-player results; keep only first-place rows
+                    # so trend race/BR counts represent distinct events.
+                    if str(row[0] or '').strip() != '1':
+                        continue
                     mode = str(row[4] or '').strip().lower()
                     if mode not in ('race', 'br'):
                         continue
