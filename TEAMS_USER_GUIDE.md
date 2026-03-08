@@ -28,6 +28,16 @@ Open **Settings → MyTeams**.
   - `season`: counts full season points.
 - **Max Team Size**
   - Hard cap for captain + co-captains + members.
+- **TEP Threshold**
+  - Team Effort Points required before the automatic TEP bonus triggers.
+- **TEP per Race**
+  - TEP added for each qualifying team race (before daily caps).
+- **TEP Bonus %/Cooldown (min)**
+  - First value is TEP bonus percent applied when threshold is reached.
+  - Second value is cooldown in minutes after bits bonus activity before TEP can trigger again.
+- **TEP Cap Member/Team (daily)**
+  - Daily TEP gain cap per member and per team.
+  - Prevents runaway looping and keeps participation scaling fair.
 
 ### Bits bonus controls
 
@@ -174,6 +184,13 @@ Displayed windows:
 - Bits track rolls weighted bonus tiers (+15%/+25%/+35%/+67%), where 67% is paid-track only.
 - TEP track triggers a fixed +15% bonus for 15 minutes by default, and cannot trigger if a bits bonus was active in the last hour.
 - Active bonus appears as `⚡+N%` in team status and leaderboard surfaces.
+
+### TEP settings in plain language
+
+- **TEP Threshold** decides how much total team effort is needed to fire the automatic TEP bonus.
+- **TEP per Race** defines how quickly teams fill that effort bank from races.
+- **TEP Bonus %/Cooldown** controls both the TEP boost size and the lockout window after bits-triggered bonuses.
+- **TEP Cap Member/Team (daily)** constrains how much TEP can be earned daily by one member and by the full team.
 
 ---
 

@@ -6371,7 +6371,7 @@ def open_settings_window():
     settings_window.transient(root)
     settings_window.attributes('-topmost', False)
 
-    window_width = 760
+    window_width = 820
     window_height = 700
     center_toplevel(settings_window, window_width, window_height)
     settings_window.minsize(720, 640)
@@ -6900,6 +6900,7 @@ def open_settings_window():
     settings_columns.grid(row=1, column=0, sticky="ew")
     settings_columns.grid_columnconfigure(0, weight=1)
     settings_columns.grid_columnconfigure(1, weight=1)
+    settings_columns.grid_rowconfigure(1, weight=1)
 
     tep_settings_frame = ttk.LabelFrame(settings_columns, text="TEP Settings", padding=10)
     tep_settings_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
@@ -6951,13 +6952,6 @@ def open_settings_window():
     teams_tep_team_daily_cap_entry = ttk.Entry(tep_caps_frame, width=5, justify='center')
     teams_tep_team_daily_cap_entry.pack(side="left")
     teams_tep_team_daily_cap_entry.insert(0, config.get_setting("teams_tep_team_daily_cap") or "100")
-    ttk.Label(
-        tep_settings_frame,
-        text="TEP CAP limits daily TEP gain per member/team to prevent runaway bonus loops.",
-        style="Small.TLabel",
-        wraplength=360
-    ).grid(row=6, column=0, columnspan=2, sticky="w", pady=(2, 0))
-
     ttk.Label(bonus_settings_frame, text="Bonus Bits Threshold").grid(row=0, column=0, sticky="w", pady=(0, 6))
     teams_bonus_bits_threshold_entry = ttk.Entry(bonus_settings_frame, width=10, justify='center')
     teams_bonus_bits_threshold_entry.grid(row=0, column=1, sticky="w", pady=(0, 6), padx=(8, 0))
@@ -6988,12 +6982,23 @@ def open_settings_window():
     teams_bonus_weight_67_entry.grid(row=3, column=1, sticky="w")
     teams_bonus_weight_67_entry.insert(0, config.get_setting("teams_bonus_weight_67") or "1")
 
+    tep_helper_frame = ttk.LabelFrame(settings_columns, text="TEP Helper", padding=10)
+    tep_helper_frame.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(10, 0))
     ttk.Label(
-        bonus_settings_frame,
-        text="TEP (Team Effort Points) is earned from team races and triggers an automatic bonus once the threshold is reached.",
+        tep_helper_frame,
+        text=(
+            "TEP (Team Effort Points) is earned from team races and runs alongside bits bonus progress.\n"
+            "• TEP Threshold: total TEP needed before the automatic TEP bonus triggers.\n"
+            "• TEP per Race: TEP added per qualifying team race (before caps).\n"
+            "• TEP Bonus %/Cooldown (min): the automatic TEP bonus percent and the minutes it is blocked after bits bonus activity.\n"
+            "• TEP Cap Member/Team (daily): maximum TEP gain per member and per team each day to avoid runaway loops.\n"
+            "• Points Counting Mode affects team scoreboards only and does not change TEP gain.\n"
+            "• Max Team Size controls how many members can contribute to TEP and points."
+        ),
         style="Small.TLabel",
-        wraplength=360
-    ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(2, 0))
+        justify="left",
+        wraplength=760
+    ).grid(row=0, column=0, sticky="w")
 
     teams_tree = ttk.Treeview(teams_management_tab, columns=("team", "captain", "size", "recruiting", "bonus", "daily", "weekly", "season"), show='headings', height=10)
     for key, label, width in [
