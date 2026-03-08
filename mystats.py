@@ -6604,8 +6604,9 @@ def open_settings_window():
     teams_bonus_weight_4x_entry.pack(side="left")
     teams_bonus_weight_4x_entry.insert(0, config.get_setting("teams_bonus_weight_4x") or "5")
 
-    teams_tree = ttk.Treeview(teams_tab, columns=("captain", "size", "recruiting", "bonus", "daily", "weekly", "season"), show='headings', height=10)
+    teams_tree = ttk.Treeview(teams_tab, columns=("team", "captain", "size", "recruiting", "bonus", "daily", "weekly", "season"), show='headings', height=10)
     for key, label, width in [
+        ("team", "Team", 170),
         ("captain", "Captain", 120),
         ("size", "Members", 70),
         ("recruiting", "Recruiting", 90),
@@ -6641,6 +6642,7 @@ def open_settings_window():
             weekly_points = _compute_team_points(channel_state, team_name, window='weekly')
             season_points = _compute_team_points(channel_state, team_name, window='season')
             teams_tree.insert('', 'end', iid=team_name, values=(
+                team_name,
                 format_user_tag(team.get('captain')),
                 size,
                 'Yes' if team.get('is_recruiting') else 'No',
