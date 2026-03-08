@@ -418,6 +418,15 @@ body[data-splash-variant='countdown'] .splash-screen.is-visible.splash-animate .
 #leaderboard li.leaderboard-row--podium-2 > span:first-child { background: #cfdaf5; color: #182448; }
 #leaderboard li.leaderboard-row--podium-3 > span:first-child { background: #f2ad73; color: #3a1600; }
 
+
+#leaderboard .team-icon {
+  width: 1.1em;
+  height: 1.1em;
+  object-fit: contain;
+  vertical-align: -0.18em;
+  margin-right: 0.38em;
+}
+
 #leaderboard li.leaderboard-row > span:last-child {
   color: var(--points-accent);
   background: transparent;
@@ -789,6 +798,13 @@ body.horizontal-layout #leaderboard li.leaderboard-row > span:first-child {
   border-radius: 4px;
 }
 
+
+body.horizontal-layout #leaderboard .team-icon {
+  width: 1.2em;
+  height: 1.2em;
+  margin-right: 0.28em;
+  vertical-align: -0.2em;
+}
 
 body.horizontal-layout #leaderboard li.leaderboard-row > span:last-child {
   font-size: calc(0.6rem * var(--text-scale));
