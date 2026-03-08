@@ -287,6 +287,3 @@ Depending on your enabled modules/settings, commonly used command groups include
 
 ---
 
-## 13) Current-state note
-
-This README summarizes the current implemented feature behavior for MyStats as an all-in-one operational guide. If future releases expand commands or settings, update this file so streamers/mods always have a single reliable reference.
