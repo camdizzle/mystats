@@ -852,10 +852,36 @@ function getRaceRowTotals(row, filterMode = 'both') {
   };
 }
 
+function getRaceFilterLabels(filterMode = 'both') {
+  if (filterMode === 'race') {
+    return {
+      totalLabel: 'Total Races',
+      countLabel: 'Races',
+      avgLabel: 'Avg Points/Race',
+      rowAvgLabel: 'Avg/Race',
+    };
+  }
+  if (filterMode === 'br') {
+    return {
+      totalLabel: 'Total BRs',
+      countLabel: 'BRs',
+      avgLabel: 'Avg Points/BR',
+      rowAvgLabel: 'Avg/BR',
+    };
+  }
+  return {
+    totalLabel: 'Total Events',
+    countLabel: 'Events',
+    avgLabel: 'Avg Points/Event',
+    rowAvgLabel: 'Avg/Event',
+  };
+}
+
 function renderRaceDashboardKpis(rows = [], filterMode = 'both') {
   const host = el('races-kpis');
   if (!host) return;
 
+  const labels = getRaceFilterLabels(filterMode);
   const filteredRows = rows.filter((row) => getRaceRowTotals(row, filterMode).events > 0);
   const totalEvents = filteredRows.reduce((acc, row) => acc + getRaceRowTotals(row, filterMode).events, 0);
   const totalPoints = filteredRows.reduce((acc, row) => acc + getRaceRowTotals(row, filterMode).points, 0);
@@ -863,9 +889,9 @@ function renderRaceDashboardKpis(rows = [], filterMode = 'both') {
 
   host.innerHTML = [
     { label: t('Tracked Racers'), value: fmt(filteredRows.length) },
-    { label: filterMode === 'race' ? 'Total Races' : (filterMode === 'br' ? 'Total BRs' : 'Total Races'), value: fmt(totalEvents) },
+    { label: labels.totalLabel, value: fmt(totalEvents) },
     { label: 'Total Points', value: fmt(totalPoints) },
-    { label: 'Avg Points/Race', value: avgPoints.toFixed(1) },
+    { label: labels.avgLabel, value: avgPoints.toFixed(1) },
   ].map((kpi) => (
     `<div class="kpi"><div class="kpi-label">${escapeHtml(kpi.label)}</div><div class="kpi-value">${escapeHtml(kpi.value)}</div></div>`
   )).join('');
@@ -926,6 +952,7 @@ function renderRaceDashboardRows(data) {
     return;
   }
 
+  const labels = getRaceFilterLabels(raceDashboardFilter);
   rowsHost.innerHTML = rows.slice(0, 200).map((row, idx) => {
     const avg = row.totals.events > 0 ? (row.totals.points / row.totals.events) : 0;
     return `
@@ -936,8 +963,8 @@ function renderRaceDashboardRows(data) {
           <span class="stat">${escapeHtml(`${fmt(row.totals.points)} pts`)}</span>
         </div>
         <div class="quest-metrics">
-          <span>Races: ${escapeHtml(fmt(row.totals.events))}</span>
-          <span>Avg/Race: ${escapeHtml(avg.toFixed(1))}</span>
+          <span>${escapeHtml(labels.countLabel)}: ${escapeHtml(fmt(row.totals.events))}</span>
+          <span>${escapeHtml(labels.rowAvgLabel)}: ${escapeHtml(avg.toFixed(1))}</span>
           <span>High Score: ${escapeHtml(fmt(row.totals.highScore))}</span>
           <span>Race: ${escapeHtml(`${fmt(row.race_points)} pts / ${fmt(row.race_count)}`)}</span>
           <span>BR: ${escapeHtml(`${fmt(row.br_points)} pts / ${fmt(row.br_count)}`)}</span>
@@ -959,7 +986,7 @@ function buildAnalyticsGroupsMarkup(data) {
   const groupOrder = ['race_br_combined', 'tilt', 'race_only', 'br_only', 'mycycle'];
   const metricMap = {
     race_br_combined: [
-      ['Races', 'events'], ['Points', 'points'], ['Wins', 'wins'], ['Win Rate %', 'win_rate'], ['Unique Racers', 'unique_racers'],
+      ['Races', 'race_events'], ['Points', 'points'], ['Wins', 'wins'], ['Win Rate %', 'win_rate'], ['Unique Racers', 'unique_racers'],
       ['High Score', 'high_score'], ['PPR', 'ppr'], ['Top PPR Racer', 'top_ppr_name'], ['Top PPR', 'top_ppr'], ['Top PPR Races', 'top_ppr_events'],
     ],
     tilt: [
@@ -967,11 +994,11 @@ function buildAnalyticsGroupsMarkup(data) {
       ['Deaths', 'deaths'], ['Survival Rate %', 'survival_rate'], ['PPR', 'ppr'],
     ],
     race_only: [
-      ['Race Count', 'events'], ['Race Points', 'points'], ['Race Wins', 'wins'], ['Win Rate %', 'win_rate'], ['Unique Racers', 'unique_racers'],
+      ['Race Count', 'race_events'], ['Race Points', 'points'], ['Race Wins', 'wins'], ['Win Rate %', 'win_rate'], ['Unique Racers', 'unique_racers'],
       ['Race High Score', 'high_score'], ['Race PPR', 'ppr'], ['Top PPR Racer', 'top_ppr_name'], ['Top PPR', 'top_ppr'], ['Top PPR Races', 'top_ppr_events'],
     ],
     br_only: [
-      ['BR Races', 'events'], ['BR Points', 'points'], ['BR Wins', 'wins'], ['Win Rate %', 'win_rate'], ['Unique Racers', 'unique_racers'],
+      ['BR Races', 'race_events'], ['BR Points', 'points'], ['BR Wins', 'wins'], ['Win Rate %', 'win_rate'], ['Unique Racers', 'unique_racers'],
       ['BR High Score', 'high_score'], ['BR PPR', 'ppr'], ['Top PPR Racer', 'top_ppr_name'], ['Top PPR', 'top_ppr'], ['Top PPR Races', 'top_ppr_events'],
     ],
     mycycle: [

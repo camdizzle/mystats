@@ -5085,6 +5085,7 @@ def _safe_float(value):
 def _aggregate_mode_from_directories(directories):
     mode_template = {
         'events': 0,
+        'race_events': set(),
         'points': 0,
         'wins': 0,
         'high_score': 0,
@@ -5118,10 +5119,15 @@ def _aggregate_mode_from_directories(directories):
                         points = _safe_int(row[3])
                         place_digits = ''.join(ch for ch in str(row[0] or '') if ch.isdigit())
                         placement = _safe_int(place_digits)
+                        race_id = str(row[10] or '').strip() if len(row) > 10 else ''
+                        race_ts = str(row[5] or '').strip() if len(row) > 5 else ''
+                        race_event_key = f"{mode}|{race_id}|{race_ts}" if (race_id or race_ts) else None
 
                         for key in ('combined', mode):
                             bucket = mode_stats[key]
                             bucket['events'] += 1
+                            if race_event_key:
+                                bucket['race_events'].add(race_event_key)
                             bucket['points'] += points
                             bucket['high_score'] = max(bucket['high_score'], points)
                             if placement == 1:
@@ -5137,6 +5143,7 @@ def _aggregate_mode_from_directories(directories):
         points = int(bucket['points'])
         wins = int(bucket['wins'])
         high_score = int(bucket['high_score'])
+        race_events = len(bucket['race_events'])
         unique_racers = len(bucket['unique_racers'])
         ppr = round((points / events), 2) if events else 0.0
         win_rate = round((wins / events) * 100, 2) if events else 0.0
@@ -5156,6 +5163,7 @@ def _aggregate_mode_from_directories(directories):
 
         return {
             'events': events,
+            'race_events': race_events if race_events else events,
             'points': points,
             'wins': wins,
             'win_rate': win_rate,
@@ -5332,12 +5340,15 @@ def _extract_race_br_trend_rows_from_directory(directory):
                     race_ts = _parse_overlay_timestamp(row[5])
                     if race_ts is None:
                         continue
+                    race_id = str(row[10] or '').strip() if len(row) > 10 else ''
+                    race_event_key = f"{mode}|{race_id}|{row[5]}" if (race_id or row[5]) else None
                     rows.append({
                         'mode': mode,
                         'username': username,
                         'display_name': display_name,
                         'points': points,
                         'date_key': race_ts.strftime('%Y-%m-%d'),
+                        'race_event_key': race_event_key,
                     })
         except Exception:
             continue
@@ -5362,8 +5373,8 @@ def _build_dashboard_race_trends_payload():
     for directory in all_season_dirs:
         trend_rows = _extract_race_br_trend_rows_from_directory(directory)
         unique_racers = len({row['display_name'] for row in trend_rows})
-        race_count = sum(1 for row in trend_rows if row['mode'] == 'race')
-        br_count = sum(1 for row in trend_rows if row['mode'] == 'br')
+        race_count = len({row['race_event_key'] for row in trend_rows if row['mode'] == 'race' and row.get('race_event_key')})
+        br_count = len({row['race_event_key'] for row in trend_rows if row['mode'] == 'br' and row.get('race_event_key')})
         total_races = race_count + br_count
         total_points = sum(_safe_int(row.get('points', 0)) for row in trend_rows)
         season_series.append({
@@ -5382,8 +5393,8 @@ def _build_dashboard_race_trends_payload():
     day_groups = defaultdict(lambda: {
         'date': '',
         'unique_racers': set(),
-        'race_count': 0,
-        'br_count': 0,
+        'race_events': set(),
+        'br_events': set(),
         'points': 0,
     })
     for row in current_rows:
@@ -5392,20 +5403,25 @@ def _build_dashboard_race_trends_payload():
         bucket['date'] = day
         bucket['unique_racers'].add(row['display_name'])
         bucket['points'] += _safe_int(row['points'])
+        event_key = row.get('race_event_key')
+        if not event_key:
+            continue
         if row['mode'] == 'race':
-            bucket['race_count'] += 1
+            bucket['race_events'].add(event_key)
         else:
-            bucket['br_count'] += 1
+            bucket['br_events'].add(event_key)
 
     daily_rows = []
     for day in sorted(day_groups.keys()):
         bucket = day_groups[day]
-        total_races = _safe_int(bucket['race_count']) + _safe_int(bucket['br_count'])
+        race_count = len(bucket['race_events'])
+        br_count = len(bucket['br_events'])
+        total_races = race_count + br_count
         daily_rows.append({
             'date': day,
             'unique_racers': len(bucket['unique_racers']),
-            'race_count': _safe_int(bucket['race_count']),
-            'br_count': _safe_int(bucket['br_count']),
+            'race_count': race_count,
+            'br_count': br_count,
             'total_races': total_races,
             'ppr': round((_safe_int(bucket['points']) / total_races), 2) if total_races else 0.0,
         })
@@ -6608,8 +6624,9 @@ def open_settings_window():
     teams_bonus_weight_4x_entry.pack(side="left")
     teams_bonus_weight_4x_entry.insert(0, config.get_setting("teams_bonus_weight_4x") or "5")
 
-    teams_tree = ttk.Treeview(teams_tab, columns=("captain", "size", "recruiting", "bonus", "daily", "weekly", "season"), show='headings', height=10)
+    teams_tree = ttk.Treeview(teams_tab, columns=("team", "captain", "size", "recruiting", "bonus", "daily", "weekly", "season"), show='headings', height=10)
     for key, label, width in [
+        ("team", "Team", 170),
         ("captain", "Captain", 120),
         ("size", "Members", 70),
         ("recruiting", "Recruiting", 90),
@@ -6645,6 +6662,7 @@ def open_settings_window():
             weekly_points = _compute_team_points(channel_state, team_name, window='weekly')
             season_points = _compute_team_points(channel_state, team_name, window='season')
             teams_tree.insert('', 'end', iid=team_name, values=(
+                team_name,
                 format_user_tag(team.get('captain')),
                 size,
                 'Yes' if team.get('is_recruiting') else 'No',
