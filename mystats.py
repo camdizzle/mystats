@@ -1016,6 +1016,52 @@ def _day_key_from_timestamp(ts):
     return ts.strftime('%Y-%m-%d')
 
 
+def _resolve_team_bonus_percent(bonus_payload, default_percent=0):
+    if not isinstance(bonus_payload, dict):
+        return max(0, int(default_percent or 0))
+    try:
+        if bonus_payload.get('bonus_percent') is not None:
+            return max(0, int(bonus_payload.get('bonus_percent')))
+    except (TypeError, ValueError):
+        pass
+    try:
+        return max(0, (int(bonus_payload.get('multiplier', 1)) - 1) * 100)
+    except (TypeError, ValueError):
+        return max(0, int(default_percent or 0))
+
+
+def _team_has_recent_bits_bonus(team, now, cooldown_minutes=60):
+    try:
+        cooldown = max(0, int(cooldown_minutes))
+    except (TypeError, ValueError):
+        cooldown = 60
+    if cooldown <= 0:
+        return False
+    cutoff = now - timedelta(minutes=cooldown)
+    for entry in reversed(team.get('bonus_windows', []) if isinstance(team.get('bonus_windows'), list) else []):
+        if not isinstance(entry, dict):
+            continue
+        if str(entry.get('source') or 'bits').lower() != 'bits':
+            continue
+        end_at = _parse_allraces_timestamp(entry.get('end_at'))
+        if end_at and end_at >= cutoff:
+            return True
+    return False
+
+
+def _team_most_recent_bits_bonus_end(team):
+    latest_end = None
+    for entry in team.get('bonus_windows', []) if isinstance(team.get('bonus_windows'), list) else []:
+        if not isinstance(entry, dict):
+            continue
+        if str(entry.get('source') or 'bits').lower() != 'bits':
+            continue
+        end_at = _parse_allraces_timestamp(entry.get('end_at'))
+        if end_at and (latest_end is None or end_at > latest_end):
+            latest_end = end_at
+    return latest_end
+
+
 def _get_channel_season_points_state(payload, channel_name, season_value):
     channels = payload.setdefault('channels', {})
     channel_key = _normalize_username(channel_name)
@@ -1080,6 +1126,7 @@ def _record_live_team_points_rows(channel_name, rows):
             cache_payload = _load_team_points_cache()
             season_state = _get_channel_season_points_state(cache_payload, channel_name, season_value)
 
+            team_data_changed = False
             for row in rows:
                 if len(row) < 6:
                     continue
@@ -1102,19 +1149,16 @@ def _record_live_team_points_rows(channel_name, rows):
                 member_meta = team.get('member_meta', {}) if isinstance(team.get('member_meta'), dict) else {}
                 user_meta = member_meta.get(username, {}) if isinstance(member_meta.get(username), dict) else {}
 
-                sub_bonus = int(round(base_points * 0.10)) if bool(user_meta.get('is_subscriber')) else 0
-                bonus_mult = 1
                 active_bonus = team.get('active_bonus') if isinstance(team.get('active_bonus'), dict) else None
+                bonus_percent = 0
                 if active_bonus:
                     start_at = _parse_iso_datetime(active_bonus.get('start_at'))
                     end_at = _parse_iso_datetime(active_bonus.get('end_at'))
                     if start_at and end_at and start_at <= ts <= end_at:
-                        try:
-                            bonus_mult = max(1, int(active_bonus.get('multiplier', 1)))
-                        except (TypeError, ValueError):
-                            bonus_mult = 1
+                        bonus_percent = _resolve_team_bonus_percent(active_bonus, 0)
 
-                bonus_extra = base_points * (bonus_mult - 1)
+                sub_bonus = int(round(base_points * 0.10)) if bool(user_meta.get('is_subscriber')) else 0
+                bonus_extra = int(math.floor(base_points * (bonus_percent / 100.0)))
                 total_add = base_points + sub_bonus + bonus_extra
 
                 bucket = _get_team_points_bucket(season_state, team_name)
@@ -1124,11 +1168,96 @@ def _record_live_team_points_rows(channel_name, rows):
                 bucket['season_points'] = int(bucket.get('season_points', 0)) + total_add
                 bucket['daily'][day_key] = int(bucket['daily'].get(day_key, 0)) + total_add
                 bucket['weekly'][week_key] = int(bucket['weekly'].get(week_key, 0)) + total_add
-                if bonus_mult > 1:
+                if bonus_percent > 0:
                     bucket['bonus_races_daily'][day_key] = int(bucket['bonus_races_daily'].get(day_key, 0)) + 1
                 bucket['last_updated'] = datetime.now(timezone.utc).isoformat()
 
+                # Dual-track Team Effort Points (TEP): participation-driven and non-overlapping with bits bonus.
+                try:
+                    tep_threshold = max(1, int(config.get_setting('teams_tep_threshold') or 40))
+                except ValueError:
+                    tep_threshold = 40
+                try:
+                    tep_per_race = max(0, int(config.get_setting('teams_tep_per_race') or 1))
+                except ValueError:
+                    tep_per_race = 1
+                try:
+                    tep_bonus_minutes = max(1, int(config.get_setting('teams_tep_bonus_duration_minutes') or 15))
+                except ValueError:
+                    tep_bonus_minutes = 15
+                try:
+                    tep_bits_cooldown_minutes = max(0, int(config.get_setting('teams_tep_bits_cooldown_minutes') or 60))
+                except ValueError:
+                    tep_bits_cooldown_minutes = 60
+                try:
+                    tep_member_daily_cap = max(0, int(config.get_setting('teams_tep_member_daily_cap') or 10))
+                except ValueError:
+                    tep_member_daily_cap = 10
+                try:
+                    tep_team_daily_cap = max(0, int(config.get_setting('teams_tep_team_daily_cap') or 100))
+                except ValueError:
+                    tep_team_daily_cap = 100
+
+                team.setdefault('effort_bank', 0)
+                effort_daily = team.setdefault('effort_daily', {})
+                day_effort = effort_daily.setdefault(day_key, {'team_total': 0, 'members': {}})
+                members_effort = day_effort.setdefault('members', {})
+                member_effort_today = int(members_effort.get(username, 0) or 0)
+                team_effort_today = int(day_effort.get('team_total', 0) or 0)
+
+                member_room = max(0, tep_member_daily_cap - member_effort_today)
+                team_room = max(0, tep_team_daily_cap - team_effort_today)
+                tep_earned = min(tep_per_race, member_room, team_room)
+                if tep_earned > 0:
+                    members_effort[username] = member_effort_today + tep_earned
+                    day_effort['team_total'] = team_effort_today + tep_earned
+                    team['effort_bank'] = int(team.get('effort_bank', 0)) + tep_earned
+                    team_data_changed = True
+
+                # Keep only recent effort days to avoid unbounded growth.
+                if len(effort_daily) > 10:
+                    for stale_day in sorted(effort_daily.keys())[:-10]:
+                        effort_daily.pop(stale_day, None)
+
+                # No overlap rule + bits cooldown rule for TEP activation.
+                now = datetime.now(timezone.utc)
+                active_now = team.get('active_bonus') if isinstance(team.get('active_bonus'), dict) else None
+                if active_now:
+                    active_end = _parse_allraces_timestamp(active_now.get('end_at'))
+                    if active_end and active_end < now:
+                        team['active_bonus'] = None
+                        team['active_bonus_label'] = None
+                        active_now = None
+                        team_data_changed = True
+
+                while int(team.get('effort_bank', 0)) >= tep_threshold:
+                    if active_now is not None:
+                        break
+                    if _team_has_recent_bits_bonus(team, now, tep_bits_cooldown_minutes):
+                        break
+                    team['effort_bank'] = int(team.get('effort_bank', 0)) - tep_threshold
+                    tep_bonus = {
+                        'bonus_percent': 15,
+                        'source': 'tep',
+                        'start_at': now.isoformat(),
+                        'end_at': (now + timedelta(minutes=tep_bonus_minutes)).isoformat(),
+                    }
+                    team['active_bonus'] = tep_bonus
+                    team['active_bonus_label'] = f"⚡+{tep_bonus['bonus_percent']}%"
+                    team.setdefault('bonus_windows', []).append({
+                        'bonus_percent': 15,
+                        'source': 'tep',
+                        'start_at': now.isoformat(),
+                        'end_at': (now + timedelta(minutes=tep_bonus_minutes)).isoformat(),
+                        'trigger_tep': tep_threshold,
+                    })
+                    active_now = tep_bonus
+                    team_data_changed = True
+                    enqueue_overlay_event('team_effort_bonus', f"🏁 Team Effort Bonus: {team_name} earned +15% for {tep_bonus_minutes}m")
+
             _save_team_points_cache(cache_payload)
+        if team_data_changed:
+            _save_team_data(team_data)
 
 
 def _normalize_team_name(name):
@@ -1429,10 +1558,10 @@ def _compute_team_bonus_points(channel_state, team_name, window='season'):
         if cutoff and end < cutoff:
             continue
         try:
-            mult = max(1, int(entry.get('multiplier', 1)))
+            mult = 1.0 + (_resolve_team_bonus_percent(entry, 0) / 100.0)
         except (TypeError, ValueError):
             mult = 1
-        if mult <= 1:
+        if mult <= 1.0:
             continue
         parsed_windows.append((start, end, mult))
 
@@ -1464,7 +1593,7 @@ def _compute_team_bonus_points(channel_state, team_name, window='season'):
                         continue
                     for start, end, mult in parsed_windows:
                         if start <= ts <= end:
-                            bonus_points += row_points * (mult - 1)
+                            bonus_points += int(math.floor(row_points * (mult - 1.0)))
                             break
         except Exception:
             continue
@@ -6769,30 +6898,66 @@ def open_settings_window():
     teams_max_size_entry.grid(row=2, column=1, sticky="w", pady=(0, 4))
     teams_max_size_entry.insert(0, config.get_setting("teams_max_size") or "25")
 
+    ttk.Label(teams_tab, text="TEP Threshold").grid(row=3, column=0, sticky="w", pady=(0, 4))
+    teams_tep_threshold_entry = ttk.Entry(teams_tab, width=12, justify='center')
+    teams_tep_threshold_entry.grid(row=3, column=1, sticky="w", pady=(0, 4))
+    teams_tep_threshold_entry.insert(0, config.get_setting("teams_tep_threshold") or "40")
+
+    ttk.Label(teams_tab, text="TEP per Race").grid(row=4, column=0, sticky="w", pady=(0, 4))
+    teams_tep_per_race_entry = ttk.Entry(teams_tab, width=12, justify='center')
+    teams_tep_per_race_entry.grid(row=4, column=1, sticky="w", pady=(0, 4))
+    teams_tep_per_race_entry.insert(0, config.get_setting("teams_tep_per_race") or "1")
+
+    ttk.Label(teams_tab, text="TEP Bonus/Cooldown (min)").grid(row=5, column=0, sticky="w", pady=(0, 4))
+    tep_bonus_frame = ttk.Frame(teams_tab, style="App.TFrame")
+    tep_bonus_frame.grid(row=5, column=1, sticky="w", pady=(0, 4))
+    teams_tep_bonus_duration_entry = ttk.Entry(tep_bonus_frame, width=5, justify='center')
+    teams_tep_bonus_duration_entry.pack(side="left")
+    teams_tep_bonus_duration_entry.insert(0, config.get_setting("teams_tep_bonus_duration_minutes") or "15")
+    ttk.Label(tep_bonus_frame, text="/").pack(side="left", padx=2)
+    teams_tep_bits_cooldown_entry = ttk.Entry(tep_bonus_frame, width=5, justify='center')
+    teams_tep_bits_cooldown_entry.pack(side="left")
+    teams_tep_bits_cooldown_entry.insert(0, config.get_setting("teams_tep_bits_cooldown_minutes") or "60")
+
+    ttk.Label(teams_tab, text="TEP Cap Member/Team (daily)").grid(row=6, column=0, sticky="w", pady=(0, 4))
+    tep_caps_frame = ttk.Frame(teams_tab, style="App.TFrame")
+    tep_caps_frame.grid(row=6, column=1, sticky="w", pady=(0, 4))
+    teams_tep_member_daily_cap_entry = ttk.Entry(tep_caps_frame, width=5, justify='center')
+    teams_tep_member_daily_cap_entry.pack(side="left")
+    teams_tep_member_daily_cap_entry.insert(0, config.get_setting("teams_tep_member_daily_cap") or "10")
+    ttk.Label(tep_caps_frame, text="/").pack(side="left", padx=2)
+    teams_tep_team_daily_cap_entry = ttk.Entry(tep_caps_frame, width=5, justify='center')
+    teams_tep_team_daily_cap_entry.pack(side="left")
+    teams_tep_team_daily_cap_entry.insert(0, config.get_setting("teams_tep_team_daily_cap") or "100")
+
     ttk.Label(teams_tab, text="Bonus Bits Threshold").grid(row=2, column=2, sticky="w", pady=(0, 4), padx=(8, 0))
     teams_bonus_bits_threshold_entry = ttk.Entry(teams_tab, width=10, justify='center')
     teams_bonus_bits_threshold_entry.grid(row=2, column=3, sticky="w", pady=(0, 4))
     teams_bonus_bits_threshold_entry.insert(0, config.get_setting("teams_bonus_bits_threshold") or "1000")
 
-    ttk.Label(teams_tab, text="Bonus Duration (min)").grid(row=3, column=2, sticky="w", pady=(0, 4), padx=(8, 0))
+    ttk.Label(teams_tab, text="Bonus Duration (min)").grid(row=5, column=2, sticky="w", pady=(0, 4), padx=(8, 0))
     teams_bonus_duration_entry = ttk.Entry(teams_tab, width=10, justify='center')
-    teams_bonus_duration_entry.grid(row=3, column=3, sticky="w", pady=(0, 4))
+    teams_bonus_duration_entry.grid(row=5, column=3, sticky="w", pady=(0, 4))
     teams_bonus_duration_entry.insert(0, config.get_setting("teams_bonus_duration_minutes") or "20")
 
-    ttk.Label(teams_tab, text="Bonus Weights 2x/3x/4x").grid(row=4, column=2, sticky="w", pady=(0, 4), padx=(8, 0))
+    ttk.Label(teams_tab, text="Bonus Weights 15%/25%/35%/67%").grid(row=6, column=2, sticky="w", pady=(0, 4), padx=(8, 0))
     bonus_weights_frame = ttk.Frame(teams_tab, style="App.TFrame")
-    bonus_weights_frame.grid(row=4, column=3, sticky="w", pady=(0, 4))
-    teams_bonus_weight_2x_entry = ttk.Entry(bonus_weights_frame, width=4, justify='center')
-    teams_bonus_weight_2x_entry.pack(side="left")
-    teams_bonus_weight_2x_entry.insert(0, config.get_setting("teams_bonus_weight_2x") or "75")
+    bonus_weights_frame.grid(row=6, column=3, sticky="w", pady=(0, 4))
+    teams_bonus_weight_15_entry = ttk.Entry(bonus_weights_frame, width=4, justify='center')
+    teams_bonus_weight_15_entry.pack(side="left")
+    teams_bonus_weight_15_entry.insert(0, config.get_setting("teams_bonus_weight_15") or "33")
     ttk.Label(bonus_weights_frame, text="/").pack(side="left", padx=2)
-    teams_bonus_weight_3x_entry = ttk.Entry(bonus_weights_frame, width=4, justify='center')
-    teams_bonus_weight_3x_entry.pack(side="left")
-    teams_bonus_weight_3x_entry.insert(0, config.get_setting("teams_bonus_weight_3x") or "20")
+    teams_bonus_weight_25_entry = ttk.Entry(bonus_weights_frame, width=4, justify='center')
+    teams_bonus_weight_25_entry.pack(side="left")
+    teams_bonus_weight_25_entry.insert(0, config.get_setting("teams_bonus_weight_25") or "33")
     ttk.Label(bonus_weights_frame, text="/").pack(side="left", padx=2)
-    teams_bonus_weight_4x_entry = ttk.Entry(bonus_weights_frame, width=4, justify='center')
-    teams_bonus_weight_4x_entry.pack(side="left")
-    teams_bonus_weight_4x_entry.insert(0, config.get_setting("teams_bonus_weight_4x") or "5")
+    teams_bonus_weight_35_entry = ttk.Entry(bonus_weights_frame, width=4, justify='center')
+    teams_bonus_weight_35_entry.pack(side="left")
+    teams_bonus_weight_35_entry.insert(0, config.get_setting("teams_bonus_weight_35") or "33")
+    ttk.Label(bonus_weights_frame, text="/").pack(side="left", padx=2)
+    teams_bonus_weight_67_entry = ttk.Entry(bonus_weights_frame, width=4, justify='center')
+    teams_bonus_weight_67_entry.pack(side="left")
+    teams_bonus_weight_67_entry.insert(0, config.get_setting("teams_bonus_weight_67") or "1")
 
     teams_tree = ttk.Treeview(teams_tab, columns=("team", "captain", "size", "recruiting", "bonus", "daily", "weekly", "season"), show='headings', height=10)
     for key, label, width in [
@@ -6807,10 +6972,10 @@ def open_settings_window():
     ]:
         teams_tree.heading(key, text=label)
         teams_tree.column(key, width=width, anchor='center')
-    teams_tree.grid(row=5, column=0, columnspan=4, sticky="nsew", pady=(8, 4))
+    teams_tree.grid(row=7, column=0, columnspan=4, sticky="nsew", pady=(8, 4))
 
     teams_tab.grid_columnconfigure(3, weight=1)
-    teams_tab.grid_rowconfigure(5, weight=1)
+    teams_tab.grid_rowconfigure(7, weight=1)
 
     def refresh_teams_tree():
         for item in teams_tree.get_children():
@@ -6876,6 +7041,8 @@ def open_settings_window():
                 'active_bonus': None,
                 'active_bonus_label': None,
                 'bonus_windows': [],
+                'effort_bank': 0,
+                'effort_daily': {},
                 'created_at': datetime.now(timezone.utc).isoformat(),
             }
             _save_team_data(data)
@@ -7369,9 +7536,16 @@ def open_settings_window():
         config.set_setting("teams_max_size", teams_max_size_entry.get(), persistent=True)
         config.set_setting("teams_bonus_bits_threshold", teams_bonus_bits_threshold_entry.get(), persistent=True)
         config.set_setting("teams_bonus_duration_minutes", teams_bonus_duration_entry.get(), persistent=True)
-        config.set_setting("teams_bonus_weight_2x", teams_bonus_weight_2x_entry.get(), persistent=True)
-        config.set_setting("teams_bonus_weight_3x", teams_bonus_weight_3x_entry.get(), persistent=True)
-        config.set_setting("teams_bonus_weight_4x", teams_bonus_weight_4x_entry.get(), persistent=True)
+        config.set_setting("teams_tep_threshold", teams_tep_threshold_entry.get(), persistent=True)
+        config.set_setting("teams_tep_per_race", teams_tep_per_race_entry.get(), persistent=True)
+        config.set_setting("teams_tep_bonus_duration_minutes", teams_tep_bonus_duration_entry.get(), persistent=True)
+        config.set_setting("teams_tep_bits_cooldown_minutes", teams_tep_bits_cooldown_entry.get(), persistent=True)
+        config.set_setting("teams_tep_member_daily_cap", teams_tep_member_daily_cap_entry.get(), persistent=True)
+        config.set_setting("teams_tep_team_daily_cap", teams_tep_team_daily_cap_entry.get(), persistent=True)
+        config.set_setting("teams_bonus_weight_15", teams_bonus_weight_15_entry.get(), persistent=True)
+        config.set_setting("teams_bonus_weight_25", teams_bonus_weight_25_entry.get(), persistent=True)
+        config.set_setting("teams_bonus_weight_35", teams_bonus_weight_35_entry.get(), persistent=True)
+        config.set_setting("teams_bonus_weight_67", teams_bonus_weight_67_entry.get(), persistent=True)
         selected_session_id = session_names.get(selected_session_name.get())
         if selected_session_id:
             config.set_setting("mycycle_primary_session_id", selected_session_id, persistent=True)
@@ -8450,7 +8624,9 @@ class ConfigManager:
                                 'mycycle_cyclestats_rotation_index',
                                 'teams_enabled', 'teams_points_mode', 'teams_max_size',
                                 'teams_bonus_bits_threshold', 'teams_bonus_duration_minutes',
-                                'teams_bonus_weight_2x', 'teams_bonus_weight_3x', 'teams_bonus_weight_4x',
+                                'teams_tep_threshold', 'teams_tep_per_race', 'teams_tep_bonus_duration_minutes', 'teams_tep_bits_cooldown_minutes',
+                                'teams_tep_member_daily_cap', 'teams_tep_team_daily_cap',
+                                'teams_bonus_weight_15', 'teams_bonus_weight_25', 'teams_bonus_weight_35', 'teams_bonus_weight_67',
                                 'overlay_rotation_seconds', 'overlay_refresh_seconds', 'overlay_theme',
                                 'overlay_card_opacity', 'overlay_text_scale', 'overlay_show_medals',
                                 'overlay_compact_rows', 'overlay_horizontal_layout', 'overlay_horizontal_feed_season', 'overlay_horizontal_feed_today',
@@ -8528,9 +8704,16 @@ class ConfigManager:
             'teams_max_size': '25',
             'teams_bonus_bits_threshold': '1000',
             'teams_bonus_duration_minutes': '20',
-            'teams_bonus_weight_2x': '75',
-            'teams_bonus_weight_3x': '20',
-            'teams_bonus_weight_4x': '5',
+            'teams_tep_threshold': '40',
+            'teams_tep_per_race': '1',
+            'teams_tep_bonus_duration_minutes': '15',
+            'teams_tep_bits_cooldown_minutes': '60',
+            'teams_tep_member_daily_cap': '10',
+            'teams_tep_team_daily_cap': '100',
+            'teams_bonus_weight_15': '33',
+            'teams_bonus_weight_25': '33',
+            'teams_bonus_weight_35': '33',
+            'teams_bonus_weight_67': '1',
             'UI_THEME': DEFAULT_UI_THEME,
             'announcedelay': 'False',
             'announcedelayseconds': '0',
@@ -10321,7 +10504,7 @@ import copy
 class Bot(commands.Bot):
     TEAM_COMMAND_NAMES = {
         'createteam', 'invite', 'cocaptain', 'acceptteam', 'denyteam', 'kick', 'leave',
-        'myteam', 'logo', 'renameteam', 'inactive', 'join', 'recruiting', 'dailyteams', 'weeklyteams',
+        'myteam', 'teambonus', 'logo', 'renameteam', 'inactive', 'join', 'recruiting', 'dailyteams', 'weeklyteams',
         'tcommands'
     }
 
@@ -10604,6 +10787,8 @@ class Bot(commands.Bot):
         active = team.get('active_bonus')
         if not isinstance(active, dict):
             return None
+        if 'bonus_percent' not in active:
+            active['bonus_percent'] = _resolve_team_bonus_percent(active, 0)
         end_at = _parse_allraces_timestamp(active.get('end_at'))
         if not end_at or end_at < now:
             team['active_bonus'] = None
@@ -10611,23 +10796,27 @@ class Bot(commands.Bot):
             return None
         return active
 
-    def _choose_bonus_multiplier(self):
+    def _choose_bonus_percent(self):
         try:
-            w2 = max(0, int(config.get_setting('teams_bonus_weight_2x') or 75))
+            w15 = max(0, int(config.get_setting('teams_bonus_weight_15') or 33))
         except ValueError:
-            w2 = 75
+            w15 = 33
         try:
-            w3 = max(0, int(config.get_setting('teams_bonus_weight_3x') or 20))
+            w25 = max(0, int(config.get_setting('teams_bonus_weight_25') or 33))
         except ValueError:
-            w3 = 20
+            w25 = 33
         try:
-            w4 = max(0, int(config.get_setting('teams_bonus_weight_4x') or 5))
+            w35 = max(0, int(config.get_setting('teams_bonus_weight_35') or 33))
         except ValueError:
-            w4 = 5
-        population = [2, 3, 4]
-        weights = [w2, w3, w4]
+            w35 = 33
+        try:
+            w67 = max(0, int(config.get_setting('teams_bonus_weight_67') or 1))
+        except ValueError:
+            w67 = 1
+        population = [15, 25, 35, 67]
+        weights = [w15, w25, w35, w67]
         if sum(weights) <= 0:
-            weights = [75, 20, 5]
+            weights = [33, 33, 33, 1]
         return random.choices(population, weights=weights, k=1)[0]
 
     async def _process_team_bits_bonus(self, message):
@@ -10671,31 +10860,37 @@ class Bot(commands.Bot):
         now = datetime.now(timezone.utc)
         active_bonus = self._current_team_bonus(team)
         while team.get('bits_bank', 0) >= threshold:
+            if active_bonus and str(active_bonus.get('source') or 'bits').lower() != 'bits':
+                break
             team['bits_bank'] -= threshold
-            multiplier = self._choose_bonus_multiplier()
+            bonus_percent = self._choose_bonus_percent()
             if active_bonus:
                 end_at = _parse_allraces_timestamp(active_bonus.get('end_at')) or now
                 new_end = end_at + timedelta(minutes=duration_minutes)
                 active_bonus['end_at'] = new_end.isoformat()
-                active_bonus['multiplier'] = max(int(active_bonus.get('multiplier', multiplier)), multiplier)
+                active_bonus['bonus_percent'] = max(_resolve_team_bonus_percent(active_bonus, 0), bonus_percent)
+                active_bonus['source'] = 'bits'
             else:
                 end_at = now + timedelta(minutes=duration_minutes)
                 active_bonus = {
-                    'multiplier': multiplier,
+                    'bonus_percent': bonus_percent,
+                    'source': 'bits',
                     'start_at': now.isoformat(),
                     'end_at': end_at.isoformat(),
                 }
                 team['active_bonus'] = active_bonus
                 team.setdefault('bonus_windows', []).append({
-                    'multiplier': multiplier,
+                    'bonus_percent': bonus_percent,
+                    'source': 'bits',
                     'start_at': now.isoformat(),
                     'end_at': end_at.isoformat(),
                     'trigger_bits': threshold,
                 })
 
-            team['active_bonus_label'] = f"⚡{active_bonus.get('multiplier', multiplier)}x"
+            resolved_bonus_percent = _resolve_team_bonus_percent(active_bonus, bonus_percent)
+            team['active_bonus_label'] = f"⚡+{resolved_bonus_percent}%"
             activated_messages.append(
-                f"⚡ Team Bonus Activated: {team_name} now has {active_bonus.get('multiplier', multiplier)}x points for {duration_minutes}m!"
+                f"⚡ Team Bonus Activated: {team_name} now has +{resolved_bonus_percent}% points for {duration_minutes}m!"
             )
 
         await self._save_channel_team_state(data)
@@ -10741,6 +10936,8 @@ class Bot(commands.Bot):
             'active_bonus': None,
             'active_bonus_label': None,
             'bonus_windows': [],
+            'effort_bank': 0,
+            'effort_daily': {},
             'created_at': datetime.now(timezone.utc).isoformat(),
         }
         self._register_member_metadata(channel_state['teams'][normalized_name], creator, ctx.author)
@@ -10953,6 +11150,11 @@ class Bot(commands.Bot):
         season_points = _compute_team_points(channel_state, team_name, window='season')
         daily_points = _compute_team_points(channel_state, team_name, window='daily')
         bonus_races = _compute_team_bonus_races(channel_state, team_name, days=1)
+        effort_bank = int(team.get('effort_bank', 0) or 0)
+        try:
+            effort_threshold = max(1, int(config.get_setting('teams_tep_threshold') or 40))
+        except ValueError:
+            effort_threshold = 40
         sub_stats = _compute_team_subscriber_stats(team)
         sub_points = sub_stats.get('tier_points', 0)
         sub_count = sub_stats.get('sub_count', 0)
@@ -10977,13 +11179,14 @@ class Bot(commands.Bot):
         kick_days = team.get('inactive_days')
         kick_text = f"{kick_days}d" if kick_days else "Off"
         recruiting_text = ":green_circle: OPEN" if team.get('is_recruiting') else ":red_circle: CLOSED"
-        bonus_label = f"⚡{active_bonus.get('multiplier', 0)}x" if active_bonus else "⚡0"
+        bonus_label = f"⚡+{_resolve_team_bonus_percent(active_bonus, 0)}%" if active_bonus else "⚡+0%"
 
         icon = team.get('logo') or ':white_check_mark:'
         stats_line = (
             f"{team_name} | Rank: #{rank} | Pts: {season_points:,} (+{daily_points:,}) | "
             f"SubPts: {sub_points} ({sub_count}/{sub_total}, {sub_coverage:.0f}% subs, ~+{est_sub_boost:.1f}% est) | "
             f"{bonus_label} Bonus Races: {bonus_races} | "
+            f"TEP: {effort_bank:,}/{effort_threshold:,} | "
             f"Kick: {kick_text} | Recruiting: {recruiting_text} | "
             f"{format_user_tag(lookup_name)} role: {role} | Capt: {captain_name} ({captain_tier_text})"
         )
@@ -10998,6 +11201,82 @@ class Bot(commands.Bot):
         await self._save_channel_team_state(data)
         for chunk in member_chunks:
             await self.send_command_response(ctx, chunk)
+
+    @commands.command(name='teambonus')
+    async def teambonus(self, ctx, username: str = None):
+        if not self._teams_feature_enabled():
+            return
+        if self._is_team_command_rate_limited(ctx.author.name, 'teambonus'):
+            return
+
+        lookup_name = _normalize_username(username or ctx.author.name)
+        data, channel_state = await self._with_channel_team_state()
+        team_name, role = _find_team_for_user(channel_state, lookup_name)
+        if not team_name:
+            await self.send_command_response(ctx, f"{format_user_tag(lookup_name)} is not currently on a team.")
+            return
+
+        team = channel_state.get('teams', {}).get(team_name)
+        if not isinstance(team, dict):
+            await self.send_command_response(ctx, "Team data unavailable.")
+            return
+
+        if lookup_name == _normalize_username(ctx.author.name):
+            self._register_member_metadata(team, lookup_name, ctx.author)
+
+        now = datetime.now(timezone.utc)
+        active_bonus = self._current_team_bonus(team)
+        active_source = str((active_bonus or {}).get('source') or ('bits' if active_bonus else '')).lower()
+
+        bits_bank = int(team.get('bits_bank', 0) or 0)
+        effort_bank = int(team.get('effort_bank', 0) or 0)
+        try:
+            bits_threshold = max(1, int(config.get_setting('teams_bonus_bits_threshold') or 1000))
+        except ValueError:
+            bits_threshold = 1000
+        try:
+            effort_threshold = max(1, int(config.get_setting('teams_tep_threshold') or 40))
+        except ValueError:
+            effort_threshold = 40
+        try:
+            tep_cooldown_minutes = max(0, int(config.get_setting('teams_tep_bits_cooldown_minutes') or 60))
+        except ValueError:
+            tep_cooldown_minutes = 60
+
+        bits_pct = min(999, max(0, int(round((bits_bank / bits_threshold) * 100)))) if bits_threshold > 0 else 0
+        effort_pct = min(999, max(0, int(round((effort_bank / effort_threshold) * 100)))) if effort_threshold > 0 else 0
+
+        recent_bits_end = _team_most_recent_bits_bonus_end(team)
+        cooldown_remaining = 0
+        if recent_bits_end and tep_cooldown_minutes > 0:
+            cooldown_until = recent_bits_end + timedelta(minutes=tep_cooldown_minutes)
+            cooldown_remaining = max(0, int((cooldown_until - now).total_seconds() // 60))
+
+        if active_bonus:
+            end_at = _parse_allraces_timestamp(active_bonus.get('end_at'))
+            mins_left = max(0, int((end_at - now).total_seconds() // 60)) if end_at else 0
+            active_line = f"Active: +{_resolve_team_bonus_percent(active_bonus, 0)}% ({active_source or 'bits'}) {mins_left}m left"
+        else:
+            active_line = "Active: none"
+
+        if active_bonus:
+            tep_state = f"TEP: blocked by active {active_source or 'bonus'} window"
+        elif cooldown_remaining > 0:
+            tep_state = f"TEP: cooldown {cooldown_remaining}m (after recent bits bonus)"
+        elif effort_bank >= effort_threshold:
+            tep_state = "TEP: ready to trigger on next processed team race"
+        else:
+            tep_state = "TEP: charging"
+
+        bits_state = "Bits: ready" if bits_bank >= bits_threshold else "Bits: charging"
+        msg = (
+            f"{team_name} bonus progress | "
+            f"Bits {bits_bank:,}/{bits_threshold:,} ({bits_pct}%) | "
+            f"TEP {effort_bank:,}/{effort_threshold:,} ({effort_pct}%) | "
+            f"{active_line} | {bits_state} | {tep_state}"
+        )
+        await self._save_channel_team_state(data)
+        await self.send_command_response(ctx, msg)
 
     @commands.command(name='renameteam')
     async def renameteam(self, ctx, *, requested_name: str = None):
@@ -11395,7 +11674,7 @@ class Bot(commands.Bot):
     async def team_help(self, ctx):
         if not self._teams_feature_enabled():
             return
-        await ctx.send("MyTeams is live! Type `!tcommands` for team commands. Use `!createteam` to start a team, `!invite` to recruit, `!renameteam` to rename your team (captain only), and `!dailyteams` / `!weeklyteams` / `!myteam` to track standings.")
+        await ctx.send("MyTeams is live! Type `!tcommands` for team commands. Use `!createteam` to start a team, `!invite` to recruit, `!renameteam` to rename your team (captain only), and `!dailyteams` / `!weeklyteams` / `!myteam` / `!teambonus` to track standings and bonus progress.")
 
     @commands.command(name='tcommands')
     async def team_commands(self, ctx):
