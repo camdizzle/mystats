@@ -413,4 +413,5 @@ begin
     // Append additional settings at the end of the installation
     AppendAdditionalSettings;
   end;
+
 end;
