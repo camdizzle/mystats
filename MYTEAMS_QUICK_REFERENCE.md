@@ -16,7 +16,8 @@ MyTeams is MyStats' channel team system (local mode). Viewers form teams, compet
 1. `!createteam Your Team Name`
 2. `!invite username`
 3. `!recruiting on`
-4. `!myteam`
+4. `!renameteam New Team Name` (when needed)
+5. `!myteam`
 
 ### Join a team (member)
 - From invite: `!acceptteam Team Name`
@@ -43,6 +44,7 @@ MyTeams is MyStats' channel team system (local mode). Viewers form teams, compet
 - `!cocaptain <username>` — Promote member to co-captain (captain only)
 - `!kick <username>` — Remove teammate (captain/co-captain)
 - `!recruiting on|off` — Open/close recruiting (captain/co-captain)
+- `!renameteam <new team name>` — Rename your team (captain only; keeps roster/invites/points cache aligned)
 - `!logo <emote>` — Set team logo (captain/co-captain)
 - `!inactive <days>` — Set inactivity policy and sweep stale members (captain/co-captain)
 
@@ -55,7 +57,7 @@ MyTeams is MyStats' channel team system (local mode). Viewers form teams, compet
 
 ## Roles at a glance
 
-- **Captain**: full team control
+- **Captain**: full team control (including team rename)
 - **Co-captain**: can invite, kick, set logo, recruiting, and inactivity policy
 - **Member**: can accept/deny invites, view status, and leave
 
@@ -71,7 +73,7 @@ MyTeams is MyStats' channel team system (local mode). Viewers form teams, compet
 
 ## Dashboard and overlay visibility
 
-- Desktop app: **Settings → MyTeams** for command toggle, scoring mode, team cap, bonus settings, and admin actions.
+- Desktop app: **Settings → MyTeams** for command toggle, scoring mode, team cap, bonus settings, and admin actions (including **Rename Team** for the selected row).
 - Dashboard: `/dashboard` includes MyTeams leaderboard cards.
 - Overlay rotation includes:
   - Top MyTeams Today
@@ -90,4 +92,4 @@ MyTeams is MyStats' channel team system (local mode). Viewers form teams, compet
 
 ## Chat blurb for streamers
 
-"MyTeams is live! Type `!tcommands` for team commands. Use `!createteam` to start a team, `!invite` to recruit, and `!dailyteams` / `!weeklyteams` / `!myteam` to track standings."
+"MyTeams is live! Type `!tcommands` for team commands. Use `!createteam` to start a team, `!invite` to recruit, `!renameteam` to rename your team (captain only), and `!dailyteams` / `!weeklyteams` / `!myteam` to track standings."
