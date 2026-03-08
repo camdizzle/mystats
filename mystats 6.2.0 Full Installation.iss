@@ -27,6 +27,9 @@ SetupIconFile=circle1.ico
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
+WizardImageFile=installer-splash.bmp
+WizardSmallImageFile=installer-splash-small.bmp
+WizardImageStretch=yes
 DefaultGroupName={#MyAppName}
 
 [Languages]
@@ -75,7 +78,7 @@ Type: filesandordirs; Name: "{app}\obs_overlay"
 
 [Files]
 ; Updated: use portable relative paths instead of machine-specific absolute paths.
-Source: "{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion; BeforeInstall: "PrepareForMyStatsInstall"
 Source: "*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs onlyifdoesntexist; Excludes: "*.iss,obs_overlay\*,modern_dashboard\*"
 Source: "settings.txt"; DestDir: "{app}"; Flags: onlyifdoesntexist uninsneveruninstall
 Source: "circle1.ico"; DestDir: "{app}"; Flags: ignoreversion
@@ -104,6 +107,7 @@ var
   settingExists: Boolean;
   NewSettings: array of String;
   NewSetting, Key, ExistingKey: String;
+  MyStatsWasClosed: Boolean;
 
 procedure CheckBoxOnClick(Sender: TObject);
 begin
@@ -242,19 +246,30 @@ begin
   end;
 end;
 
+procedure CloseRunningMyStatsProcesses;
+var
+  ResultCode: Integer;
+begin
+  // Close MyStats and any child processes before we copy the new executable.
+  Exec(ExpandConstant('{cmd}'), '/C taskkill /IM {#MyAppExeName} /T /F', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+procedure PrepareForMyStatsInstall;
+begin
+  if not MyStatsWasClosed then
+  begin
+    CloseRunningMyStatsProcesses;
+    MyStatsWasClosed := True;
+  end;
+end;
+
 function InitializeSetup(): Boolean;
 var
   prevVersion: String;
-  ResultCode: Integer;
 begin
-  // 1) (Optional) Forcibly kill mystats.exe if it's running
-  //    Requires admin privileges. This is aggressive (force-kill) and 
-  //    may be necessary if your app is stuck and won't close gracefully.
-  Exec('taskkill', '/IM mystats.exe /F', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  // If you want to handle errors from taskkill, check ResultCode here.
-  // e.g. 0 means success; 128 means process not found, etc.
+  MyStatsWasClosed := False;
 
-  // 2) Run your existing version check
+  // Run the existing version check
   if RegQueryStringValue(HKLM, 'Software\MyStats', 'Version', prevVersion) then
   begin
     if prevVersion = '{#MyAppVersion}' then
@@ -268,7 +283,7 @@ begin
     end;
   end;
 
-  // 3) Return True to let the setup continue
+  // Return True to let the setup continue
   Result := True;
 end;
 
