@@ -1557,6 +1557,10 @@ def _compute_team_sub_points(team):
     return _compute_team_subscriber_stats(team).get('tier_points', 0)
 
 
+def _is_teams_enabled_flag():
+    return bool(parse_boolean_token(config.get_setting('teams_enabled'), default=True))
+
+
 def _random_overlay_team_emote():
     raw_pool = str(config.get_setting('teams_overlay_emote_pool') or '').strip()
     if raw_pool:
