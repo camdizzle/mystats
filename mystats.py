@@ -1053,6 +1053,21 @@ def _remove_team_points_cache_entry(channel_name, season_value, team_name):
             _save_team_points_cache(cache_payload)
 
 
+def _rename_team_points_cache_entry(channel_name, season_value, old_team_name, new_team_name):
+    with TEAM_POINTS_CACHE_LOCK:
+        cache_payload = _load_team_points_cache()
+        season_state = _get_channel_season_points_state(cache_payload, channel_name, season_value)
+        teams = season_state.setdefault('teams', {})
+        old_bucket = teams.get(old_team_name)
+        if old_bucket is None:
+            return
+        if new_team_name in teams:
+            return
+        teams[new_team_name] = old_bucket
+        teams.pop(old_team_name, None)
+        _save_team_points_cache(cache_payload)
+
+
 def _record_live_team_points_rows(channel_name, rows):
     if not rows:
         return
@@ -6903,12 +6918,52 @@ def open_settings_window():
                 _save_team_data(data)
         refresh_teams_tree()
 
+    def rename_selected_team():
+        selected = teams_tree.selection()
+        if not selected:
+            messagebox.showinfo("MyTeams", "Select a team to rename.", parent=settings_window)
+            return
+
+        current_name = selected[0]
+        requested_name = simpledialog.askstring("Rename Team", f"New name for '{current_name}':", initialvalue=current_name, parent=settings_window)
+        normalized_name = _normalize_team_name(requested_name) if requested_name else ''
+        if not normalized_name:
+            return
+
+        if _normalize_team_name(current_name).lower() == normalized_name.lower():
+            return
+
+        with TEAM_DATA_LOCK:
+            channel_name = config.get_setting('CHANNEL')
+            season_value = config.get_setting('season') or 'default'
+            data = _load_team_data()
+            channel_state = _get_channel_team_state(data, channel_name)
+            teams = channel_state.get('teams', {})
+            if current_name not in teams:
+                messagebox.showinfo("MyTeams", "Selected team no longer exists.", parent=settings_window)
+                return
+            taken = any(_normalize_team_name(name).lower() == normalized_name.lower() for name in teams if name != current_name)
+            if taken:
+                messagebox.showinfo("MyTeams", f"Team name '{normalized_name}' already exists.", parent=settings_window)
+                return
+
+            team_payload = teams.pop(current_name)
+            teams[normalized_name] = team_payload
+            for invite in channel_state.get('invites', []):
+                if invite.get('team') == current_name:
+                    invite['team'] = normalized_name
+            _save_team_data(data)
+
+        _rename_team_points_cache_entry(channel_name, season_value, current_name, normalized_name)
+        refresh_teams_tree()
+
     teams_actions = ttk.Frame(teams_tab, style="App.TFrame")
     teams_actions.grid(row=6, column=0, columnspan=4, sticky="w", pady=(4, 0))
     ttk.Button(teams_actions, text="Refresh", command=refresh_teams_tree).pack(side="left", padx=(0, 6))
     ttk.Button(teams_actions, text="Generate Team Name", command=generate_team_name_for_clipboard).pack(side="left", padx=(0, 6))
     ttk.Button(teams_actions, text="Add Team", command=add_team_from_settings).pack(side="left", padx=(0, 6))
     ttk.Button(teams_actions, text="Toggle Recruiting", command=toggle_selected_team_recruiting).pack(side="left", padx=(0, 6))
+    ttk.Button(teams_actions, text="Rename Team", command=rename_selected_team).pack(side="left", padx=(0, 6))
     ttk.Button(teams_actions, text="Delete Team", command=delete_selected_team).pack(side="left", padx=(0, 6))
 
     refresh_teams_tree()
@@ -10266,7 +10321,7 @@ import copy
 class Bot(commands.Bot):
     TEAM_COMMAND_NAMES = {
         'createteam', 'invite', 'cocaptain', 'acceptteam', 'denyteam', 'kick', 'leave',
-        'myteam', 'logo', 'inactive', 'join', 'recruiting', 'dailyteams', 'weeklyteams',
+        'myteam', 'logo', 'renameteam', 'inactive', 'join', 'recruiting', 'dailyteams', 'weeklyteams',
         'tcommands'
     }
 
@@ -10944,6 +10999,54 @@ class Bot(commands.Bot):
         for chunk in member_chunks:
             await self.send_command_response(ctx, chunk)
 
+    @commands.command(name='renameteam')
+    async def renameteam(self, ctx, *, requested_name: str = None):
+        if not self._teams_feature_enabled():
+            return
+        if self._is_team_command_rate_limited(ctx.author.name, 'renameteam'):
+            return
+
+        actor = _normalize_username(ctx.author.name)
+        normalized_name = _normalize_team_name(requested_name) if requested_name else ''
+        if not normalized_name:
+            await self.send_command_response(ctx, "Usage: !renameteam New Team Name")
+            return
+
+        data, channel_state = await self._with_channel_team_state()
+        current_team_name, role = self._resolve_user_active_team(channel_state, actor)
+        if role != 'captain':
+            await self.send_command_response(ctx, "Only captains can rename their team.")
+            return
+
+        if _normalize_team_name(current_team_name).lower() == normalized_name.lower():
+            await self.send_command_response(ctx, f"Your team is already named '{current_team_name}'.")
+            return
+
+        taken = any(
+            _normalize_team_name(candidate).lower() == normalized_name.lower()
+            for candidate in channel_state.get('teams', {})
+            if candidate != current_team_name
+        )
+        if taken:
+            await self.send_command_response(ctx, f"Team name '{normalized_name}' already exists.")
+            return
+
+        team = channel_state.get('teams', {}).pop(current_team_name, None)
+        if not isinstance(team, dict):
+            await self.send_command_response(ctx, "Team not found. Please try again.")
+            return
+
+        channel_state['teams'][normalized_name] = team
+        for invite in channel_state.get('invites', []):
+            if invite.get('team') == current_team_name:
+                invite['team'] = normalized_name
+
+        await self._save_channel_team_state(data)
+        _rename_team_points_cache_entry(self.channel_name, self.current_season(), current_team_name, normalized_name)
+
+        await self.send_command_response(ctx, f"✅ Team renamed: '{current_team_name}' -> '{normalized_name}'.")
+
+
     @commands.command(name='logo')
     async def logo(self, ctx, emote: str = None):
         if not self._teams_feature_enabled() or not emote:
@@ -11292,7 +11395,7 @@ class Bot(commands.Bot):
     async def team_help(self, ctx):
         if not self._teams_feature_enabled():
             return
-        await ctx.send("MyTeams is live! Type `!tcommands` for team commands. Use `!createteam` to start a team, `!invite` to recruit, and `!dailyteams` / `!weeklyteams` / `!myteam` to track standings.")
+        await ctx.send("MyTeams is live! Type `!tcommands` for team commands. Use `!createteam` to start a team, `!invite` to recruit, `!renameteam` to rename your team (captain only), and `!dailyteams` / `!weeklyteams` / `!myteam` to track standings.")
 
     @commands.command(name='tcommands')
     async def team_commands(self, ctx):
