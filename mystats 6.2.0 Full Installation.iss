@@ -21,9 +21,10 @@ DisableWelcomePage=yes
 DisableProgramGroupPage=yes
 DisableDirPage=yes
 DisableReadyPage=yes
-CloseApplications=yes
-CloseApplicationsFilter=mystats.exe
-RestartApplications=yes
+; Use explicit taskkill logic in [Code] instead of Restart Manager prompts.
+; This avoids "Setup was unable to automatically close all applications" dialogs.
+CloseApplications=no
+RestartApplications=no
 PrivilegesRequired=admin
 OutputBaseFilename=MyStats_Setup {#MyAppVersion}
 SetupIconFile=circle1.ico
