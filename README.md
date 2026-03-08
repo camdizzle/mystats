@@ -162,7 +162,7 @@ Tilt is a dedicated MyStats mode for run-based progression, survival tracking, e
 
 ### Tilt views
 - Dashboard: `http://127.0.0.1:<overlay_server_port>/dashboard`
-- Tilt overlay: `http://127.0.0.1:<overlay_server_port>/overlay/tilt`
+- Tilt overlay (unified overlay with mode switching): `http://127.0.0.1:<overlay_server_port>/overlay`
 
 ---
 
@@ -220,8 +220,7 @@ MyStats serves OBS-ready overlays from its built-in local Flask server so you ca
 ### Overlay URLs
 - Unified overlay (Race/BR/Tilt auto-rotation):
   - `http://127.0.0.1:<overlay_server_port>/overlay`
-- Tilt-focused overlay:
-  - `http://127.0.0.1:<overlay_server_port>/overlay/tilt`
+- Legacy note: `/overlay/tilt` is deprecated; use `/overlay` and switch overlay mode in **Settings → Overlay**.
 
 ### OBS setup quickstart
 1. Start MyStats.
@@ -286,4 +285,3 @@ Depending on your enabled modules/settings, commonly used command groups include
   - Check invite validity, team capacity, and current team membership state.
 
 ---
-
