@@ -870,10 +870,10 @@ function getRaceFilterLabels(filterMode = 'both') {
     };
   }
   return {
-    totalLabel: 'Total Events',
-    countLabel: 'Events',
-    avgLabel: 'Avg Points/Event',
-    rowAvgLabel: 'Avg/Event',
+    totalLabel: 'Total Races',
+    countLabel: 'Races',
+    avgLabel: 'Avg Points/Race',
+    rowAvgLabel: 'Avg/Race',
   };
 }
 
@@ -883,13 +883,16 @@ function renderRaceDashboardKpis(rows = [], filterMode = 'both') {
 
   const labels = getRaceFilterLabels(filterMode);
   const filteredRows = rows.filter((row) => getRaceRowTotals(row, filterMode).events > 0);
-  const totalEvents = filteredRows.reduce((acc, row) => acc + getRaceRowTotals(row, filterMode).events, 0);
+  const dedupedTotalRaces = Number(dataCache?.race_totals?.total_events || 0);
+  const totalRaces = filterMode === 'both'
+    ? (dedupedTotalRaces || filteredRows.reduce((acc, row) => acc + getRaceRowTotals(row, filterMode).events, 0))
+    : filteredRows.reduce((acc, row) => acc + getRaceRowTotals(row, filterMode).events, 0);
   const totalPoints = filteredRows.reduce((acc, row) => acc + getRaceRowTotals(row, filterMode).points, 0);
-  const avgPoints = totalEvents > 0 ? (totalPoints / totalEvents) : 0;
+  const avgPoints = totalRaces > 0 ? (totalPoints / totalRaces) : 0;
 
   host.innerHTML = [
     { label: t('Tracked Racers'), value: fmt(filteredRows.length) },
-    { label: labels.totalLabel, value: fmt(totalEvents) },
+    { label: labels.totalLabel, value: fmt(totalRaces) },
     { label: 'Total Points', value: fmt(totalPoints) },
     { label: labels.avgLabel, value: avgPoints.toFixed(1) },
   ].map((kpi) => (

@@ -5009,6 +5009,7 @@ def _build_main_dashboard_payload():
         },
         'rivals': get_global_rivalries(limit=RIVALS_MAX_PAIRS),
         'races': get_race_dashboard_leaderboard(limit=250),
+        'race_totals': get_race_event_totals(),
         'mycycle': {
             'session': mycycle_session or {},
             'rows': mycycle_rows,
