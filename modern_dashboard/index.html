@@ -23,6 +23,7 @@
       <button class="dashboard-nav-btn" data-view="races" type="button" role="tab" aria-selected="false" aria-controls="panel-races">Race Dashboard</button>
       <button class="dashboard-nav-btn" data-view="teams" type="button" role="tab" aria-selected="false" aria-controls="panel-teams">Teams 🛡️</button>
       <button class="dashboard-nav-btn" data-view="trends" type="button" role="tab" aria-selected="false" aria-controls="panel-trends">Race/BR Trends</button>
+      <button class="dashboard-nav-btn" data-view="guide" type="button" role="tab" aria-selected="false" aria-controls="panel-guide">Guide</button>
     </section>
 
     <section id="panel-mycycle" class="mycycle-shell" data-panel="mycycle" role="tabpanel">
@@ -212,6 +213,17 @@
         <div id="trend-charts" class="analytics-groups"></div>
       </article>
     </section>
+
+    <section id="panel-guide" class="guide-shell is-hidden" data-panel="guide" role="tabpanel">
+      <article class="leaderboard-panel">
+        <div class="panel-title-row">
+          <h2>MyStats Guide</h2>
+          <span class="range-pill">README</span>
+        </div>
+        <div id="guide-content" class="guide-content" aria-live="polite">Loading guide…</div>
+      </article>
+    </section>
+
 
   </main>
   <script src="/dashboard/dashboard.js"></script>
