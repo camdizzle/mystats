@@ -10243,7 +10243,7 @@ def show_update_message(versioncheck, download_url):
     # Create a custom popup window
     popup = tk.Toplevel(root)
     popup.title("Update Available")
-    popup.geometry("560x320")
+    popup.geometry("560x360")
 
     # Center the popup window on the main window
     root_x = root.winfo_x()
@@ -10252,7 +10252,7 @@ def show_update_message(versioncheck, download_url):
     root_height = root.winfo_height()
 
     popup_width = 560
-    popup_height = 320
+    popup_height = 360
 
     pos_x = root_x + (root_width // 2) - (popup_width // 2)
     pos_y = root_y + (root_height // 2) - (popup_height // 2)
