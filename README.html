@@ -173,7 +173,7 @@
 <h3>Tilt views</h3>
 <ul>
   <li>Dashboard: <code>http://127.0.0.1:&lt;overlay_server_port&gt;/dashboard</code></li>
-  <li>Tilt overlay: <code>http://127.0.0.1:&lt;overlay_server_port&gt;/overlay/tilt</code></li>
+  <li>Tilt overlay (unified overlay with mode switching): <code>http://127.0.0.1:&lt;overlay_server_port&gt;/overlay</code></li>
 </ul>
 <hr />
 <h2>7) Events</h2>
@@ -190,6 +190,15 @@
   <li>Season quest completion announcements</li>
   <li>Competitive raid queue/live/cancel/summary status messages</li>
 </ul>
+<h3>Competitive Raid Alerts</h3>
+<p>Competitive raid monitoring emits dedicated alerts so chat can follow the full lifecycle:</p>
+<ul>
+  <li>Queue detection when a raid has been queued</li>
+  <li>Live detection when the raid transitions to active</li>
+  <li>Cancel/end summaries when the monitored state exits</li>
+  <li>Host selection and history summary lines when relevant</li>
+</ul>
+<p>These alerts are part of the automated event stream and are designed to keep viewers informed without manual callouts.</p>
 <h3>Why these matter</h3>
 <p>These system-generated events reduce manual moderation overhead and keep chat informed with consistent, structured updates.</p>
 <hr />
@@ -225,8 +234,7 @@
 <ul>
   <li>Unified overlay (Race/BR/Tilt auto-rotation):</li>
   <li><code>http://127.0.0.1:&lt;overlay_server_port&gt;/overlay</code></li>
-  <li>Tilt-focused overlay:</li>
-  <li><code>http://127.0.0.1:&lt;overlay_server_port&gt;/overlay/tilt</code></li>
+  <li>Legacy note: <code>/overlay/tilt</code> is deprecated; use <code>/overlay</code> and switch overlay mode in <strong>Settings → Overlay</strong>.</li>
 </ul>
 <h3>OBS setup quickstart</h3>
 <ol>
