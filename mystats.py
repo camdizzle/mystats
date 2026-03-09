@@ -1133,6 +1133,9 @@ def _record_live_team_points_rows(channel_name, rows):
                 username = _normalize_username(row[1])
                 if not username:
                     continue
+                mode = row[4] if len(row) > 4 else ''
+                if not _is_team_scoring_mode(mode):
+                    continue
                 try:
                     base_points = int(row[3])
                 except (TypeError, ValueError):
@@ -1401,6 +1404,11 @@ def _parse_allraces_timestamp(raw_value):
     return _parse_iso_datetime(raw_value)
 
 
+def _is_team_scoring_mode(mode_value):
+    normalized_mode = str(mode_value or '').strip().lower()
+    return normalized_mode in {'race', 'br'}
+
+
 def _sum_points_from_allraces(username, *, days=None, since_dt=None):
     username_key = _normalize_username(username)
     total = 0
@@ -1434,6 +1442,9 @@ def _sum_points_from_allraces(username, *, days=None, since_dt=None):
                     if len(row) < 4:
                         continue
                     if _normalize_username(row[1]) != username_key:
+                        continue
+                    mode = row[4] if len(row) > 4 else ''
+                    if not _is_team_scoring_mode(mode):
                         continue
                     try:
                         total += int(row[3])
@@ -1582,6 +1593,9 @@ def _compute_team_bonus_points(channel_state, team_name, window='season'):
                         continue
                     if _normalize_username(row[1]) not in members:
                         continue
+                    mode = row[4] if len(row) > 4 else ''
+                    if not _is_team_scoring_mode(mode):
+                        continue
                     ts = _parse_allraces_timestamp(row[5])
                     if not ts:
                         continue
@@ -1655,6 +1669,9 @@ def _compute_team_bonus_races(channel_state, team_name, *, days=None):
                     if len(row) < 6:
                         continue
                     if _normalize_username(row[1]) not in members:
+                        continue
+                    mode = row[4] if len(row) > 4 else ''
+                    if not _is_team_scoring_mode(mode):
                         continue
                     ts = _parse_allraces_timestamp(row[5])
                     if not ts:
@@ -2657,12 +2674,47 @@ def get_int_setting(setting_key, default=0):
         return default
 
 
-def _get_season_quest_completer_name():
+def _get_season_quest_fallback_completer_name():
     for setting_key in ('TWITCH_USERNAME', 'CHANNEL'):
         raw_value = (config.get_setting(setting_key) or '').strip()
         if raw_value:
             return raw_value.lstrip('#@')
     return 'The streamer'
+
+
+def _get_season_quest_completer_name(quest_definition, target_value, fallback_name):
+    user_stats = get_user_season_stats()
+    if not user_stats or target_value <= 0:
+        return fallback_name
+
+    quest_value_keys = {
+        'races': 'races',
+        'points': 'points',
+        'race_hs': 'race_hs',
+        'br_hs': 'br_hs',
+        'tilt_levels': 'tilt_levels',
+        'tilt_tops': 'tilt_top_tiltee',
+        'tilt_points': 'tilt_points',
+    }
+    stat_key = quest_value_keys.get(quest_definition['id'])
+    if not stat_key:
+        return fallback_name
+
+    completer = None
+    best_value = -1
+    for stats in user_stats.values():
+        current_value = int(stats.get(stat_key, 0) or 0)
+        if current_value < target_value:
+            continue
+        if current_value <= best_value:
+            continue
+        display_name = (stats.get('display_name') or '').strip()
+        if not display_name:
+            continue
+        completer = display_name
+        best_value = current_value
+
+    return completer or fallback_name
 
 
 def _season_quest_value_map(tilt_totals=None):
@@ -2724,7 +2776,7 @@ def get_season_quest_updates():
     season_key = _get_season_scope_key()
 
     quest_messages = []
-    completer_name = _get_season_quest_completer_name()
+    fallback_completer_name = _get_season_quest_fallback_completer_name()
     state_updated = False
 
     for quest in SEASON_QUEST_DEFINITIONS:
@@ -2742,6 +2794,7 @@ def get_season_quest_updates():
                 completion_state[season_key] = season_state
             season_state[quest['id']] = True
             config.set_setting(quest['legacy_complete_key'], 'True', persistent=True)
+            completer_name = _get_season_quest_completer_name(quest, target_value, fallback_completer_name)
             quest_messages.append(quest['message'].format(name=completer_name, value=current_value, target=target_value))
             state_updated = True
 

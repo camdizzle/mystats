@@ -162,7 +162,7 @@ Actions:
 
 ## 6) Scoring model (current)
 
-MyTeams scores are computed from member points with configurable mode:
+MyTeams scores are computed from member **Race + BR** points with configurable mode:
 
 - **active mode**: member points counted from join/create timestamp.
 - **season mode**: member full-season points counted.
