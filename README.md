@@ -181,6 +181,15 @@ MyStats emits automatic chat events for major milestones and run outcomes.
 - Season quest completion announcements
 - Competitive raid queue/live/cancel/summary status messages
 
+### Competitive Raid Alerts
+Competitive raid monitoring emits dedicated alerts so chat can follow the full lifecycle:
+- Queue detection when a raid has been queued
+- Live detection when the raid transitions to active
+- Cancel/end summaries when the monitored state exits
+- Host selection and history summary lines when relevant
+
+These alerts are part of the automated event stream and are designed to keep viewers informed without manual callouts.
+
 ### Why these matter
 These system-generated events reduce manual moderation overhead and keep chat informed with consistent, structured updates.
 
