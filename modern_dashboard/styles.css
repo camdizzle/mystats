@@ -477,3 +477,40 @@ body {
   border-radius: 999px;
   background: linear-gradient(90deg, #4ec9ff, #3ddc8f);
 }
+
+.guide-shell {
+  display: block;
+  min-height: 76vh;
+}
+
+.guide-shell .leaderboard-panel {
+  height: 76vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.guide-content {
+  flex: 1;
+  overflow: auto;
+  border: 1px solid rgba(127,216,255,.25);
+  border-radius: 10px;
+  background: rgba(8, 14, 30, .75);
+  padding: 14px;
+  color: #d7e6ff;
+}
+
+.guide-content a { color: #7fd8ff; }
+.guide-content code {
+  background: rgba(255,255,255,.08);
+  padding: 1px 5px;
+  border-radius: 6px;
+}
+.guide-content table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.guide-content th,
+.guide-content td {
+  border: 1px solid rgba(127,216,255,.2);
+  padding: 6px;
+}

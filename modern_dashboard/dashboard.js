@@ -1362,9 +1362,28 @@ function wireTiltSortControls() {
 
 
 
+
+let guideLoaded = false;
+
+async function loadGuideContent() {
+  if (guideLoaded) return;
+  const host = el('guide-content');
+  if (!host) return;
+  try {
+    const resp = await fetch('/dashboard/readme', { cache: 'no-store' });
+    const htmlText = await resp.text();
+    const parsed = new DOMParser().parseFromString(htmlText, 'text/html');
+    const bodyHtml = parsed.body ? parsed.body.innerHTML : htmlText;
+    host.innerHTML = bodyHtml;
+    guideLoaded = true;
+  } catch (error) {
+    host.innerHTML = `<div class="empty">${escapeHtml(t('Unable to load MyStats data.'))}</div>`;
+  }
+}
+
 function getRequestedViewFromLocation() {
   const hashView = String(window.location.hash || '').replace('#', '').trim();
-  const validViews = new Set(['mycycle', 'season-quests', 'tilt', 'rivals', 'races', 'teams', 'trends']);
+  const validViews = new Set(['mycycle', 'season-quests', 'tilt', 'rivals', 'races', 'teams', 'trends', 'guide']);
   if (validViews.has(hashView)) return hashView;
 
   const viewFromQuery = new URLSearchParams(window.location.search).get('view');
@@ -1450,6 +1469,7 @@ wireTeamFilterButtons();
 wireTiltSortControls();
 wireSeasonControls();
 wireRivalsOnboardingToggle();
+loadGuideContent();
 window.addEventListener('hashchange', () => {
   const hashView = getRequestedViewFromLocation();
   if (hashView) setActiveView(hashView);

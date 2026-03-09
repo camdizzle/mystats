@@ -80,7 +80,7 @@ except ImportError:
     ToastNotifier = None
 
 # Global Variables
-version = '6.2.0'
+version = '6.3.0'
 text_widget = None
 bot = None
 BOT_SHOULD_RUN = True
@@ -4549,6 +4549,20 @@ def _dashboard_dir_candidates():
     return candidates
 
 
+def _readme_file_candidates():
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        os.path.join(script_dir, "README.html"),
+        os.path.join(os.getcwd(), "README.html"),
+    ]
+
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.insert(0, os.path.join(meipass, "README.html"))
+
+    return candidates
+
+
 def _resolve_dashboard_dir():
     for candidate in _dashboard_dir_candidates():
         if os.path.isdir(candidate):
@@ -5835,6 +5849,15 @@ def dashboard_assets(filename):
             return send_from_directory(candidate, filename)
 
     return (f"Dashboard asset not found: {filename}", 404)
+
+
+@app.route('/dashboard/readme')
+def dashboard_readme_page():
+    for candidate in _readme_file_candidates():
+        if os.path.isfile(candidate):
+            return send_from_directory(os.path.dirname(candidate), os.path.basename(candidate))
+
+    return (f"README.html not found. Checked: {', '.join(_readme_file_candidates())}", 404)
 
 
 @app.route('/api/dashboard/main')
