@@ -4629,10 +4629,14 @@ def set_overlay_mode(mode):
 
 
 def get_overlay_mode():
+    configured_mode = normalize_overlay_mode(config.get_setting('overlay_active_mode'))
     current_run_id = str(config.get_setting('tilt_current_run_id') or '').strip()
-    if current_run_id:
+    # Treat tilt as active only when both a run id is present and tilt is still the
+    # configured mode. This prevents stale run ids from pinning /overlay to tilt
+    # after race/BR handlers explicitly switch modes.
+    if current_run_id and configured_mode == 'tilt':
         return 'tilt'
-    return normalize_overlay_mode(config.get_setting('overlay_active_mode'))
+    return configured_mode
 
 
 def _is_first_place_row(row):
