@@ -2196,6 +2196,31 @@ def get_competitive_raid_poll_delay_seconds(started_at, now=None):
     return baseline
 
 
+def get_competitive_raid_cycle_state(now=None):
+    """Return deterministic competitive raid cycle state.
+
+    Cycle definition (UTC):
+    - Live window: first 5 minutes of each 20-minute block (:00/:20/:40)
+    - Queue window: remaining 15 minutes
+    """
+    now_utc = now.astimezone(timezone.utc) if now else datetime.now(timezone.utc)
+    cycle_minute = now_utc.minute % 20
+    cycle_second = cycle_minute * 60 + now_utc.second
+    window = 'live' if cycle_minute < 5 else 'queue'
+    seconds_until_transition = (5 * 60 - cycle_second) if window == 'live' else (20 * 60 - cycle_second)
+    return {
+        'window': window,
+        'seconds_until_transition': max(1, int(seconds_until_transition)),
+    }
+
+
+def get_competitive_raid_live_window_started_at(now=None):
+    """Return UTC timestamp for the current/most-recent :00/:20/:40 live boundary."""
+    now_utc = now.astimezone(timezone.utc) if now else datetime.now(timezone.utc)
+    minute_floor = now_utc.minute - (now_utc.minute % 20)
+    return now_utc.replace(minute=minute_floor, second=0, microsecond=0)
+
+
 def _collect_payload_field_names(payload):
     field_names = set()
     for node in _walk_payload_nodes(payload):
@@ -8725,7 +8750,7 @@ class ConfigManager:
                                 'tilts_results_file', 'tilt_level_file', 'map_data_file', 'map_results_file',
                                 'UI_THEME', 'chat_br_results', 'chat_race_results', 'chat_leaderboard_show_medals', 'chat_tilt_results',
                                 'chat_tilt_suppress_offline', 'chat_tilt_redact_survivor_names',
-                                'chat_mystats_command', 'chat_all_commands', 'chat_narrative_alerts', 'competitive_raid_monitor_enabled', 'competitive_raid_phase', 'competitive_raid_queue_started_at', 'competitive_raid_live_started_at', 'competitive_raid_last_summary_live_started_at',
+                                'chat_mystats_command', 'chat_all_commands', 'chat_narrative_alerts', 'competitive_raid_monitor_enabled', 'competitive_raid_phase', 'competitive_raid_queue_started_at', 'competitive_raid_live_started_at', 'competitive_raid_last_summary_live_started_at', 'competitive_raid_last_queue_open_live_started_at',
                                 'narrative_alert_grinder_enabled', 'narrative_alert_winmilestone_enabled',
                                 'narrative_alert_leadchange_enabled', 'narrative_alert_cooldown_races',
                                 'narrative_alert_min_lead_change_points', 'narrative_alert_max_items',
@@ -8778,6 +8803,7 @@ class ConfigManager:
             'competitive_raid_queue_started_at': '',
             'competitive_raid_live_started_at': '',
             'competitive_raid_last_summary_live_started_at': '',
+            'competitive_raid_last_queue_open_live_started_at': '',
             'narrative_alert_grinder_enabled': 'True',
             'narrative_alert_winmilestone_enabled': 'True',
             'narrative_alert_leadchange_enabled': 'True',
@@ -13288,31 +13314,32 @@ async def competitive_raid_monitor(bot):
             if payload_signature != bot.last_competitive_raid_field_list_signature:
                 bot.last_competitive_raid_field_list_signature = payload_signature
 
+            now_utc = datetime.now(timezone.utc)
             local_streamer = normalize_channel_name(bot.channel_name)
-            queue_info, live_info = _extract_phase_streamer_info(payload)
-            queue_streamer = normalize_channel_name((queue_info or {}).get('streamer'))
+            _, live_info = _extract_phase_streamer_info(payload)
             live_streamer = normalize_channel_name((live_info or {}).get('streamer'))
 
-            queue_started_at = (queue_info or {}).get('started_at') or _parse_iso_utc(config.get_setting('competitive_raid_queue_started_at'))
-            live_started_at = (live_info or {}).get('started_at')
+            cycle_state = get_competitive_raid_cycle_state(now_utc)
+            cycle_window = cycle_state['window']
+            cycle_seconds_remaining = cycle_state['seconds_until_transition']
+
+            derived_live_started_at = get_competitive_raid_live_window_started_at(now_utc)
+            live_started_at = (live_info or {}).get('started_at') or derived_live_started_at
             previous_phase = str(config.get_setting('competitive_raid_phase') or '').lower()
             persisted_live_start = _parse_iso_utc(config.get_setting('competitive_raid_live_started_at'))
 
             if live_streamer:
                 bot.last_competitive_raid_streamer = live_streamer
                 persist_competitive_raid_snapshot(payload, live_streamer, live_started_at)
-            elif queue_streamer:
-                bot.last_competitive_raid_streamer = queue_streamer
-                persist_competitive_raid_snapshot(payload, queue_streamer, live_started_at)
-
-            if queue_streamer == local_streamer and queue_started_at is not None:
+            if cycle_window == 'queue':
+                queue_started_at = derived_live_started_at + timedelta(minutes=5)
                 queue_start_iso = queue_started_at.isoformat()
                 if config.get_setting('competitive_raid_queue_started_at') != queue_start_iso:
                     config.set_setting('competitive_raid_queue_started_at', queue_start_iso, persistent=True)
-                    if previous_phase != 'live':
-                        config.set_setting('competitive_raid_phase', 'queue', persistent=True)
+                if previous_phase != 'live':
+                    config.set_setting('competitive_raid_phase', 'queue', persistent=True)
 
-            if live_streamer == local_streamer and live_started_at is not None:
+            if cycle_window == 'live' and live_streamer == local_streamer and live_started_at is not None:
                 live_start_iso = live_started_at.isoformat()
                 if config.get_setting('competitive_raid_live_started_at') != live_start_iso:
                     config.set_setting('competitive_raid_live_started_at', live_start_iso, persistent=True)
@@ -13333,11 +13360,20 @@ async def competitive_raid_monitor(bot):
                         await send_chat_message(bot.channel, live_message, category='race')
                     enqueue_overlay_event('raid_selected', live_message)
 
+                # Queue-side visibility: when local streamer is active host, announce queue link once per live window.
+                if config.get_setting('competitive_raid_last_queue_open_live_started_at') != live_start_iso:
+                    queue_message = (
+                        "🧾 Next competitive raid queue is open now: https://pixelbypixel.studio/competitions"
+                    )
+                    if bot.channel is not None:
+                        await send_chat_message(bot.channel, queue_message, category='race')
+                    enqueue_overlay_event('raid_queue_open', queue_message)
+                    config.set_setting('competitive_raid_last_queue_open_live_started_at', live_start_iso, persistent=True)
+
             if (
                 previous_phase == 'live'
                 and persisted_live_start is not None
-                and live_streamer != local_streamer
-                and (datetime.now(timezone.utc) - persisted_live_start) >= timedelta(minutes=18)
+                and (cycle_window != 'live' or live_streamer != local_streamer)
             ):
                 summary_key = persisted_live_start.isoformat()
                 if config.get_setting('competitive_raid_last_summary_live_started_at') != summary_key:
@@ -13356,26 +13392,17 @@ async def competitive_raid_monitor(bot):
                     config.set_setting('competitive_raid_phase', 'idle', persistent=True)
                     config.set_setting('competitive_raid_live_started_at', '', persistent=True)
 
-            now_utc = datetime.now(timezone.utc)
-            current_phase = str(config.get_setting('competitive_raid_phase') or '').lower()
-            if current_phase == 'live' and live_streamer == local_streamer and live_started_at is not None:
-                live_end = live_started_at + timedelta(minutes=20)
-                if now_utc < live_end:
-                    remaining = (live_end - now_utc).total_seconds()
-                    next_poll_at = time.monotonic() + (10 if remaining < 90 else 30)
+            if cycle_window == 'live':
+                if live_streamer:
+                    next_delay = 10 if cycle_seconds_remaining < 90 else 20
                 else:
-                    next_poll_at = time.monotonic() + 20
-            elif queue_streamer == local_streamer and queue_started_at is not None:
-                queue_end = queue_started_at + timedelta(minutes=15)
-                if now_utc < queue_end:
-                    remaining = (queue_end - now_utc).total_seconds()
-                    next_poll_at = time.monotonic() + max(10, min(30, remaining / 3))
-                else:
-                    next_poll_at = time.monotonic() + 15
+                    # At go-live, poll aggressively until host assignment appears.
+                    next_delay = 8
+                next_poll_at = time.monotonic() + max(5, min(30, next_delay))
             else:
-                started_at = get_competitive_raid_started_at(payload)
-                delay_seconds = get_competitive_raid_poll_delay_seconds(started_at)
-                next_poll_at = time.monotonic() + max(20, delay_seconds)
+                # Queue has no assigned host; poll slower except near live boundary.
+                next_delay = 10 if cycle_seconds_remaining < 90 else 30
+                next_poll_at = time.monotonic() + max(10, min(60, next_delay))
 
         except asyncio.CancelledError:
             print("Competitive raid monitor task was cancelled.")
