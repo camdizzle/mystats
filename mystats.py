@@ -13549,6 +13549,7 @@ async def tilted(bot):
                 personal_best_level_num = max(get_int_setting('tilt_personal_best_level_num', 0), personal_best_floor_level_num)
 
             set_tilt_runtime_setting('tilt_run_xp', str(run_xp))
+            set_tilt_runtime_setting('tilt_last_level_xp', str(earned_xp))
             set_tilt_runtime_setting('tilt_run_points', str(run_points))
             set_tilt_runtime_setting('tilt_run_total_seconds', str(run_total_seconds))
             set_tilt_runtime_setting('tilt_total_xp_today', str(total_xp_today))
