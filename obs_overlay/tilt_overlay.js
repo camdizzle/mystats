@@ -590,9 +590,9 @@ function renderLevelCompletionOverlay(level = {}) {
   `;
 
   levelOverlayActive = true;
+  setLevelOverlayVisible(true);
   hideRunCompletionOverlay();
   updateTrackerVisibility();
-  setLevelOverlayVisible(true);
 
   if (levelOverlayHideTimer) clearTimeout(levelOverlayHideTimer);
   levelOverlayHideTimer = setTimeout(() => {
@@ -662,8 +662,8 @@ function renderRunCompletionOverlay(lastRun = {}, shouldDisplay = true) {
   runOverlayActive = true;
   levelOverlayActive = false;
   setLevelOverlayVisible(false);
-  updateTrackerVisibility();
   setRunOverlayVisible(true);
+  updateTrackerVisibility();
 
   if (runOverlayHideTimer) clearTimeout(runOverlayHideTimer);
   runOverlayHideTimer = setTimeout(() => {
