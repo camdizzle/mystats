@@ -90,7 +90,7 @@ Open **Settings → MyTeams** and configure:
 
 ### Most-used chat commands
 - Discovery: `!teamhelp`, `!tcommands`
-- Create/join: `!createteam`, `!invite`, `!acceptteam`, `!denyteam`, `!join`, `!leave`
+- Create/join: `!createteam`, `!invite`, `!acceptteam`, `!denyteam`, `!jointeam`, `!leave`
 - Management: `!cocaptain`, `!kick`, `!recruiting on|off`, `!renameteam`, `!logo`, `!inactive`
 - Status/boards: `!myteam`, `!teambonus`, `!dailyteams`, `!weeklyteams`
 

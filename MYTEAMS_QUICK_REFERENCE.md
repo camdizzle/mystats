@@ -23,7 +23,7 @@ MyTeams is MyStats' channel team system (local mode). Viewers form teams, compet
 ### Join a team (member)
 - From invite: `!acceptteam Team Name`
 - Decline invite: `!denyteam Team Name`
-- Auto-join recruiting team: `!join`
+- Auto-join recruiting team: `!jointeam`
 
 ---
 
@@ -38,7 +38,7 @@ MyTeams is MyStats' channel team system (local mode). Viewers form teams, compet
 - `!invite <username>` — Invite a user (captain/co-captain)
 - `!acceptteam <team name>` — Accept invite
 - `!denyteam <team name>` — Deny invite
-- `!join` — Join a recruiting team with available space
+- `!jointeam` — Join a recruiting team with available space
 - `!leave` — Leave your current team
 
 ### Team management
@@ -98,7 +98,7 @@ MyTeams is MyStats' channel team system (local mode). Viewers form teams, compet
 - Team commands do nothing → Enable **MyTeams Commands** in **Settings → MyTeams**
 - Can't create team → Subscriber required (except broadcaster)
 - Can't accept invite → invite expired, team full, already on team, or team removed
-- `!join` fails → no recruiting teams currently open with available slots
+- `!jointeam` fails → no recruiting teams currently open with available slots
 
 ---
 

@@ -76,7 +76,7 @@ Actions:
 
 - Join invite: `!acceptteam Team Name`
 - Deny invite: `!denyteam Team Name`
-- Auto-join open team: `!join`
+- Auto-join open team: `!jointeam`
 - Check status: `!myteam`
 - Check bonus progress: `!teambonus`
 - Leave: `!leave`
@@ -110,7 +110,7 @@ Actions:
   - Accept a pending invite if valid and team has space.
 - `!denyteam <team name>`
   - Deny a pending invite.
-- `!join`
+- `!jointeam`
   - Auto-joins the best available recruiting team with room.
 - `!leave`
   - Leaves current team.
@@ -240,5 +240,5 @@ When teams are deleted/archived, related invite and cache entries are cleaned.
 - You may already be on a team.
 - Target team may have been removed.
 
-### "!join says no teams available"
+### "!jointeam says no teams available"
 - No teams are currently both recruiting **and** under max team size.

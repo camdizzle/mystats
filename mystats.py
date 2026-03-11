@@ -10643,7 +10643,7 @@ import copy
 class Bot(commands.Bot):
     TEAM_COMMAND_NAMES = {
         'createteam', 'invite', 'cocaptain', 'acceptteam', 'denyteam', 'kick', 'leave',
-        'myteam', 'teambonus', 'logo', 'renameteam', 'inactive', 'join', 'recruiting', 'dailyteams', 'weeklyteams',
+        'myteam', 'teambonus', 'logo', 'renameteam', 'inactive', 'jointeam', 'recruiting', 'dailyteams', 'weeklyteams',
         'tcommands'
     }
 
@@ -11526,11 +11526,11 @@ class Bot(commands.Bot):
         await self._save_channel_team_state(data)
         await self.send_command_response(ctx, f"'{team_name}' inactive policy set to {value} days.")
 
-    @commands.command(name='join')
-    async def join(self, ctx):
+    @commands.command(name='jointeam')
+    async def jointeam(self, ctx):
         if not self._teams_feature_enabled():
             return
-        if self._is_team_command_rate_limited(ctx.author.name, 'join'):
+        if self._is_team_command_rate_limited(ctx.author.name, 'jointeam'):
             return
         username = _normalize_username(ctx.author.name)
         data, channel_state = await self._with_channel_team_state()
