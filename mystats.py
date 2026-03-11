@@ -12382,9 +12382,11 @@ class Bot(commands.Bot):
         deaths_season = 0
         deaths_run = 0
         last_completed_level = 0
+        last_completed_seen = False
 
         current_run_id = (config.get_setting('tilt_current_run_id') or '').strip()
         latest_run_by_user = None
+        run_points_tracker = {}
 
         for tilts_file in sorted(glob.glob(os.path.join(config.get_setting('directory'), "tilts_*.csv"))):
             try:
@@ -12420,8 +12422,24 @@ class Bot(commands.Bot):
                                 level_number = int(''.join(ch for ch in str(row[1]).strip() if ch.isdigit()) or '0')
                             except (TypeError, ValueError):
                                 level_number = 0
-                            if points > 0 and level_number > last_completed_level:
+
+                            previous_points = run_points_tracker.get(run_id)
+                            level_completed = False
+
+                            # Tilt result rows can include players who reached a level but
+                            # were eliminated on it. Treat a level as completed only when the
+                            # player's cumulative score increased from their prior row in the
+                            # same run (or from zero when first seen in that run).
+                            if previous_points is None:
+                                level_completed = points > 0
+                            else:
+                                level_completed = points > previous_points
+
+                            run_points_tracker[run_id] = points
+
+                            if level_completed:
                                 last_completed_level = level_number
+                                last_completed_seen = True
 
                         run_match = bool(current_run_id) and run_id == current_run_id
                         if run_match:
@@ -12473,7 +12491,7 @@ class Bot(commands.Bot):
             f"⚖️ {format_user_tag(display_name)} Tilt Stats | Run: {points_run:,} pts, {deaths_run:,} deaths | "
             f"Today: {points_today:,} pts, {deaths_today:,} deaths | "
             f"Season: {points_season:,} pts, {deaths_season:,} deaths | "
-            f"Last Level Completed: {last_completed_level:,}",
+            f"Last Level Completed: {last_completed_level if last_completed_seen else 0:,}",
             category="mystats"
         )
 
