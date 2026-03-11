@@ -5212,6 +5212,7 @@ def _build_tilt_overlay_payload():
         'top_tiltee': current_top_tiltee,
         'top_tiltee_count': current_top_tiltee_count,
         'run_points': get_int_setting('tilt_run_points', 0),
+        'run_deaths': get_int_setting('tilt_run_deaths_total', 0),
         'run_xp': get_int_setting('tilt_run_xp', 0),
         'run_expertise': get_int_setting('tilt_run_xp', 0),
         'best_run_xp_today': get_int_setting('tilt_best_run_xp_today', 0),
@@ -8694,7 +8695,7 @@ TILT_RUNTIME_PERSISTENT_KEYS = {
     "tilt_current_level", "tilt_current_elapsed", "tilt_current_top_tiltee",
     "tilt_current_run_id", "tilt_run_started_at", "tilt_run_ledger",
     "tilt_run_deaths_ledger", "tilt_top_tiltee_ledger", "tilt_current_top_tiltee_count", "tilt_run_xp",
-    "tilt_run_points", "tilt_run_total_seconds", "tilt_previous_run_xp", "tilt_level_completion_overlay",
+    "tilt_run_points", "tilt_run_deaths_total", "tilt_run_total_seconds", "tilt_previous_run_xp", "tilt_level_completion_overlay",
     "tilt_run_completion_overlay", "tilt_run_completion_event_id",
     "tilt_last_run_summary", "tilt_best_run_xp_today", "tilt_highest_level_points_today",
     "tilt_highest_level_reached_num", "tilt_season_best_level_num",
@@ -8877,6 +8878,7 @@ class ConfigManager:
             'tilt_current_top_tiltee_count': '0',
             'tilt_run_xp': '0',
             'tilt_run_points': '0',
+            'tilt_run_deaths_total': '0',
             'tilt_run_total_seconds': '0',
             'tilt_previous_run_xp': '0',
             'tilt_level_completion_overlay': '{}',
@@ -12501,8 +12503,8 @@ class Bot(commands.Bot):
             run_points = get_int_setting('tilt_run_points', 0)
             run_xp = get_int_setting('tilt_run_xp', 0)
             run_level = get_int_setting('tilt_current_level', 0)
-            run_elapsed = str(config.get_setting('tilt_current_elapsed') or '0:00')
-            total_deaths_today = get_int_setting('tilt_total_deaths_today', 0)
+            run_elapsed = format_tilt_duration(get_int_setting('tilt_run_total_seconds', 0))
+            run_deaths = get_int_setting('tilt_run_deaths_total', 0)
             top_tiltee = str(config.get_setting('tilt_current_top_tiltee') or 'None')
             top_tiltee_count = get_int_setting('tilt_current_top_tiltee_count', 0)
 
@@ -12510,7 +12512,7 @@ class Bot(commands.Bot):
                 f"🏃‍➡️ This Run ({run_status}) | Level: {run_level:,} | Elapsed: {run_elapsed} | "
                 f"Leader: {leader_text} | Run Pts: {run_points:,} | "
                 f"Run Expertise: {run_xp:,} | Top Tiltee: {top_tiltee} ({top_tiltee_count:,}) | "
-                f"Deaths Today: {total_deaths_today:,}"
+                f"Run Deaths: {run_deaths:,}"
             )
         else:
             last_run_raw = config.get_setting('tilt_last_run_summary') or '{}'
@@ -12529,12 +12531,19 @@ class Bot(commands.Bot):
             total_time = str(last_run.get('total_time') or format_tilt_duration(total_seconds))
             run_points = _safe_int(last_run.get('run_points', 0))
             run_xp = _safe_int(last_run.get('run_xp', last_run.get('run_expertise', 0)))
+            run_deaths = _safe_int(last_run.get('run_deaths', 0))
+            if run_deaths <= 0 and isinstance(last_run.get('standings'), list):
+                run_deaths = sum(
+                    _safe_int(item.get('deaths', item.get('death_count', item.get('run_deaths', 0))))
+                    for item in last_run.get('standings', [])
+                    if isinstance(item, dict)
+                )
             ended_level = _safe_int(last_run.get('ended_level', 0))
 
             message = (
                 f"🏃‍➡️ This Run ({run_status}) | Last Completed Level: {ended_level:,} | "
                 f"Total Time: {total_time} | Run Pts: {run_points:,} | "
-                f"Run Expertise: {run_xp:,}"
+                f"Run Expertise: {run_xp:,} | Run Deaths: {run_deaths:,}"
             )
 
         await send_chat_message(ctx.channel, message, category="mystats")
@@ -13446,6 +13455,7 @@ async def tilted(bot):
                 set_tilt_runtime_setting('tilt_current_top_tiltee_count', '0')
                 set_tilt_runtime_setting('tilt_run_xp', '0')
                 set_tilt_runtime_setting('tilt_run_points', '0')
+                set_tilt_runtime_setting('tilt_run_deaths_total', '0')
                 set_tilt_runtime_setting('tilt_run_total_seconds', '0')
                 set_tilt_runtime_setting('tilt_previous_run_xp', config.get_setting('tilt_run_xp') or '0')
                 set_tilt_runtime_setting('tilt_level_completion_overlay', '{}')
@@ -13527,6 +13537,7 @@ async def tilted(bot):
             run_total_seconds = get_int_setting('tilt_run_total_seconds', 0) + level_elapsed_seconds
             run_xp = get_int_setting('tilt_run_xp', 0) + earned_xp
             run_points = get_int_setting('tilt_run_points', 0) + (level_points if survivors else 0)
+            run_deaths_total = get_int_setting('tilt_run_deaths_total', 0) + deaths_this_level
             total_xp_today = get_int_setting('tilt_total_xp_today', 0) + earned_xp
             total_deaths_today = get_int_setting('tilt_total_deaths_today', 0) + deaths_this_level
 
@@ -13551,6 +13562,7 @@ async def tilted(bot):
             set_tilt_runtime_setting('tilt_run_xp', str(run_xp))
             set_tilt_runtime_setting('tilt_last_level_xp', str(earned_xp))
             set_tilt_runtime_setting('tilt_run_points', str(run_points))
+            set_tilt_runtime_setting('tilt_run_deaths_total', str(run_deaths_total))
             set_tilt_runtime_setting('tilt_run_total_seconds', str(run_total_seconds))
             set_tilt_runtime_setting('tilt_total_xp_today', str(total_xp_today))
             set_tilt_runtime_setting('tilt_total_deaths_today', str(total_deaths_today))
@@ -13783,6 +13795,7 @@ async def tilted(bot):
                     'top_tiltee_count': get_int_setting('tilt_current_top_tiltee_count', 0),
                     'leader': {'name': participants_with_points[0][0], 'points': int(participants_with_points[0][1])} if participants_with_points else None,
                     'run_points': run_points,
+                    'run_deaths': run_deaths_total,
                     'run_xp': run_xp,
                     'run_expertise': run_xp,
                     'best_run_xp_today': best_run_xp_today,
@@ -13806,6 +13819,7 @@ async def tilted(bot):
                 set_tilt_runtime_setting('tilt_current_run_id', '')
                 set_tilt_runtime_setting('tilt_run_xp', '0')
                 set_tilt_runtime_setting('tilt_run_points', '0')
+                set_tilt_runtime_setting('tilt_run_deaths_total', '0')
                 set_tilt_runtime_setting('tilt_run_total_seconds', '0')
                 set_tilt_runtime_setting('tilt_run_ledger', '{}')
                 set_tilt_runtime_setting('tilt_run_deaths_ledger', '{}')
