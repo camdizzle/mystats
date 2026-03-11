@@ -14600,7 +14600,7 @@ async def race(bot):
                         for i, data in enumerate(filtered_data):  # Show only top 10 with points in Twitch chat
                             winner_name = data[1] if data[1] != data[2].lower() else data[2]
                             formatted_points = '{:,}'.format(int(data[4]))
-                            line = f"{format_ranked_label(int(data[0]))} {winner_name} | {formatted_points} {pluralize(int(data[4]), 'point')}"
+                            line = f"{format_ranked_label(int(data[0]))} {winner_name} +{formatted_points} {pluralize(int(data[4]), 'point')}"
                             if i < len(filtered_data) - 1:
                                 line += " | "
 
@@ -14658,7 +14658,7 @@ async def race(bot):
                         for i, data in enumerate(filtered_data):
                             winner_name = data[1] if data[1] != data[2].lower() else data[2]
                             formatted_points = '{:,}'.format(int(data[4]))
-                            line = f"{format_ranked_label(int(data[0]))} {winner_name} | {formatted_points} {pluralize(int(data[4]), 'point')}"
+                            line = f"{format_ranked_label(int(data[0]))} {winner_name} +{formatted_points} {pluralize(int(data[4]), 'point')}"
                             if i < len(filtered_data) - 1:
                                 line += " | "
 
