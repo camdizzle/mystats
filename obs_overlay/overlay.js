@@ -169,6 +169,7 @@ let hasHydratedOverlayEvents = false;
 let currentResultsMode = '';
 let currentSceneMode = 'pre-game';
 let lastSceneMode = '';
+let lastOverlayMode = '';
 let lastSplashAtMs = 0;
 let cycleCountSinceSplash = 0;
 const splashAnimationDurationMs = 9000;
@@ -337,6 +338,19 @@ function queueTop3Overlay(top3View = {}) {
   if (!finishedRows.length) return;
   queuedRaceTop3 = top3View;
   processOverlayPresentationQueue();
+}
+
+function clearOverlayPresentationState() {
+  overlayEventQueue = [];
+  narrativeEventQueue = [];
+  queuedRaceTop3 = null;
+  hideEventOverlay();
+  hideRecordOverlay();
+  if (top3ShowTimeout) {
+    clearTimeout(top3ShowTimeout);
+    top3ShowTimeout = null;
+  }
+  top3IsShowing = false;
 }
 
 function showRecordOverlay(top3View = {}) {
@@ -1036,6 +1050,14 @@ async function refresh() {
     const resolvedSceneMode = resolveSceneMode(racePayload, overlayMode);
     currentSceneMode = overlayMode === 'tilt' ? 'tilt' : resolvedSceneMode;
 
+    if (overlayMode !== lastOverlayMode) {
+      const tiltTransition = overlayMode === 'tilt' || lastOverlayMode === 'tilt';
+      if (tiltTransition) {
+        clearOverlayPresentationState();
+      }
+      lastOverlayMode = overlayMode;
+    }
+
     if (currentSceneMode !== lastSceneMode) {
       const prettyScene = String(currentSceneMode || 'race').replace(/[-_]+/g, ' ');
       queueNarrativeEvent({
@@ -1066,6 +1088,13 @@ async function refresh() {
       });
 
       const overlayEvents = Array.isArray(racePayload?.overlay_events) ? racePayload.overlay_events : [];
+      const maxHydratedEventId = overlayEvents.reduce((maxId, eventItem) => {
+        const currentId = Number(eventItem?.id) || 0;
+        return Math.max(maxId, currentId);
+      }, 0);
+      lastOverlayEventId = Math.max(lastOverlayEventId, maxHydratedEventId);
+      hasHydratedOverlayEvents = true;
+
       const tiltViews = buildHorizontalTiltViews(tiltPayload);
       const viewsToRender = filterViewsForHorizontalFeed(tiltViews, overlayEvents);
       syncViews(viewsToRender);
@@ -1103,6 +1132,16 @@ async function refresh() {
     renderPillPage();
 
     const overlayEvents = Array.isArray(p.overlay_events) ? p.overlay_events : [];
+    const maxOverlayEventId = overlayEvents.reduce((maxId, eventItem) => {
+      const currentId = Number(eventItem?.id) || 0;
+      return Math.max(maxId, currentId);
+    }, 0);
+    if (hasHydratedOverlayEvents && maxOverlayEventId > 0 && maxOverlayEventId < lastOverlayEventId) {
+      // Event ids can reset when the app restarts. Re-baseline to avoid stale comparisons.
+      lastOverlayEventId = 0;
+      hasHydratedOverlayEvents = false;
+    }
+
     const filteredViews = selectViewsForMode(normalizedViews, currentResultsMode);
     const modeViews = filteredViews.length ? filteredViews : normalizedViews;
     const viewsToRender = settings.horizontalLayout
