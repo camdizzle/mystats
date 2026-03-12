@@ -143,6 +143,8 @@ const themes = {
 
 let settings = { ...defaultSettings };
 let refreshTimer = null;
+let overlayStream = null;
+let overlayStreamReconnectTimer = null;
 let pillRotationTimer = null;
 let currentViews = [];
 let activePillPage = 0;
@@ -876,9 +878,60 @@ function ensureLeaderboardAutoScroll() {
   startLeaderboardAutoScroll();
 }
 
+function stopRefreshTimer() {
+  if (refreshTimer) {
+    clearInterval(refreshTimer);
+    refreshTimer = null;
+  }
+}
+
 function startRefreshTimer() {
-  if (refreshTimer) clearInterval(refreshTimer);
+  if (overlayStream) return;
+  stopRefreshTimer();
   refreshTimer = setInterval(refresh, settings.refreshSeconds * 1000);
+}
+
+function stopOverlayStream() {
+  if (overlayStream) {
+    overlayStream.close();
+    overlayStream = null;
+  }
+  if (overlayStreamReconnectTimer) {
+    clearTimeout(overlayStreamReconnectTimer);
+    overlayStreamReconnectTimer = null;
+  }
+}
+
+function startOverlayStream() {
+  stopOverlayStream();
+  if (typeof window === 'undefined' || !('EventSource' in window)) {
+    startRefreshTimer();
+    return false;
+  }
+
+  const stream = new EventSource('/api/overlay/stream');
+  overlayStream = stream;
+  stopRefreshTimer();
+
+  stream.addEventListener('update', (event) => {
+    try {
+      const payload = JSON.parse(event.data || '{}');
+      applyOverlayPayload(payload);
+    } catch (error) {
+      console.error('Overlay stream parse failed:', error);
+    }
+  });
+
+  stream.onerror = () => {
+    stopOverlayStream();
+    startRefreshTimer();
+    overlayStreamReconnectTimer = setTimeout(() => {
+      refresh();
+      startOverlayStream();
+    }, 5000);
+  };
+
+  return true;
 }
 
 function applyTheme() {
@@ -1041,152 +1094,155 @@ function selectViewsForMode(views = [], mode = '') {
     .filter((view) => Array.isArray(view?.rows) && view.rows.length > 0);
 }
 
+function applyOverlayPayload(payload) {
+  const overlayMode = normalizeOverlayMode(payload?.active_mode);
+  const racePayload = payload?.top3 || payload;
+  const resolvedSceneMode = resolveSceneMode(racePayload, overlayMode);
+  currentSceneMode = overlayMode === 'tilt' ? 'tilt' : resolvedSceneMode;
+
+  if (overlayMode !== lastOverlayMode) {
+    const tiltTransition = overlayMode === 'tilt' || lastOverlayMode === 'tilt';
+    if (tiltTransition) {
+      clearOverlayPresentationState();
+    }
+    lastOverlayMode = overlayMode;
+  }
+
+  if (currentSceneMode !== lastSceneMode) {
+    const prettyScene = String(currentSceneMode || 'race').replace(/[-_]+/g, ' ');
+    queueNarrativeEvent({
+      type: 'scene mode',
+      message: `Scene mode: ${prettyScene.toUpperCase()}`,
+    });
+    lastSceneMode = currentSceneMode;
+  }
+
+  currentLanguage = (racePayload?.settings?.language || 'en').toLowerCase();
+  applyServerSettings(racePayload.settings || {});
+
+  if (overlayMode === 'tilt' && !settings.horizontalLayout) {
+    window.location.replace('/overlay');
+    return;
+  }
+
+  if (overlayMode === 'tilt' && settings.horizontalLayout) {
+    const tiltPayload = payload?.tilt || {};
+    $('overlay-title').textContent = t(tiltPayload?.title || 'MyStats Tilt Run Tracker');
+    updateHeaderStats({
+      avg_points_today: tiltPayload?.current_run?.run_points || 0,
+      unique_racers_today: Array.isArray(tiltPayload?.current_run?.standings) ? tiltPayload.current_run.standings.length : 0,
+      total_races_today: tiltPayload?.current_run?.level || 0,
+      avg_points_season: tiltPayload?.current_run?.best_run_xp_today || 0,
+      unique_racers_season: Array.isArray(tiltPayload?.season_standings) ? tiltPayload.season_standings.length : 0,
+      total_races_season: tiltPayload?.current_run?.total_xp_today || 0,
+    });
+
+    const overlayEvents = Array.isArray(racePayload?.overlay_events) ? racePayload.overlay_events : [];
+    const maxHydratedEventId = overlayEvents.reduce((maxId, eventItem) => {
+      const currentId = Number(eventItem?.id) || 0;
+      return Math.max(maxId, currentId);
+    }, 0);
+    lastOverlayEventId = Math.max(lastOverlayEventId, maxHydratedEventId);
+    hasHydratedOverlayEvents = true;
+
+    const tiltViews = buildHorizontalTiltViews(tiltPayload);
+    const viewsToRender = filterViewsForHorizontalFeed(tiltViews, overlayEvents);
+    syncViews(viewsToRender);
+    return;
+  }
+
+  const p = racePayload;
+  $('overlay-title').textContent = t(p.title || 'MyStats Live Results');
+  updateHeaderStats(p.header_stats || {});
+  const shouldShowPreviousRace = Array.isArray(p.top10_previous_race)
+    && p.top10_previous_race.length;
+
+  const normalizedViews = Array.isArray(p.views)
+    ? p.views
+    : [
+        { id: 'season', title: 'Top 10 Season', rows: p.top10_season || [] },
+        { id: 'today', title: 'Top 10 Today', rows: p.top10_today || [] },
+        ...(shouldShowPreviousRace
+          ? [{ id: 'previous', title: 'Top 10 Previous Race', rows: p.top10_previous_race }]
+          : []),
+      ];
+
+  const raceType = normalizeRaceType(p?.recent_race_top3?.race_type);
+  if (overlayMode === 'race' || overlayMode === 'br') {
+    currentResultsMode = overlayMode;
+  } else if (raceType) {
+    currentResultsMode = raceType;
+  }
+
+  const nextPillMode = currentResultsMode === 'br' ? 'br' : 'race';
+  if (nextPillMode !== currentPillMode) {
+    currentPillMode = nextPillMode;
+    activePillPage = 0;
+  }
+  renderPillPage();
+
+  const overlayEvents = Array.isArray(p.overlay_events) ? p.overlay_events : [];
+  const maxOverlayEventId = overlayEvents.reduce((maxId, eventItem) => {
+    const currentId = Number(eventItem?.id) || 0;
+    return Math.max(maxId, currentId);
+  }, 0);
+  if (hasHydratedOverlayEvents && maxOverlayEventId > 0 && maxOverlayEventId < lastOverlayEventId) {
+    lastOverlayEventId = 0;
+    hasHydratedOverlayEvents = false;
+  }
+
+  const filteredViews = selectViewsForMode(normalizedViews, currentResultsMode);
+  const modeViews = filteredViews.length ? filteredViews : normalizedViews;
+  const viewsToRender = settings.horizontalLayout
+    ? filterViewsForHorizontalFeed(modeViews, overlayEvents)
+    : modeViews;
+  syncViews(viewsToRender);
+
+  if (!hasHydratedOverlayEvents) {
+    hasHydratedOverlayEvents = true;
+    const maxHydratedEventId = overlayEvents.reduce((maxId, eventItem) => {
+      const currentId = Number(eventItem?.id) || 0;
+      return Math.max(maxId, currentId);
+    }, 0);
+    lastOverlayEventId = Math.max(lastOverlayEventId, maxHydratedEventId);
+  } else {
+    overlayEvents
+      .filter((eventItem) => (Number(eventItem?.id) || 0) > lastOverlayEventId)
+      .sort((a, b) => (Number(a?.id) || 0) - (Number(b?.id) || 0))
+      .forEach((eventItem) => {
+        lastOverlayEventId = Math.max(lastOverlayEventId, Number(eventItem?.id) || 0);
+        queueOverlayEvent(eventItem);
+      });
+  }
+
+  const raceKey = p.recent_race_top3?.race_key || null;
+  if (!hasHydratedOnce) {
+    hasHydratedOnce = true;
+    lastRaceKey = raceKey;
+    return;
+  }
+
+  if (raceKey && raceKey !== lastRaceKey) {
+    lastRaceKey = raceKey;
+    const firstPlace = Array.isArray(p?.recent_race_top3?.rows)
+      ? p.recent_race_top3.rows.find((row) => Number(row?.placement) === 1)
+      : null;
+    if (firstPlace?.name) {
+      const raceKind = normalizeRaceType(p?.recent_race_top3?.race_type);
+      queueNarrativeEvent({
+        type: raceKind === 'br' ? 'br winner' : 'race winner',
+        message: `${firstPlace.name} won with ${fmt(firstPlace.points)} points`,
+      });
+    }
+    queueTop3Overlay(p.recent_race_top3);
+  }
+}
+
 async function refresh() {
   try {
     const r = await fetch('/api/overlay', { cache: 'no-store' });
     const payload = await r.json();
-    const overlayMode = normalizeOverlayMode(payload?.active_mode);
-    const racePayload = payload?.top3 || payload;
-    const resolvedSceneMode = resolveSceneMode(racePayload, overlayMode);
-    currentSceneMode = overlayMode === 'tilt' ? 'tilt' : resolvedSceneMode;
-
-    if (overlayMode !== lastOverlayMode) {
-      const tiltTransition = overlayMode === 'tilt' || lastOverlayMode === 'tilt';
-      if (tiltTransition) {
-        clearOverlayPresentationState();
-      }
-      lastOverlayMode = overlayMode;
-    }
-
-    if (currentSceneMode !== lastSceneMode) {
-      const prettyScene = String(currentSceneMode || 'race').replace(/[-_]+/g, ' ');
-      queueNarrativeEvent({
-        type: 'scene mode',
-        message: `Scene mode: ${prettyScene.toUpperCase()}`,
-      });
-      lastSceneMode = currentSceneMode;
-    }
-
-    currentLanguage = (racePayload?.settings?.language || 'en').toLowerCase();
-    applyServerSettings(racePayload.settings || {});
-
-    if (overlayMode === 'tilt' && !settings.horizontalLayout) {
-      window.location.replace('/overlay');
-      return;
-    }
-
-    if (overlayMode === 'tilt' && settings.horizontalLayout) {
-      const tiltPayload = payload?.tilt || {};
-      $('overlay-title').textContent = t(tiltPayload?.title || 'MyStats Tilt Run Tracker');
-      updateHeaderStats({
-        avg_points_today: tiltPayload?.current_run?.run_points || 0,
-        unique_racers_today: Array.isArray(tiltPayload?.current_run?.standings) ? tiltPayload.current_run.standings.length : 0,
-        total_races_today: tiltPayload?.current_run?.level || 0,
-        avg_points_season: tiltPayload?.current_run?.best_run_xp_today || 0,
-        unique_racers_season: Array.isArray(tiltPayload?.season_standings) ? tiltPayload.season_standings.length : 0,
-        total_races_season: tiltPayload?.current_run?.total_xp_today || 0,
-      });
-
-      const overlayEvents = Array.isArray(racePayload?.overlay_events) ? racePayload.overlay_events : [];
-      const maxHydratedEventId = overlayEvents.reduce((maxId, eventItem) => {
-        const currentId = Number(eventItem?.id) || 0;
-        return Math.max(maxId, currentId);
-      }, 0);
-      lastOverlayEventId = Math.max(lastOverlayEventId, maxHydratedEventId);
-      hasHydratedOverlayEvents = true;
-
-      const tiltViews = buildHorizontalTiltViews(tiltPayload);
-      const viewsToRender = filterViewsForHorizontalFeed(tiltViews, overlayEvents);
-      syncViews(viewsToRender);
-      return;
-    }
-
-    const p = racePayload;
-    $('overlay-title').textContent = t(p.title || 'MyStats Live Results');
-    updateHeaderStats(p.header_stats || {});
-    const shouldShowPreviousRace = Array.isArray(p.top10_previous_race)
-      && p.top10_previous_race.length;
-
-    const normalizedViews = Array.isArray(p.views)
-      ? p.views
-      : [
-          { id: 'season', title: 'Top 10 Season', rows: p.top10_season || [] },
-          { id: 'today', title: 'Top 10 Today', rows: p.top10_today || [] },
-          ...(shouldShowPreviousRace
-            ? [{ id: 'previous', title: 'Top 10 Previous Race', rows: p.top10_previous_race }]
-            : []),
-        ];
-
-    const raceType = normalizeRaceType(p?.recent_race_top3?.race_type);
-    if (overlayMode === 'race' || overlayMode === 'br') {
-      currentResultsMode = overlayMode;
-    } else if (raceType) {
-      currentResultsMode = raceType;
-    }
-
-    const nextPillMode = currentResultsMode === 'br' ? 'br' : 'race';
-    if (nextPillMode !== currentPillMode) {
-      currentPillMode = nextPillMode;
-      activePillPage = 0;
-    }
-    renderPillPage();
-
-    const overlayEvents = Array.isArray(p.overlay_events) ? p.overlay_events : [];
-    const maxOverlayEventId = overlayEvents.reduce((maxId, eventItem) => {
-      const currentId = Number(eventItem?.id) || 0;
-      return Math.max(maxId, currentId);
-    }, 0);
-    if (hasHydratedOverlayEvents && maxOverlayEventId > 0 && maxOverlayEventId < lastOverlayEventId) {
-      // Event ids can reset when the app restarts. Re-baseline to avoid stale comparisons.
-      lastOverlayEventId = 0;
-      hasHydratedOverlayEvents = false;
-    }
-
-    const filteredViews = selectViewsForMode(normalizedViews, currentResultsMode);
-    const modeViews = filteredViews.length ? filteredViews : normalizedViews;
-    const viewsToRender = settings.horizontalLayout
-      ? filterViewsForHorizontalFeed(modeViews, overlayEvents)
-      : modeViews;
-    syncViews(viewsToRender);
-
-    if (!hasHydratedOverlayEvents) {
-      hasHydratedOverlayEvents = true;
-      const maxHydratedEventId = overlayEvents.reduce((maxId, eventItem) => {
-        const currentId = Number(eventItem?.id) || 0;
-        return Math.max(maxId, currentId);
-      }, 0);
-      lastOverlayEventId = Math.max(lastOverlayEventId, maxHydratedEventId);
-    } else {
-      overlayEvents
-        .filter((eventItem) => (Number(eventItem?.id) || 0) > lastOverlayEventId)
-        .sort((a, b) => (Number(a?.id) || 0) - (Number(b?.id) || 0))
-        .forEach((eventItem) => {
-          lastOverlayEventId = Math.max(lastOverlayEventId, Number(eventItem?.id) || 0);
-          queueOverlayEvent(eventItem);
-        });
-    }
-
-    const raceKey = p.recent_race_top3?.race_key || null;
-    if (!hasHydratedOnce) {
-      hasHydratedOnce = true;
-      lastRaceKey = raceKey;
-      return;
-    }
-
-    if (raceKey && raceKey !== lastRaceKey) {
-      lastRaceKey = raceKey;
-      const firstPlace = Array.isArray(p?.recent_race_top3?.rows)
-        ? p.recent_race_top3.rows.find((row) => Number(row?.placement) === 1)
-        : null;
-      if (firstPlace?.name) {
-        const raceKind = normalizeRaceType(p?.recent_race_top3?.race_type);
-        queueNarrativeEvent({
-          type: raceKind === 'br' ? 'br winner' : 'race winner',
-          message: `${firstPlace.name} won with ${fmt(firstPlace.points)} points`,
-        });
-      }
-      queueTop3Overlay(p.recent_race_top3);
-    }
+    applyOverlayPayload(payload);
   } catch (error) {
     console.error('Overlay refresh failed:', error);
     if (leaderboard) leaderboard.innerHTML = '<li>Unable to load race data.</li>';
@@ -1195,6 +1251,7 @@ async function refresh() {
     clearCycleRestartTimer();
   }
 }
+
 
 window.addEventListener('resize', () => {
   syncEndSpacerHeight();
@@ -1213,6 +1270,7 @@ showLeaderboardView();
 
 renderPillPage();
 refresh();
+startOverlayStream();
 startRefreshTimer();
 startPillRotationTimer();
 

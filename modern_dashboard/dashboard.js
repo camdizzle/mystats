@@ -19,6 +19,10 @@ let seasonPageSize = 100;
 let seasonQuery = '';
 let seasonSortBy = 'completed';
 let seasonSortOrder = 'desc';
+let refreshIntervalHandle = null;
+let dashboardStream = null;
+let dashboardStreamReconnectTimer = null;
+let dashboardStreamQuery = '';
 
 const I18N = {
   en: {},
@@ -1422,37 +1426,96 @@ function wireViewTabs() {
   });
 }
 
+function buildRefreshParams() {
+  const params = new URLSearchParams({
+    mycycle_page: String(mycyclePage),
+    mycycle_page_size: String(mycyclePageSize),
+  });
+  if (mycycleQuery) params.set('mycycle_query', mycycleQuery);
+  if (seasonQuery) params.set('season_query', seasonQuery);
+  params.set('season_page', String(seasonPage));
+  params.set('season_page_size', String(seasonPageSize));
+  params.set('season_sort_by', seasonSortBy);
+  params.set('season_sort_order', seasonSortOrder);
+  return params;
+}
+
+function renderDashboardPayload(data) {
+  currentLanguage = data?.settings?.language || currentLanguage || 'en';
+  el('updated-at').textContent = data.updated_at ? `${t('Updated')} ${data.updated_at}` : t('Updated now');
+  renderMyCycleRows(data);
+  renderSeasonQuestRows(data);
+  renderTiltRows(data);
+  renderRivalsRows(data);
+  renderRaceDashboardRows(data);
+  renderTeamsRows(data);
+  renderRaceTrends(data);
+}
+
+function renderDashboardError(error) {
+  console.error('dashboard refresh failed', error);
+  const fallback = `<div class="empty">${escapeHtml(t('Unable to load MyStats data.'))}</div>`;
+  ['mycycle', 'season-quests', 'tilt-leaderboard', 'rivals-leaderboard', 'races-leaderboard', 'teams-leaderboard', 'trend-charts'].forEach((id) => {
+    const node = el(id);
+    if (node) node.innerHTML = fallback;
+  });
+}
+
 async function refresh() {
   try {
-    const params = new URLSearchParams({
-      mycycle_page: String(mycyclePage),
-      mycycle_page_size: String(mycyclePageSize),
-    });
-    if (mycycleQuery) params.set('mycycle_query', mycycleQuery);
-    if (seasonQuery) params.set('season_query', seasonQuery);
-    params.set('season_page', String(seasonPage));
-    params.set('season_page_size', String(seasonPageSize));
-    params.set('season_sort_by', seasonSortBy);
-    params.set('season_sort_order', seasonSortOrder);
-    const resp = await fetch(`/api/dashboard/main?${params.toString()}`, { cache: 'no-store' });
+    const params = buildRefreshParams();
+    const nextQuery = params.toString();
+    if (dashboardStream && dashboardStreamQuery && dashboardStreamQuery !== nextQuery) {
+      startDashboardStream();
+    }
+    const resp = await fetch(`/api/dashboard/main?${nextQuery}`, { cache: 'no-store' });
     const data = await resp.json();
-    currentLanguage = data?.settings?.language || currentLanguage || 'en';
-    el('updated-at').textContent = data.updated_at ? `${t('Updated')} ${data.updated_at}` : t('Updated now');
-    renderMyCycleRows(data);
-    renderSeasonQuestRows(data);
-    renderTiltRows(data);
-    renderRivalsRows(data);
-    renderRaceDashboardRows(data);
-    renderTeamsRows(data);
-    renderRaceTrends(data);
+    renderDashboardPayload(data);
   } catch (error) {
-    console.error('dashboard refresh failed', error);
-    const fallback = `<div class="empty">${escapeHtml(t('Unable to load MyStats data.'))}</div>`;
-    ['mycycle', 'season-quests', 'tilt-leaderboard', 'rivals-leaderboard', 'races-leaderboard', 'teams-leaderboard', 'trend-charts'].forEach((id) => {
-      const node = el(id);
-      if (node) node.innerHTML = fallback;
-    });
+    renderDashboardError(error);
   }
+}
+
+function stopDashboardStream() {
+  if (dashboardStream) {
+    dashboardStream.close();
+    dashboardStream = null;
+    dashboardStreamQuery = '';
+  }
+  if (dashboardStreamReconnectTimer) {
+    clearTimeout(dashboardStreamReconnectTimer);
+    dashboardStreamReconnectTimer = null;
+  }
+}
+
+function startDashboardStream() {
+  stopDashboardStream();
+  if (typeof window === 'undefined' || !('EventSource' in window)) return false;
+
+  const params = buildRefreshParams();
+  dashboardStreamQuery = params.toString();
+  const streamUrl = `/api/dashboard/main/stream?${dashboardStreamQuery}`;
+  const stream = new EventSource(streamUrl);
+  dashboardStream = stream;
+
+  stream.addEventListener('update', (event) => {
+    try {
+      const data = JSON.parse(event.data || '{}');
+      renderDashboardPayload(data);
+    } catch (error) {
+      console.error('dashboard stream parse failed', error);
+    }
+  });
+
+  stream.onerror = () => {
+    stopDashboardStream();
+    dashboardStreamReconnectTimer = setTimeout(() => {
+      refresh();
+      startDashboardStream();
+    }, 5000);
+  };
+
+  return true;
 }
 
 const requestedView = getRequestedViewFromLocation();
@@ -1472,4 +1535,5 @@ window.addEventListener('hashchange', () => {
   const hashView = getRequestedViewFromLocation();
   if (hashView) setActiveView(hashView);
 });
-setInterval(refresh, 15000);
+refreshIntervalHandle = setInterval(refresh, 15000);
+startDashboardStream();

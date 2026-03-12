@@ -20,7 +20,7 @@ import re
 import tkinter.simpledialog as simpledialog
 from PIL import Image, ImageTk, ImageDraw
 from twitchio.ext import commands
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, request, send_from_directory, stream_with_context
 import threading
 import glob
 import math
@@ -5374,6 +5374,11 @@ def overlay_unified_payload():
     return jsonify(_build_unified_overlay_payload())
 
 
+@app.route('/api/overlay/stream')
+def overlay_stream_payload():
+    return _make_sse_response(_build_unified_overlay_payload)
+
+
 def _build_main_dashboard_payload():
     now_ts = time.time()
     cached = _dashboard_main_cache.get('value')
@@ -5912,17 +5917,16 @@ def dashboard_readme_page():
     return (f"README.html not found. Checked: {', '.join(_readme_file_candidates())}", 404)
 
 
-@app.route('/api/dashboard/main')
-def dashboard_main_payload():
+def _build_dashboard_main_payload_for_args(args):
     payload = _build_main_dashboard_payload()
 
-    q = (request.args.get('mycycle_query') or '').strip().lower()
+    q = (args.get('mycycle_query') or '').strip().lower()
     try:
-        page = max(1, int(request.args.get('mycycle_page', 1)))
+        page = max(1, int(args.get('mycycle_page', 1)))
     except (TypeError, ValueError):
         page = 1
     try:
-        page_size = min(250, max(10, int(request.args.get('mycycle_page_size', 120))))
+        page_size = min(250, max(10, int(args.get('mycycle_page_size', 120))))
     except (TypeError, ValueError):
         page_size = 120
 
@@ -5945,17 +5949,17 @@ def dashboard_main_payload():
             'query': q,
         }
 
-    season_q = (request.args.get('season_query') or '').strip().lower()
+    season_q = (args.get('season_query') or '').strip().lower()
     try:
-        season_page = max(1, int(request.args.get('season_page', 1)))
+        season_page = max(1, int(args.get('season_page', 1)))
     except (TypeError, ValueError):
         season_page = 1
     try:
-        season_page_size = min(250, max(10, int(request.args.get('season_page_size', 100))))
+        season_page_size = min(250, max(10, int(args.get('season_page_size', 100))))
     except (TypeError, ValueError):
         season_page_size = 100
-    season_sort_by = (request.args.get('season_sort_by') or 'completed').strip().lower()
-    season_sort_order = (request.args.get('season_sort_order') or 'desc').strip().lower()
+    season_sort_by = (args.get('season_sort_by') or 'completed').strip().lower()
+    season_sort_order = (args.get('season_sort_order') or 'desc').strip().lower()
 
     if season_q or season_page > 1 or season_page_size != 100 or season_sort_by != 'completed' or season_sort_order != 'desc':
         payload = copy.deepcopy(payload)
@@ -5996,7 +6000,44 @@ def dashboard_main_payload():
             'sort_order': 'asc' if season_sort_order == 'asc' else 'desc',
         }
 
-    return jsonify(payload)
+    return payload
+
+
+def _make_sse_response(payload_builder, *, poll_interval_s=1.0, heartbeat_interval_s=15.0):
+    def generate():
+        last_signature = None
+        last_heartbeat = time.monotonic()
+
+        while True:
+            payload = payload_builder()
+            payload_json = json.dumps(payload, separators=(',', ':'), sort_keys=True, ensure_ascii=False)
+            signature = hashlib.sha1(payload_json.encode('utf-8')).hexdigest()
+
+            if signature != last_signature:
+                last_signature = signature
+                yield f"event: update\ndata: {payload_json}\n\n"
+                last_heartbeat = time.monotonic()
+            elif (time.monotonic() - last_heartbeat) >= heartbeat_interval_s:
+                yield ': keepalive\n\n'
+                last_heartbeat = time.monotonic()
+
+            time.sleep(poll_interval_s)
+
+    response = Response(stream_with_context(generate()), mimetype='text/event-stream')
+    response.headers['Cache-Control'] = 'no-store'
+    response.headers['X-Accel-Buffering'] = 'no'
+    return response
+
+
+@app.route('/api/dashboard/main')
+def dashboard_main_payload():
+    return jsonify(_build_dashboard_main_payload_for_args(request.args))
+
+
+@app.route('/api/dashboard/main/stream')
+def dashboard_main_stream():
+    args_snapshot = request.args.to_dict(flat=True)
+    return _make_sse_response(lambda: _build_dashboard_main_payload_for_args(args_snapshot))
 
 
 # Path to the token file
