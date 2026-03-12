@@ -31,11 +31,9 @@ import chardet
 from collections import defaultdict
 import csv
 import pytz
-from collections import defaultdict
 from colorama import Fore, Style
 import atexit
 import webbrowser
-from datetime import datetime, timedelta
 from twitchio.ext.commands.errors import CommandNotFound
 import sounddevice as sd
 import soundfile as sf
@@ -43,8 +41,6 @@ from twitchio import errors
 import io
 from io import BytesIO
 from dateutil import parser
-from datetime import datetime, timedelta
-import atexit
 import socket
 import logging
 import queue
@@ -5293,28 +5289,31 @@ def _build_tilt_overlay_payload():
     return payload
 
 
+def _derive_overlay_active_mode(top3_payload=None):
+    active_mode = get_overlay_mode()
+    if active_mode == 'tilt':
+        return active_mode
+
+    payload = top3_payload if isinstance(top3_payload, dict) else _build_overlay_top3_payload()
+    recent_race = payload.get('recent_race_top3') or {}
+    has_rows = bool(recent_race.get('rows'))
+    race_type = str(recent_race.get('race_type') or '').strip().lower()
+    is_recent = bool(recent_race.get('is_recent'))
+
+    if not has_rows:
+        return 'pre-game'
+    if is_recent and race_type in ('br', 'battle royale', 'royale'):
+        return 'br'
+    if is_recent:
+        return 'race'
+    return 'post-race'
+
+
 def _build_unified_overlay_payload():
     top3_payload = _build_overlay_top3_payload()
-    active_mode = get_overlay_mode()
-
-    if active_mode != 'tilt':
-        recent_race = top3_payload.get('recent_race_top3') or {}
-        has_rows = bool(recent_race.get('rows'))
-        race_type = str(recent_race.get('race_type') or '').strip().lower()
-        is_recent = bool(recent_race.get('is_recent'))
-
-        if not has_rows:
-            active_mode = 'pre-game'
-        elif is_recent and race_type in ('br', 'battle royale', 'royale'):
-            active_mode = 'br'
-        elif is_recent:
-            active_mode = 'race'
-        else:
-            active_mode = 'post-race'
-
     return {
         'updated_at': get_internal_now_iso(timespec='seconds'),
-        'active_mode': active_mode,
+        'active_mode': _derive_overlay_active_mode(top3_payload),
         'top3': top3_payload,
         'tilt': _build_tilt_overlay_payload(),
     }
@@ -5359,14 +5358,14 @@ def overlay_settings():
 @app.route('/api/overlay/top3')
 def overlay_top3():
     payload = _build_overlay_top3_payload()
-    payload['active_mode'] = get_overlay_mode()
+    payload['active_mode'] = _derive_overlay_active_mode(payload)
     return jsonify(payload)
 
 
 @app.route('/api/overlay/tilt')
 def overlay_tilt_payload():
     payload = _build_tilt_overlay_payload()
-    payload['active_mode'] = get_overlay_mode()
+    payload['active_mode'] = _derive_overlay_active_mode()
     return jsonify(payload)
 
 
@@ -5388,6 +5387,28 @@ def _build_main_dashboard_payload():
     season_quest_rows = get_quest_completion_leaderboard(limit=100)
     season_quest_targets = get_season_quest_targets()
     tilt_totals, tilt_users = get_tilt_season_stats()
+    tilt_leaderboard_rows = sorted(
+        [
+            {
+                'username': str(username or '').strip().lower(),
+                'display_name': str((stats or {}).get('display_name') or username or '').strip(),
+                'tilt_levels': _safe_int((stats or {}).get('tilt_levels', 0)),
+                'tilt_points': _safe_int((stats or {}).get('tilt_points', 0)),
+                'tilt_top_tiltee': _safe_int((stats or {}).get('tilt_top_tiltee', (stats or {}).get('tilt_tops', 0))),
+                'tilt_tops': _safe_int((stats or {}).get('tilt_tops', (stats or {}).get('tilt_top_tiltee', 0))),
+                'tilt_deaths': _safe_int((stats or {}).get('tilt_deaths', 0)),
+            }
+            for username, stats in (tilt_users or {}).items()
+            if _safe_int((stats or {}).get('tilt_levels', 0)) > 0 or _safe_int((stats or {}).get('tilt_points', 0)) > 0
+        ],
+        key=lambda row: (
+            _safe_int(row.get('tilt_points', 0)),
+            _safe_int(row.get('tilt_top_tiltee', 0)),
+            -_safe_int(row.get('tilt_deaths', 0)),
+            str(row.get('display_name') or row.get('username') or '').lower(),
+        ),
+        reverse=True,
+    )
     analytics_payload = _build_dashboard_analytics_payload(mycycle_rows, tilt_totals, tilt_users)
     race_trends_payload = _build_dashboard_race_trends_payload()
 
@@ -5414,6 +5435,7 @@ def _build_main_dashboard_payload():
             'totals': tilt_totals,
             'deaths_today': get_int_setting('tilt_total_deaths_today', 0),
             'participants': len(tilt_users),
+            'leaderboard': tilt_leaderboard_rows,
         },
         'settings': {
             'language': get_ui_language(),
@@ -13481,12 +13503,6 @@ async def tilted(bot):
             total_xp = level_state['total_xp']
             level_passed = level_state['level_passed']
 
-            if run_id is None and current_level != 1:
-                last_modified_tilt = current_modified_tilt
-                last_tilt_processed_at = time.monotonic()
-                await asyncio.sleep(1)
-                continue
-
             is_level_live = parse_boolean_token(level_state.get('live'), default=True)
             suppress_offline_tilt_chat = is_chat_response_enabled("chat_tilt_suppress_offline")
             should_suppress_tilt_chat = suppress_offline_tilt_chat and not is_level_live
@@ -13495,24 +13511,34 @@ async def tilted(bot):
             set_tilt_runtime_setting('tilt_current_elapsed', str(elapsed_time))
             set_tilt_runtime_setting('tilt_current_top_tiltee', str(top_tiltee))
 
-            if current_level == 1 and run_id is None:
-                run_id = base64.urlsafe_b64encode(uuid.uuid4().bytes).rstrip(b'=').decode('utf-8')
-                set_tilt_runtime_setting('tilt_run_started_at', get_internal_adjusted_time().strftime('%Y-%m-%d %H:%M:%S'))
-                set_tilt_runtime_setting('tilt_run_ledger', '{}')
-                set_tilt_runtime_setting('tilt_run_deaths_ledger', '{}')
-                set_tilt_runtime_setting('tilt_top_tiltee_ledger', '{}')
-                set_tilt_runtime_setting('tilt_current_top_tiltee_count', '0')
-                set_tilt_runtime_setting('tilt_run_xp', '0')
-                set_tilt_runtime_setting('tilt_run_points', '0')
-                set_tilt_runtime_setting('tilt_run_deaths_total', '0')
-                set_tilt_runtime_setting('tilt_run_total_seconds', '0')
-                set_tilt_runtime_setting('tilt_previous_run_xp', config.get_setting('tilt_run_xp') or '0')
-                set_tilt_runtime_setting('tilt_level_completion_overlay', '{}')
-                set_tilt_runtime_setting('tilt_run_completion_overlay', '{}')
-                current_tilt_points_leader = None
-
             if run_id is None:
-                run_id = base64.urlsafe_b64encode(uuid.uuid4().bytes).rstrip(b'=').decode('utf-8')
+                if current_level <= 1:
+                    run_id = base64.urlsafe_b64encode(uuid.uuid4().bytes).rstrip(b'=').decode('utf-8')
+                    set_tilt_runtime_setting('tilt_run_started_at', get_internal_adjusted_time().strftime('%Y-%m-%d %H:%M:%S'))
+                    set_tilt_runtime_setting('tilt_run_ledger', '{}')
+                    set_tilt_runtime_setting('tilt_run_deaths_ledger', '{}')
+                    set_tilt_runtime_setting('tilt_top_tiltee_ledger', '{}')
+                    set_tilt_runtime_setting('tilt_current_top_tiltee_count', '0')
+                    set_tilt_runtime_setting('tilt_run_xp', '0')
+                    set_tilt_runtime_setting('tilt_run_points', '0')
+                    set_tilt_runtime_setting('tilt_run_deaths_total', '0')
+                    set_tilt_runtime_setting('tilt_run_total_seconds', '0')
+                    set_tilt_runtime_setting('tilt_previous_run_xp', config.get_setting('tilt_run_xp') or '0')
+                    set_tilt_runtime_setting('tilt_level_completion_overlay', '{}')
+                    set_tilt_runtime_setting('tilt_run_completion_overlay', '{}')
+                    current_tilt_points_leader = None
+                else:
+                    # Recovery path: app restarted or was upgraded mid-run.
+                    # If no run id persisted, synthesize one and continue tracking
+                    # from the current level instead of dropping all subsequent updates.
+                    run_id = base64.urlsafe_b64encode(uuid.uuid4().bytes).rstrip(b'=').decode('utf-8')
+                    if not str(config.get_setting('tilt_run_started_at') or '').strip():
+                        set_tilt_runtime_setting('tilt_run_started_at', get_internal_adjusted_time().strftime('%Y-%m-%d %H:%M:%S'))
+                    logger.info(
+                        "Recovered active tilt run without persisted run id at level %s; generated new run_id=%s",
+                        current_level,
+                        run_id,
+                    )
 
             set_tilt_runtime_setting('tilt_current_run_id', run_id)
 

@@ -522,10 +522,8 @@ function renderTiltRows(data) {
   const rowsHost = el('tilt-leaderboard');
   if (!rowsHost) return;
 
-  const seasonPayload = data?.season_quests;
-  const allRows = Array.isArray(seasonPayload)
-    ? seasonPayload
-    : (Array.isArray(seasonPayload?.rows) ? seasonPayload.rows : []);
+  const tiltPayload = data?.tilt || {};
+  const allRows = Array.isArray(tiltPayload?.leaderboard) ? tiltPayload.leaderboard : [];
 
   const rows = allRows
     .filter((row) => Number(row.tilt_levels || 0) > 0 || Number(row.tilt_points || 0) > 0)
@@ -566,8 +564,8 @@ function renderTiltRows(data) {
           <span class="stat">${escapeHtml(tiltSortBy === 'pressure_score' ? `${fmt(Math.round(row.pressure_score))} pressure` : `${fmt(row.tilt_points)} pts`)}</span>
         </div>
         <div class="quest-metrics">
-          X
-          X
+          <span>Tilt Levels: ${escapeHtml(fmt(row.tilt_levels))}</span>
+          <span>Tilt Points: ${escapeHtml(fmt(row.tilt_points))}</span>
           <span>Top Tiltees: ${escapeHtml(fmt(getTopTilteeCount(row)))}</span>
           <span>Death Count: ${escapeHtml(fmt(row.deaths))}</span>
           <span>Death Rate: ${escapeHtml(`${row.death_rate.toFixed(1)}%`)}</span>
