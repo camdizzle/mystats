@@ -7,6 +7,9 @@
   --panel-2: rgba(22, 33, 57, 0);
   --line: rgba(255, 255, 255, 0.18);
   --text-scale: 1;
+  --overlay-frame-gap: 12px;
+  --overlay-frame-width: max(600px, calc(100vw - (var(--overlay-frame-gap) * 2)));
+  --overlay-frame-height: calc(100vh - (var(--overlay-frame-gap) * 2));
 }
 
 * { box-sizing: border-box; }
@@ -24,9 +27,9 @@ body {
 }
 
 .card {
-  width: min(640px, 95vw);
-  height: calc(100vh - 28px);
-  margin: 14px;
+  width: var(--overlay-frame-width);
+  height: var(--overlay-frame-height);
+  margin: var(--overlay-frame-gap);
   padding: 14px;
   border-radius: 18px;
   background: linear-gradient(165deg, var(--panel), var(--panel-2));
@@ -594,9 +597,6 @@ body.compact-rows #leaderboard li.leaderboard-row {
 
 @media (max-width: 560px) {
   .card {
-    width: calc(100vw - 12px);
-    height: calc(100vh - 12px);
-    margin: 6px;
     padding: 10px;
     border-radius: 14px;
   }
