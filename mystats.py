@@ -6043,6 +6043,7 @@ def dashboard_main_stream():
 # Path to the token file
 TOKEN_FILE_PATH = 'token_data.json'
 DEFAULT_BOT_USERNAME = 'mystats_results'
+TOKEN_REFRESH_EARLY_SECONDS = 300
 
 
 def clear_invalid_token_data(reason):
@@ -6107,7 +6108,11 @@ def load_token_data():
 # Function to check if the token is expired
 def is_token_expired(token_data):
     expires_at = token_data.get("expires_at")
-    return expires_at < time.time() if expires_at else True
+    if not expires_at:
+        return True
+
+    # Refresh slightly ahead of hard expiry to reduce churn/reconnect noise.
+    return (float(expires_at) - time.time()) <= TOKEN_REFRESH_EARLY_SECONDS
 
 # Function to refresh access token using refresh token
 def refresh_access_token():
@@ -6117,7 +6122,7 @@ def refresh_access_token():
         print("No refresh token found.")
         return None
 
-    print("Access token expired. Refreshing...")
+    print("Access token expired or nearing expiry. Refreshing...")
 
     token_url = "https://id.twitch.tv/oauth2/token"
     refresh_token = token_data['refresh_token']
@@ -10769,7 +10774,7 @@ class Bot(commands.Bot):
                 self._initial_token_validation_logged = True
                 return file_access_token
 
-            print("Stored custom token is expired or invalid, attempting token refresh...")
+            print("Stored custom token is expired/nearing expiry or invalid, attempting token refresh...")
             new_token = refresh_access_token()  # Try to refresh the token
             if new_token and verify_token(new_token, emit_console=emit_validation_console):
                 print("Token refreshed successfully.")
