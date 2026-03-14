@@ -50,6 +50,7 @@ import warnings
 import html
 import hashlib
 import unicodedata
+from pathlib import Path
 
 if sys.platform == "win32":
     import ctypes
@@ -163,8 +164,17 @@ TRAY_MINIMIZE_TOAST_MESSAGE = (
 logger = logging.getLogger("mystats")
 logger.propagate = False  # All output goes strictly to the log file, not the console
 
+APPDATA_ROOT = Path('/appdata/local/mystats')
+APPDATA_ROOT.mkdir(parents=True, exist_ok=True)
+
+
+def appdata_path(*parts):
+    path = APPDATA_ROOT.joinpath(*parts)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return str(path)
+
 # Log errors and milestones (INFO and above) to mystats.log only
-_log_file_handler = logging.FileHandler("mystats.log", encoding="utf-8")
+_log_file_handler = logging.FileHandler(appdata_path("mystats.log"), encoding="utf-8")
 _log_file_handler.setLevel(logging.INFO)
 _log_file_handler.setFormatter(
     logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -197,43 +207,11 @@ def append_csv_rows_safely(file_path, rows):
 
 
 def _settings_file_candidates():
-    filename = "settings.txt"
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    candidates = [
-        os.path.join(script_dir, filename),
-        os.path.join(os.getcwd(), filename),
-    ]
-
-    executable_path = getattr(sys, "executable", "")
-    if executable_path:
-        executable_dir = os.path.dirname(os.path.abspath(executable_path))
-        candidates.append(os.path.join(executable_dir, filename))
-
-    unique_candidates = []
-    seen = set()
-    for candidate in candidates:
-        normalized = os.path.normcase(os.path.abspath(candidate))
-        if normalized in seen:
-            continue
-        seen.add(normalized)
-        unique_candidates.append(candidate)
-
-    return unique_candidates
+    return [appdata_path("settings.txt")]
 
 
 def _resolve_settings_file_path():
-    for candidate in _settings_file_candidates():
-        if os.path.isfile(candidate):
-            return candidate
-
-    for candidate in _settings_file_candidates():
-        parent_dir = os.path.dirname(candidate) or "."
-        if os.access(parent_dir, os.W_OK):
-            return candidate
-
-    fallback_dir = os.path.join(os.path.expanduser("~"), ".mystats")
-    os.makedirs(fallback_dir, exist_ok=True)
-    return os.path.join(fallback_dir, "settings.txt")
+    return _settings_file_candidates()[0]
 
 
 SETTINGS_FILE_PATH = _resolve_settings_file_path()
@@ -782,7 +760,7 @@ def refresh_tilt_lifetime_xp_from_leaderboard():
 
 
 def get_tilt_output_directory():
-    output_directory = os.path.join(os.path.expanduser("~\\AppData\\Local\\MyStats\\"), "TiltedOutputFiles")
+    output_directory = appdata_path("TiltedOutputFiles")
     os.makedirs(output_directory, exist_ok=True)
     return output_directory
 
@@ -6041,7 +6019,7 @@ def dashboard_main_stream():
 
 
 # Path to the token file
-TOKEN_FILE_PATH = 'token_data.json'
+TOKEN_FILE_PATH = appdata_path('token_data.json')
 DEFAULT_BOT_USERNAME = 'mystats_results'
 
 
@@ -6487,7 +6465,7 @@ def update_reset_audio_label(reset_audio_label, file_path):
 
 # Function to select the chunk alert audio file
 def select_chunk_alert_sound(chunk_alert_label, settings_window):
-    initial_dir = os.path.expandvars(r"%localappdata%/mystats/sound files/")
+    initial_dir = appdata_path("sound files")
     file_path = tk.filedialog.askopenfilename(initialdir=initial_dir, title="Select Sound File",
                                               filetypes=[("Audio Files", "*.mp3;*.wav;*.ogg")])
     if file_path:
@@ -6498,7 +6476,7 @@ def select_chunk_alert_sound(chunk_alert_label, settings_window):
 
 # Function to select the reset audio file
 def select_reset_audio_sound(reset_audio_label, settings_window):
-    initial_dir = os.path.expandvars(r"%localappdata%\\mystats\\sound files\\")
+    initial_dir = appdata_path("sound files")
     file_path = tk.filedialog.askopenfilename(initialdir=initial_dir, title="Select Sound File",
                                               filetypes=[("Audio Files", "*.mp3;*.wav;*.ogg")])
     if file_path:
@@ -6643,14 +6621,14 @@ def open_settings_window():
     ttk.Checkbutton(general_tab, text=tray_support_text, variable=minimize_to_tray_var).grid(row=6, column=0, columnspan=2, sticky="w", pady=(0, 4))
 
     ttk.Label(general_tab, text=tr("Mystats Directory")).grid(row=8, column=0, sticky="w", pady=(0, 4))
-    directory_value = os.path.expandvars(r"%localappdata%/mystats/")
+    directory_value = appdata_path()
     directory_entry = ttk.Entry(general_tab, width=55)
     directory_entry.grid(row=9, column=0, sticky="ew", pady=(0, 4), columnspan=2)
     directory_entry.insert(0, directory_value)
     directory_entry.config(state="readonly")
 
     def open_directory():
-        directory_path = os.path.expandvars(r"%localappdata%/mystats/")
+        directory_path = appdata_path()
         if os.path.exists(directory_path):
             os.startfile(directory_path)
         else:
@@ -9288,43 +9266,43 @@ def process_event_data(event_id):
 
 
 def write_overlays():
-    with open('race_hs_season.txt', 'w', encoding='utf-8', errors='ignore') as rhs:
+    with open(appdata_path('race_hs_season.txt'), 'w', encoding='utf-8', errors='ignore') as rhs:
         if config.get_setting('race_hs_season') is not None:
             rhs.write(str(f"{int(config.get_setting('race_hs_season')):,}\n"))
         else:
             rhs.write("0\n")
 
-    with open('br_hs_season.txt', 'w', encoding='utf-8', errors='ignore') as bhs:
+    with open(appdata_path('br_hs_season.txt'), 'w', encoding='utf-8', errors='ignore') as bhs:
         if config.get_setting('br_hs_season') is not None:
             bhs.write(str(f"{int(config.get_setting('br_hs_season')):,}\n"))
         else:
             bhs.write("0\n")
 
-    with open('race_hs_today.txt', 'w', encoding='utf-8', errors='ignore') as rhs:
+    with open(appdata_path('race_hs_today.txt'), 'w', encoding='utf-8', errors='ignore') as rhs:
         if config.get_setting('race_hs_today') is not None:
             rhs.write(str(f"{int(config.get_setting('race_hs_today')):,}\n"))
         else:
             rhs.write("0\n")
 
-    with open('br_hs_today.txt', 'w', encoding='utf-8', errors='ignore') as brhs:
+    with open(appdata_path('br_hs_today.txt'), 'w', encoding='utf-8', errors='ignore') as brhs:
         if config.get_setting('br_hs_today') is not None:
             brhs.write(f"{int(config.get_setting('br_hs_today')):,}\n")
         else:
             brhs.write("0\n")
 
-    with open('TotalPointsToday.txt', 'w', encoding='utf-8', errors='ignore') as f:
+    with open(appdata_path('TotalPointsToday.txt'), 'w', encoding='utf-8', errors='ignore') as f:
         if config.get_setting('totalpointstoday') is not None:
             f.write(f"{int(config.get_setting('totalpointstoday')):,}\n")
         else:
             f.write("0\n")
 
-    with open('AvgPointsToday.txt', 'w', encoding='utf-8', errors='ignore') as f:
+    with open(appdata_path('AvgPointsToday.txt'), 'w', encoding='utf-8', errors='ignore') as f:
         if config.get_setting('avgpointstoday') is not None:
             f.write(str(f"{int(float(config.get_setting('avgpointstoday'))):,}\n"))
         else:
             f.write("0\n")
 
-    with open('CountofRaces.txt', 'w', encoding='utf-8', errors='ignore') as f:
+    with open(appdata_path('CountofRaces.txt'), 'w', encoding='utf-8', errors='ignore') as f:
         if config.get_setting('totalcounttoday') is not None:
             f.write(str(f"{int(config.get_setting('totalcounttoday')):,}\n"))
         else:
@@ -9334,7 +9312,7 @@ def write_overlays():
 def create_results_files():
     timestamp, timestampMDY, timestampHMS, adjusted_time = time_manager.get_adjusted_time()
 
-    base_directory = os.path.expanduser("~\\AppData\\Local\\MyStats\\")
+    base_directory = appdata_path()
     directory = os.path.join(base_directory, "Results", "Season_" + str(config.get_setting('season')))
     config.set_setting('directory', directory, persistent=True)
     if not os.path.exists(directory):
@@ -9369,8 +9347,7 @@ def create_results_files():
     try:
         open(br_file, "r", encoding='utf-8', errors='ignore').close()
     except FileNotFoundError:
-        open(br_file, "w", encoding='utf-8', errors='ignore').close()
-        with open('log.txt', 'a') as f:
+        with open(appdata_path('log.txt'), 'a') as f:
             f.write(
                 f"[{timestamp}]  - ~\\AppData\\Local\\MarblesOnStream\\Saved\\SaveGames\\LastSeasonRoyale.csv "
                 f"does not exist\n")
@@ -9382,8 +9359,7 @@ def create_results_files():
     try:
         open(race_file, "r", encoding='utf-8', errors='ignore').close()
     except FileNotFoundError:
-        open(race_file, "w", encoding='utf-8', errors='ignore').close()
-        with open('log.txt', 'a') as f:
+        with open(appdata_path('log.txt'), 'a') as f:
             f.write(
                 f"[{timestamp}]  - ~\\AppData\\Local\\MarblesOnStream\\Saved\\SaveGames\\LastSeasonRace.csv "
                 f"does not exist\n")
@@ -9395,8 +9371,7 @@ def create_results_files():
     try:
         open(tilt_player_file, "r", encoding='utf-8', errors='ignore').close()
     except FileNotFoundError:
-        open(tilt_player_file, "w", encoding='utf-8', errors='ignore').close()
-        with open('log.txt', 'a') as f:
+        with open(appdata_path('log.txt'), 'a') as f:
             f.write(
                 f"[{timestamp}]  - ~\\AppData\\Local\\MarblesOnStream\\Saved\\SaveGames\\LastTiltLevelPlayers.csv "
                 f"does not exist\n")
@@ -9408,8 +9383,7 @@ def create_results_files():
     try:
         open(tilt_level_file, "r", encoding='utf-8', errors='ignore').close()
     except FileNotFoundError:
-        open(tilt_level_file, "w", encoding='utf-8', errors='ignore').close()
-        with open('log.txt', 'a') as f:
+        with open(appdata_path('log.txt'), 'a') as f:
             f.write(
                 f"[{timestamp}]  - ~\\AppData\\Local\\MarblesOnStream\\Saved\\SaveGames\\LastTiltLevel.csv "
                 f"does not exist\n")
@@ -9421,8 +9395,7 @@ def create_results_files():
     try:
         open(checkpoint_file, "r", encoding='utf-8', errors='ignore').close()
     except FileNotFoundError:
-        open(checkpoint_file, "w", encoding='utf-8', errors='ignore').close()
-        with open('log.txt', 'a') as f:
+        with open(appdata_path('log.txt'), 'a') as f:
             f.write(
                 f"[{timestamp}]  - ~\\AppData\\Local\\MarblesOnStream\\Saved\\SaveGames\\LastRaceNumbersHit.csv "
                 f"does not exist\n")
@@ -9434,8 +9407,7 @@ def create_results_files():
     try:
         open(map_file, "r", encoding='utf-8', errors='ignore').close()
     except FileNotFoundError:
-        open(map_file, "w", encoding='utf-8', errors='ignore').close()
-        with open('log.txt', 'a') as f:
+        with open(appdata_path('log.txt'), 'a') as f:
             f.write(
                 f"[{timestamp}]  - ~\\AppData\\Local\\MarblesOnStream\\Saved\\SaveGames\\LastCustomRaceMapPlayed.csv "
                 f"does not exist\n")
@@ -10645,7 +10617,7 @@ def reset():
     config.set_setting('br_hs_today', 0, persistent=False)
     config.set_setting('race_hs_today', 0, persistent=False)
 
-    with open('HighScore.txt', 'w', encoding='utf-8', errors='ignore') as hs:
+    with open(appdata_path('HighScore.txt'), 'w', encoding='utf-8', errors='ignore') as hs:
         hs.write(str(config.get_setting('hscore_name')) + '\n')
         hs.write(str(config.get_setting('hscore')) + '\n')
 
@@ -10708,7 +10680,7 @@ def startup(text_widget):
 
     br_hscore = int(config.get_setting('hscore'))
     br_hscore_format = format(br_hscore, ',')
-    with open('HighScore.txt', 'w', encoding='utf-8', errors='ignore') as hs:
+    with open(appdata_path('HighScore.txt'), 'w', encoding='utf-8', errors='ignore') as hs:
         hs.write(str(config.get_setting('hscore_name')) + '\n')
         hs.write(str(br_hscore_format + '\n'))
 
@@ -13187,7 +13159,7 @@ def log_message(message):
 
 
 def one_time_sync():
-    base_directory = os.path.expanduser("~\\AppData\\Local\\MyStats\\")
+    base_directory = appdata_path()
     directory_55 = os.path.join(base_directory, "Results", "Season_" + '55')
     directory_56 = os.path.join(base_directory, "Results", "Season_" + '56')
     directory_57 = os.path.join(base_directory, "Results", "Season_" + '57')
@@ -14470,7 +14442,7 @@ async def race(bot):
                 config.set_setting('hscore', current_score, persistent=False)
                 br_hscore = int(config.get_setting('hscore'))
                 br_hscore_format = format(br_hscore, ',')
-                with open('HighScore.txt', 'w', encoding='utf-8', errors='ignore') as hs:
+                with open(appdata_path('HighScore.txt'), 'w', encoding='utf-8', errors='ignore') as hs:
                     hs.write(str(config.get_setting('hscore_name')) + '\n')
                     hs.write(str(br_hscore_format + '\n'))
 
@@ -14491,11 +14463,11 @@ async def race(bot):
                 lastwinnerh += "{} {} {} point{}".format("(" + str(place) + ")", racedata[i][2], racedata[i][3],
                                                          "s" if int(racedata[i][3]) != 1 else "")
 
-            with open('LatestWinner.txt', 'w', encoding='utf-8', errors='replace') as lw:
+            with open(appdata_path('LatestWinner.txt'), 'w', encoding='utf-8', errors='replace') as lw:
                 lw.write("Previous Winners:" + '\n')
                 lw.write(lastwinner1 + '\n')
 
-            with open('LatestWinner_horizontal.txt', 'w', encoding='utf-8', errors='replace') as lwh:
+            with open(appdata_path('LatestWinner_horizontal.txt'), 'w', encoding='utf-8', errors='replace') as lwh:
                 lwh.write("Previous Winners:" + lastwinnerh)
 
             logger.info("Data synced: race latest winner files updated")
@@ -15175,7 +15147,7 @@ async def royale(bot):
                         config.set_setting('hscore_name', winner_display, persistent=False)
                         config.set_setting('hscore', current_score, persistent=False)
                         high_score_payload = f"{config.get_setting('hscore_name')}\n{current_score:,}\n"
-                        atomic_write_text('HighScore.txt', high_score_payload)
+                        atomic_write_text(appdata_path('HighScore.txt'), high_score_payload)
 
                     if current_score > _safe_int(config.get_setting('br_hs_season')):
                         config.set_setting('br_hs_season', current_score, persistent=False)
@@ -15186,11 +15158,11 @@ async def royale(bot):
                     latest_winner_summary = f"{winner_label} with {current_score} points, "
                     latest_winner_detail = f"{winner_kills} kills and {winner_damage} damage."
                     atomic_write_text(
-                        'LatestWinner.txt',
+                        appdata_path('LatestWinner.txt'),
                         f"Previous Winner:\n{latest_winner_summary}\n{latest_winner_detail}\n"
                     )
                     atomic_write_text(
-                        'LatestWinner_horizontal.txt',
+                        appdata_path('LatestWinner_horizontal.txt'),
                         f"Previous Winner: {latest_winner_summary}{latest_winner_detail}",
                         errors='replace'
                     )
