@@ -3654,15 +3654,22 @@ def _parse_mycycle_timestamp(value):
     if not text:
         return None
 
+    def _coerce_naive_utc(parsed_dt):
+        if parsed_dt is None:
+            return None
+        if parsed_dt.tzinfo is None:
+            return parsed_dt
+        return parsed_dt.astimezone(timezone.utc).replace(tzinfo=None)
+
     for fmt in ('%Y-%m-%d %H:%M:%S',):
         try:
-            return datetime.strptime(text, fmt)
+            return _coerce_naive_utc(datetime.strptime(text, fmt))
         except (TypeError, ValueError):
             continue
 
     try:
         normalized = text.replace('Z', '+00:00')
-        return datetime.fromisoformat(normalized)
+        return _coerce_naive_utc(datetime.fromisoformat(normalized))
     except (TypeError, ValueError):
         return None
 
