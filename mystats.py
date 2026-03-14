@@ -50,6 +50,7 @@ import warnings
 import html
 import hashlib
 import unicodedata
+import shutil
 from pathlib import Path
 
 if sys.platform == "win32":
@@ -156,6 +157,7 @@ is_forced_exit = False
 win_toaster = ToastNotifier() if ToastNotifier is not None else None
 is_hiding_to_tray = False
 tray_hint_toast_shown = False
+channel_prompted_this_session = False
 
 TRAY_MINIMIZE_TOAST_MESSAGE = (
     "The app is running in the system tray. Double-click the icon to reopen."
@@ -207,11 +209,55 @@ def append_csv_rows_safely(file_path, rows):
 
 
 def _settings_file_candidates():
-    return [appdata_path("settings.txt")]
+    appdata_settings = Path(appdata_path("settings.txt"))
+    candidates = [appdata_settings]
+
+    # Legacy paths used by older desktop builds.
+    legacy_candidates = [
+        Path.cwd() / "settings.txt",
+        Path(__file__).resolve().parent / "settings.txt",
+    ]
+
+    local_app_data = os.getenv('LOCALAPPDATA')
+    if local_app_data:
+        local_app_data_path = Path(local_app_data)
+        legacy_candidates.extend([
+            local_app_data_path / "mystats" / "settings.txt",
+            local_app_data_path / "mystats" / "data" / "settings.txt",
+            local_app_data_path / "MyStats" / "settings.txt",
+            local_app_data_path / "MyStats" / "data" / "settings.txt",
+        ])
+
+    for candidate in legacy_candidates:
+        if candidate not in candidates:
+            candidates.append(candidate)
+
+    return candidates
+
+
+def _migrate_settings_file_if_needed(settings_candidates):
+    destination = Path(settings_candidates[0])
+    if destination.exists():
+        return
+
+    for candidate in settings_candidates[1:]:
+        source = Path(candidate)
+        if not source.exists() or source == destination:
+            continue
+
+        try:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, destination)
+            print(f"Migrated settings file from {source} to {destination}")
+            return
+        except OSError as exc:
+            print(f"Failed to migrate settings from {source} to {destination}: {exc}")
 
 
 def _resolve_settings_file_path():
-    return _settings_file_candidates()[0]
+    candidates = _settings_file_candidates()
+    _migrate_settings_file_if_needed(candidates)
+    return str(candidates[0])
 
 
 SETTINGS_FILE_PATH = _resolve_settings_file_path()
@@ -10485,9 +10531,56 @@ def close_application(popup):
     sys.exit(0)  # Exit the application
 
 
+def ensure_channel_name_configured(parent=None):
+    """Prompt once per app session for channel name if it is missing."""
+    global channel_prompted_this_session
+
+    current_channel = (config.get_setting('CHANNEL') or '').strip().lstrip('@')
+    if current_channel:
+        return current_channel
+
+    if channel_prompted_this_session:
+        return ''
+
+    channel_prompted_this_session = True
+
+    messagebox.showinfo(
+        "Channel Required",
+        "MyStats could not find your channel in settings. Please enter your channel name now.",
+        parent=parent
+    )
+
+    while True:
+        entered_channel = simpledialog.askstring(
+            "Set Channel",
+            "Enter your Twitch channel name (without @):",
+            parent=parent,
+        )
+
+        if entered_channel is None:
+            messagebox.showwarning(
+                "Channel Missing",
+                "Channel is still blank. Some features require a valid channel.",
+                parent=parent,
+            )
+            return ''
+
+        normalized_channel = entered_channel.strip().lstrip('@')
+        if normalized_channel:
+            config.set_setting('CHANNEL', normalized_channel, persistent=True)
+            return normalized_channel
+
+        messagebox.showerror(
+            "Invalid Channel",
+            "Channel cannot be blank. Please enter a valid channel name.",
+            parent=parent,
+        )
+
+
 # Replace messagebox.showwarning with show_update_message in ver_season_only()
 def ver_season_only():
     load_racer_data()
+    ensure_channel_name_configured(root)
 
     channel = config.get_setting('CHANNEL')
     api_url = f"https://mystats.camwow.tv/api/app/settings?channel={channel}"
@@ -10666,6 +10759,7 @@ def display_welcome_message(text_widget, version, config, timestamp):
 
 def startup(text_widget):
     print("\nCommunicating with server to check for updates...\n")
+    ensure_channel_name_configured(root)
     config.set_setting('startup', 'yes', persistent=False)
     config.set_setting('data_sync', 'yes', persistent=False)
     create_results_files()
