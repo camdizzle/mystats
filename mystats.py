@@ -13295,13 +13295,17 @@ class Bot(commands.Bot):
         try:
             print(f"Reconnecting with new token... (Attempt {6 - retries}/5)\n")
 
-            tasks_to_cancel = [task for task in asyncio.all_tasks(self.loop) if not task.done()]
+            current_task = asyncio.current_task()
+            tasks_to_cancel = [
+                task
+                for task in asyncio.all_tasks(self.loop)
+                if not task.done() and task is not current_task
+            ]
             for task in tasks_to_cancel:
-                try:
-                    task.cancel()
-                    await task
-                except asyncio.CancelledError:
-                    pass
+                task.cancel()
+
+            if tasks_to_cancel:
+                await asyncio.gather(*tasks_to_cancel, return_exceptions=True)
 
             await self.close()
 
