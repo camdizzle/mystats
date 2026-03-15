@@ -171,6 +171,11 @@ def _resolve_appdata_root():
     if local_app_data:
         return Path(local_app_data) / 'mystats'
 
+    # Fallback for Windows sessions where LOCALAPPDATA is unexpectedly unset.
+    windows_local = Path.home() / 'AppData' / 'Local'
+    if windows_local.exists():
+        return windows_local / 'mystats'
+
     return Path('/appdata/local/mystats')
 
 
