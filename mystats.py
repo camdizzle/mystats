@@ -166,7 +166,15 @@ TRAY_MINIMIZE_TOAST_MESSAGE = (
 logger = logging.getLogger("mystats")
 logger.propagate = False  # All output goes strictly to the log file, not the console
 
-APPDATA_ROOT = Path('/appdata/local/mystats')
+def _resolve_appdata_root():
+    local_app_data = os.getenv('LOCALAPPDATA')
+    if local_app_data:
+        return Path(local_app_data) / 'mystats'
+
+    return Path('/appdata/local/mystats')
+
+
+APPDATA_ROOT = _resolve_appdata_root()
 APPDATA_ROOT.mkdir(parents=True, exist_ok=True)
 CYCLE_DATA_ROOT = APPDATA_ROOT / 'CycleData'
 CYCLE_DATA_ROOT.mkdir(parents=True, exist_ok=True)
@@ -6248,6 +6256,32 @@ def restart_bot(new_token):
 
 # Function to load token data from a file
 def load_token_data():
+    if not os.path.exists(TOKEN_FILE_PATH):
+        legacy_token_candidates = [
+            Path.cwd() / 'token_data.json',
+            Path(__file__).resolve().parent / 'token_data.json',
+        ]
+
+        local_app_data = os.getenv('LOCALAPPDATA')
+        if local_app_data:
+            local_app_data_path = Path(local_app_data)
+            legacy_token_candidates.extend([
+                local_app_data_path / 'MyStats' / 'token_data.json',
+                local_app_data_path / 'MyStats' / 'data' / 'token_data.json',
+            ])
+
+        for candidate in legacy_token_candidates:
+            if not candidate.exists() or str(candidate) == TOKEN_FILE_PATH:
+                continue
+
+            try:
+                Path(TOKEN_FILE_PATH).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(candidate, TOKEN_FILE_PATH)
+                print(f"Migrated token file from legacy location: {candidate}")
+                break
+            except OSError:
+                logger.exception("Failed migrating token file from %s", candidate)
+
     try:
         with open(TOKEN_FILE_PATH, 'r') as f:
             return json.load(f)
