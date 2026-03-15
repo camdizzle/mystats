@@ -6414,17 +6414,20 @@ def _sync_chatbot_identity_from_token(access_token):
         logger.warning("Token update succeeded but username lookup failed; preserving current chatbot label")
 
 
-# Save token data to a file and reconnect the bot with the new token asynchronously
-def save_token_data(token_info):
+# Save token data to a file and optionally reconnect the bot with the new token asynchronously
+def save_token_data(token_info, reconnect_bot=False):
     token_info['expires_at'] = time.time() + token_info.get('expires_in', 0)
     with open(TOKEN_FILE_PATH, 'w') as f:
         json.dump(token_info, f)
 
     _sync_chatbot_identity_from_token(token_info.get('access_token'))
-    print("Token data saved successfully. Restarting bot...")
+    if reconnect_bot:
+        print("Token data saved successfully. Restarting bot...")
 
-    # Reconnect the bot asynchronously with the new token
-    restart_bot(token_info['access_token'])
+        # Reconnect the bot asynchronously with the new token
+        restart_bot(token_info['access_token'])
+    else:
+        print("Token data saved successfully. Bot restart not required for proactive token refresh.")
 
 
 def restart_bot(new_token):
@@ -6648,7 +6651,7 @@ def callback():
         username = fetch_twitch_username(oauth_token)
         if username:
             update_login_button_text(username)
-            save_token_data(token_info)  # Save token info and restart bot
+            save_token_data(token_info, reconnect_bot=True)  # Save token info and restart bot
         return "Authentication successful!", 200
     else:
         return "Failed to retrieve or validate access token.", 400
