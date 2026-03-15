@@ -6296,6 +6296,7 @@ def dashboard_main_stream():
 TOKEN_FILE_PATH = appdata_path('token_data.json')
 DEFAULT_BOT_USERNAME = 'mystats_results'
 TOKEN_REFRESH_EARLY_SECONDS = 300
+TOKEN_VALIDATION_CONSOLE_LOGGED = False
 
 
 def clear_invalid_token_data(reason):
@@ -6566,13 +6567,15 @@ def callback():
 
 
 def verify_token(token, emit_console=True):
+    global TOKEN_VALIDATION_CONSOLE_LOGGED
     verify_url = "https://id.twitch.tv/oauth2/validate"
     headers = {"Authorization": f"OAuth {token}"}
     logger.info("API call: Twitch token validation")
     response = requests.get(verify_url, headers=headers)
     if response.status_code == 200:
-        if emit_console:
+        if emit_console and not TOKEN_VALIDATION_CONSOLE_LOGGED:
             print("Token is valid.", end="\r\n")
+            TOKEN_VALIDATION_CONSOLE_LOGGED = True
         return True
     else:
         if emit_console:
