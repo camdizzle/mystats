@@ -4802,7 +4802,9 @@ OVERLAY_DIR = _resolve_overlay_dir()
 
 def _dashboard_dir_candidates():
     script_dir = os.path.dirname(os.path.abspath(__file__))
+    executable_dir = os.path.dirname(os.path.abspath(sys.executable))
     candidates = [
+        os.path.join(executable_dir, "modern_dashboard"),
         os.path.join(script_dir, "modern_dashboard"),
         os.path.join(os.getcwd(), "modern_dashboard"),
     ]
@@ -4811,7 +4813,13 @@ def _dashboard_dir_candidates():
     if meipass:
         candidates.insert(0, os.path.join(meipass, "modern_dashboard"))
 
-    return candidates
+    # Preserve order while removing duplicates/empty paths
+    unique_candidates = []
+    for candidate in candidates:
+        if candidate and candidate not in unique_candidates:
+            unique_candidates.append(candidate)
+
+    return unique_candidates
 
 
 def _readme_file_candidates():
@@ -6564,7 +6572,7 @@ def verify_token(token, emit_console=True):
     response = requests.get(verify_url, headers=headers)
     if response.status_code == 200:
         if emit_console:
-            print("\nToken is valid.")
+            print("Token is valid.", end="\r\n")
         return True
     else:
         if emit_console:
@@ -10949,6 +10957,36 @@ def reset_season_stats():
     config.set_setting('new_season', 'False', persistent=False)
 
 
+_marble_reset_check_lock = threading.Lock()
+_marble_reset_check_in_progress = False
+
+
+def run_marble_reset_version_season_check():
+    """Run version/season validation without blocking the race event loop."""
+    global _marble_reset_check_in_progress
+
+    with _marble_reset_check_lock:
+        if _marble_reset_check_in_progress:
+            print("Marble reset version/season check already in progress; skipping duplicate trigger.")
+            return
+        _marble_reset_check_in_progress = True
+
+    try:
+        print("Running Marble reset version/season check in background...")
+        ver_season_only()
+
+        if str(config.get_setting('new_season')) == 'True':
+            print("New season detected during Marble reset. Resetting season stats now.")
+            reset_season_stats()
+            create_results_files()
+            update_config_labels()
+    except Exception:
+        logger.exception("Background Marble reset version/season check failed")
+    finally:
+        with _marble_reset_check_lock:
+            _marble_reset_check_in_progress = False
+
+
 def reset(run_version_check=True):
     reset_timestamp, reset_timestampmdy, reset_timestamphms, reset_adjusted_time = time_manager.get_adjusted_time()
     if config.get_setting('startup') == 'yes':
@@ -14524,6 +14562,7 @@ def read_latest_map_data(map_data_file):
 async def race(bot):
     last_modified_race = None
     last_map_file_mod_time = None
+    marble_reset_version_check_task = None
     totalpointsrace = 0
     current_daily_points_leader = None
     last_narrative_alert_race_count = 0
@@ -14562,7 +14601,12 @@ async def race(bot):
             last_narrative_alert_race_count = 0
             config.set_setting('data_sync', 'yes', persistent=False)
             await asyncio.sleep(3)
-            reset()
+            reset(run_version_check=False)
+
+            if marble_reset_version_check_task is None or marble_reset_version_check_task.done():
+                marble_reset_version_check_task = asyncio.create_task(
+                    asyncio.to_thread(run_marble_reset_version_season_check)
+                )
 
         if current_modified_race != last_modified_race:
             set_overlay_mode('race')
