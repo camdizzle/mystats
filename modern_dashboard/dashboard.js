@@ -5,7 +5,6 @@ let raceDashboardFilter = 'both';
 let teamLeaderboardFilter = 'season';
 let tiltSortBy = 'tilt_points';
 let tiltSortOrder = 'desc';
-let rivalsGuideCollapsed = false;
 let rivalsSortBy = 'closest';
 let rivalsSearchQuery = '';
 let rivalsGapPreset = 'all';
@@ -581,52 +580,6 @@ function renderTiltRows(data) {
 }
 
 
-function getRivalsOnboardingSteps(settings = {}) {
-  const minRaces = Math.max(1, Number(settings?.min_races || 0) || 50);
-  const maxGap = Math.max(0, Number(settings?.max_point_gap || 0) || 1500);
-  const pairCount = Math.max(1, Number(settings?.pair_count || 0) || 25);
-  const hardCap = Math.max(1, Number(settings?.max_pairs || 0) || 200);
-
-  return [
-    `1) MyStats scans players with at least ${fmt(minRaces)} season races.`,
-    `2) It compares point totals and keeps pairs within a ${fmt(maxGap)}-point gap.`,
-    `3) The dashboard ranks the ${fmt(Math.min(hardCap, pairCount))} closest pairs (smaller gap = stronger rivalry).`,
-    '4) Use !rivals <name> for personal rivals, or !h2h <name1> <name2> for direct matchups in chat.',
-  ];
-}
-
-function renderRivalsOnboarding(settings = {}, rows = []) {
-  const stepsHost = el('rivals-onboarding-steps');
-  const contextHost = el('rivals-onboarding-context');
-  if (!stepsHost || !contextHost) return;
-
-  const steps = getRivalsOnboardingSteps(settings);
-  stepsHost.innerHTML = steps.map((step) => `<li>${escapeHtml(step)}</li>`).join('');
-
-  if (!rows.length) {
-    contextHost.textContent = t('No rivals currently qualify. Try lowering Minimum Season Races or increasing Maximum Point Gap in Settings → Rivals.');
-    return;
-  }
-
-  const closest = rows[0];
-  const closestNames = `${closest.display_a || closest.user_a || 'Player A'} vs ${closest.display_b || closest.user_b || 'Player B'}`;
-  contextHost.textContent = `${t('Current closest rivalry')}: ${closestNames} at ${fmt(closest.point_gap)} points apart.`;
-}
-
-function wireRivalsOnboardingToggle() {
-  const toggle = el('rivals-onboarding-toggle');
-  const panel = el('rivals-onboarding');
-  if (!toggle || !panel || toggle.dataset.wired === 'true') return;
-
-  toggle.dataset.wired = 'true';
-  toggle.addEventListener('click', () => {
-    rivalsGuideCollapsed = !rivalsGuideCollapsed;
-    panel.classList.toggle('rivals-onboarding--collapsed', rivalsGuideCollapsed);
-    toggle.textContent = rivalsGuideCollapsed ? 'Show guide' : 'Hide guide';
-    toggle.setAttribute('aria-expanded', rivalsGuideCollapsed ? 'false' : 'true');
-  });
-}
-
 function renderRivalsKpis(rows = []) {
   const host = el('rivals-kpis');
   if (!host) return;
@@ -802,7 +755,6 @@ function renderRivalsRows(data) {
     max_pairs: Number(data?.settings?.rivals_limits?.max_pairs || 200),
   };
 
-  renderRivalsOnboarding(rivalsSettings, rows);
   renderRivalsKpis(rows);
   renderRivalsHighlights(rows);
 
@@ -1529,7 +1481,6 @@ wireRaceFilterButtons();
 wireTeamFilterButtons();
 wireTiltSortControls();
 wireSeasonControls();
-wireRivalsOnboardingToggle();
 loadGuideContent();
 window.addEventListener('hashchange', () => {
   const hashView = getRequestedViewFromLocation();
