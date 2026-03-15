@@ -9003,6 +9003,8 @@ class ConfigManager:
         self.settings_file = SETTINGS_FILE_PATH
         self.settings = {}
         self.transient_settings = {}
+        self.unmanaged_settings = {}
+        self.settings_order = []
         self.persistent_keys = {'TWITCH_USERNAME', 'TWITCH_TOKEN', 'CHANNEL', 'chunk_alert', 'chunk_alert_value',
                                 'marble_day', 'allraces_file', 'announcedelay', 'announcedelayseconds',
                                 'directory', 'app_install_directory', 'race_file', 'br_file', 'season', 'reset_audio', 'sync', 'MPL',
@@ -9195,17 +9197,21 @@ class ConfigManager:
 
     def load_settings(self):
         try:
-            with open(self.settings_file, "r") as f:
+            with open(self.settings_file, "r", encoding="utf-8", errors="ignore") as f:
                 for line in f:
                     clean_line = line.strip()
                     if not clean_line or '=' not in clean_line:
                         continue
 
                     key, value = clean_line.split('=', 1)
+                    if key not in self.settings_order:
+                        self.settings_order.append(key)
                     if key in self.persistent_keys:
                         self.settings[key] = value
                     elif key in self.transient_keys:
                         self.transient_settings[key] = value.strip()
+                    else:
+                        self.unmanaged_settings[key] = value
         except FileNotFoundError:
             print("Settings file not found. Please check the file path and filename.")
 
@@ -9224,6 +9230,10 @@ class ConfigManager:
             if key in self.persistent_keys:
                 if self.validate_setting(key, value):
                     self.settings[key] = str(value).strip()
+                    if key in self.unmanaged_settings:
+                        del self.unmanaged_settings[key]
+                    if key not in self.settings_order:
+                        self.settings_order.append(key)
                     self.save_settings()
         else:
             if key not in self.transient_keys and key not in self.persistent_keys:
@@ -9264,9 +9274,24 @@ class ConfigManager:
 
     def save_settings(self):
         temp_file = f"{self.settings_file}.tmp"
-        with open(temp_file, "w") as f:
+        with open(temp_file, "w", encoding="utf-8") as f:
+            written_keys = set()
+
+            for key in self.settings_order:
+                if key in self.settings and key in self.persistent_keys:
+                    f.write(f"{key}={self.settings[key]}\n")
+                    written_keys.add(key)
+                elif key in self.unmanaged_settings:
+                    f.write(f"{key}={self.unmanaged_settings[key]}\n")
+                    written_keys.add(key)
+
             for key, value in self.settings.items():
-                if key in self.persistent_keys:
+                if key in self.persistent_keys and key not in written_keys:
+                    f.write(f"{key}={value}\n")
+                    written_keys.add(key)
+
+            for key, value in self.unmanaged_settings.items():
+                if key not in written_keys:
                     f.write(f"{key}={value}\n")
         os.replace(temp_file, self.settings_file)
 
