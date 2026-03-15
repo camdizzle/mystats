@@ -198,6 +198,29 @@ def application_install_path():
         return str(Path(sys.executable).resolve().parent)
     return str(Path(__file__).resolve().parent)
 
+
+def launch_target_path():
+    raw_target = ''
+    try:
+        raw_target = str(sys.argv[0]) if sys.argv and sys.argv[0] else ''
+    except Exception:
+        raw_target = ''
+
+    if not raw_target:
+        return ''
+
+    try:
+        return str(Path(raw_target).resolve())
+    except Exception:
+        return str(Path(raw_target).absolute())
+
+
+def launch_target_dir():
+    target_path = launch_target_path()
+    if not target_path:
+        return ''
+    return str(Path(target_path).parent)
+
 # Log errors and milestones (INFO and above) to mystats.log only
 _log_file_handler = logging.FileHandler(appdata_path("mystats.log"), encoding="utf-8")
 _log_file_handler.setLevel(logging.INFO)
@@ -236,9 +259,11 @@ def _settings_file_candidates():
     candidates = [appdata_settings]
 
     # Legacy paths used by older desktop builds.
+    launch_dir = launch_target_dir()
     legacy_candidates = [
         Path.cwd() / "settings.txt",
         Path(__file__).resolve().parent / "settings.txt",
+        Path(launch_dir) / "settings.txt" if launch_dir else None,
     ]
 
     local_app_data = os.getenv('LOCALAPPDATA')
@@ -252,6 +277,8 @@ def _settings_file_candidates():
         ])
 
     for candidate in legacy_candidates:
+        if candidate is None:
+            continue
         if candidate not in candidates:
             candidates.append(candidate)
 
@@ -471,6 +498,9 @@ def _get_app_icon_path():
         candidates.append(os.path.dirname(os.path.abspath(sys.executable)))
 
     candidates.append(os.path.dirname(os.path.abspath(__file__)))
+    launch_dir = launch_target_dir()
+    if launch_dir:
+        candidates.append(launch_dir)
     candidates.append(os.getcwd())
 
     for base_dir in candidates:
@@ -1007,10 +1037,19 @@ def _ensure_team_data_locations():
 
 
 def _legacy_results_roots():
-    return [
+    roots = [
         Path(application_install_path()) / 'Results',
         Path.cwd() / 'Results',
     ]
+    launch_dir = launch_target_dir()
+    if launch_dir:
+        roots.append(Path(launch_dir) / 'Results')
+
+    unique_roots = []
+    for root in roots:
+        if root not in unique_roots:
+            unique_roots.append(root)
+    return unique_roots
 
 
 def _season_directory_candidates():
@@ -1137,16 +1176,22 @@ def _migrate_team_data_files_if_needed():
     team_sources = [season / TEAM_DATA_FILE for season in season_candidates]
     team_cache_sources = [season / TEAM_POINTS_CACHE_FILE for season in season_candidates]
 
+    launch_dir = launch_target_dir()
     team_sources.extend([
         APPDATA_ROOT / TEAM_DATA_FILE,
         Path.cwd() / TEAM_DATA_FILE,
         Path(__file__).resolve().parent / TEAM_DATA_FILE,
+        Path(launch_dir) / TEAM_DATA_FILE if launch_dir else None,
     ])
     team_cache_sources.extend([
         APPDATA_ROOT / TEAM_POINTS_CACHE_FILE,
         Path.cwd() / TEAM_POINTS_CACHE_FILE,
         Path(__file__).resolve().parent / TEAM_POINTS_CACHE_FILE,
+        Path(launch_dir) / TEAM_POINTS_CACHE_FILE if launch_dir else None,
     ])
+
+    team_sources = [source for source in team_sources if source is not None]
+    team_cache_sources = [source for source in team_cache_sources if source is not None]
 
     _migrate_data_file_if_needed(team_destination, team_sources, 'team data')
     _migrate_data_file_if_needed(team_cache_destination, team_cache_sources, 'team points cache')
@@ -3844,6 +3889,9 @@ def _migrate_mycycle_file_if_needed():
     script_root = Path(__file__).resolve().parent
 
     legacy_candidates = [season / MYCYCLE_FILE_NAME for season in season_candidates]
+    launch_dir = launch_target_dir()
+    launch_root = Path(launch_dir) if launch_dir else None
+
     legacy_candidates.extend([
         APPDATA_ROOT / MYCYCLE_FILE_NAME,
         APPDATA_ROOT / 'data' / MYCYCLE_FILE_NAME,
@@ -3856,6 +3904,9 @@ def _migrate_mycycle_file_if_needed():
         script_root / MYCYCLE_FILE_NAME,
         script_root / 'data' / MYCYCLE_FILE_NAME,
         script_root / 'CycleData' / MYCYCLE_FILE_NAME,
+        launch_root / MYCYCLE_FILE_NAME if launch_root else None,
+        launch_root / 'data' / MYCYCLE_FILE_NAME if launch_root else None,
+        launch_root / 'CycleData' / MYCYCLE_FILE_NAME if launch_root else None,
     ])
 
     local_app_data = os.getenv('LOCALAPPDATA')
@@ -3868,6 +3919,7 @@ def _migrate_mycycle_file_if_needed():
             local_app_data_path / 'MyStats' / 'data' / MYCYCLE_FILE_NAME,
         ])
 
+    legacy_candidates = [candidate for candidate in legacy_candidates if candidate is not None]
     _migrate_data_file_if_needed(destination, legacy_candidates, 'MyCycle data')
 
 
@@ -4778,8 +4830,10 @@ app = Flask(__name__)
 oauth_token = None
 def _overlay_dir_candidates():
     script_dir = os.path.dirname(os.path.abspath(__file__))
+    launch_dir = launch_target_dir()
     candidates = [
         os.path.join(script_dir, "obs_overlay"),
+        os.path.join(launch_dir, "obs_overlay") if launch_dir else '',
         os.path.join(os.getcwd(), "obs_overlay"),
     ]
 
@@ -4787,7 +4841,12 @@ def _overlay_dir_candidates():
     if meipass:
         candidates.insert(0, os.path.join(meipass, "obs_overlay"))
 
-    return candidates
+    unique_candidates = []
+    for candidate in candidates:
+        if candidate and candidate not in unique_candidates:
+            unique_candidates.append(candidate)
+
+    return unique_candidates
 
 
 def _resolve_overlay_dir():
@@ -4803,9 +4862,11 @@ OVERLAY_DIR = _resolve_overlay_dir()
 def _dashboard_dir_candidates():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     executable_dir = os.path.dirname(os.path.abspath(sys.executable))
+    argv0_dir = launch_target_dir()
     candidates = [
-        os.path.join(executable_dir, "modern_dashboard"),
         os.path.join(script_dir, "modern_dashboard"),
+        os.path.join(argv0_dir, "modern_dashboard") if argv0_dir else '',
+        os.path.join(executable_dir, "modern_dashboard"),
         os.path.join(os.getcwd(), "modern_dashboard"),
     ]
 
@@ -4824,8 +4885,12 @@ def _dashboard_dir_candidates():
 
 def _readme_file_candidates():
     script_dir = os.path.dirname(os.path.abspath(__file__))
+    executable_dir = os.path.dirname(os.path.abspath(sys.executable))
+    argv0_dir = launch_target_dir()
     candidates = [
         os.path.join(script_dir, "README.html"),
+        os.path.join(argv0_dir, "README.html") if argv0_dir else '',
+        os.path.join(executable_dir, "README.html"),
         os.path.join(os.getcwd(), "README.html"),
     ]
 
@@ -4833,7 +4898,13 @@ def _readme_file_candidates():
     if meipass:
         candidates.insert(0, os.path.join(meipass, "README.html"))
 
-    return candidates
+    # Preserve order while removing duplicates/empty paths.
+    unique_candidates = []
+    for candidate in candidates:
+        if candidate and candidate not in unique_candidates:
+            unique_candidates.append(candidate)
+
+    return unique_candidates
 
 
 def _resolve_dashboard_dir():
@@ -6353,9 +6424,11 @@ def restart_bot(new_token):
 # Function to load token data from a file
 def load_token_data():
     if not os.path.exists(TOKEN_FILE_PATH):
+        launch_dir = launch_target_dir()
         legacy_token_candidates = [
             Path.cwd() / 'token_data.json',
             Path(__file__).resolve().parent / 'token_data.json',
+            Path(launch_dir) / 'token_data.json' if launch_dir else None,
         ]
 
         local_app_data = os.getenv('LOCALAPPDATA')
@@ -6367,6 +6440,8 @@ def load_token_data():
             ])
 
         for candidate in legacy_token_candidates:
+            if candidate is None:
+                continue
             if not candidate.exists() or str(candidate) == TOKEN_FILE_PATH:
                 continue
 
