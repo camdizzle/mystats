@@ -1006,6 +1006,13 @@ def _ensure_team_data_locations():
     TEAM_DATA_MIGRATION_DONE = True
 
 
+def _legacy_results_roots():
+    return [
+        Path(application_install_path()) / 'Results',
+        Path.cwd() / 'Results',
+    ]
+
+
 def _season_directory_candidates():
     results_root = APPDATA_ROOT / 'Results'
     candidates = []
@@ -1029,7 +1036,72 @@ def _season_directory_candidates():
         if current_dir_path not in candidates:
             candidates.append(current_dir_path)
 
+    # Legacy installs often stored results beside the executable/script.
+    for legacy_root in _legacy_results_roots():
+        if not legacy_root.exists():
+            continue
+        legacy_season_dirs = sorted(
+            [d for d in legacy_root.iterdir() if d.is_dir() and d.name.lower().startswith('season_')],
+            key=lambda p: p.name,
+            reverse=True,
+        )
+        for season_dir in legacy_season_dirs:
+            if season_dir not in candidates:
+                candidates.append(season_dir)
+
     return candidates
+
+
+def _migrate_season_results_if_needed(season_directory, season_value):
+    destination = Path(season_directory)
+    destination.mkdir(parents=True, exist_ok=True)
+
+    destination_has_results = bool(list(destination.glob('allraces_*.csv')))
+    if destination_has_results:
+        return
+
+    source_candidates = []
+    current_directory = str(config.get_setting('directory') or '').strip()
+    if current_directory:
+        source_candidates.append(Path(current_directory))
+
+    for root in _legacy_results_roots():
+        source_candidates.append(root / f"Season_{season_value}")
+
+    seen = set()
+    patterns = [
+        'allraces_*.csv',
+        'checkpoints_*.csv',
+        'tilts_*.csv',
+        'maps_*.csv',
+        'competitive_raid_streamer_stats.jsonl',
+        'competitive_raid_payload_fields.json',
+    ]
+
+    for source in source_candidates:
+        source_key = str(source)
+        if source_key in seen:
+            continue
+        seen.add(source_key)
+
+        if not source.exists() or source == destination:
+            continue
+
+        copied_any = False
+        for pattern in patterns:
+            for source_file in source.glob(pattern):
+                destination_file = destination / source_file.name
+                if destination_file.exists():
+                    continue
+                try:
+                    shutil.copy2(source_file, destination_file)
+                    copied_any = True
+                except OSError as exc:
+                    logger.warning("Failed to migrate season file from %s to %s: %s", source_file, destination_file, exc)
+
+        if copied_any:
+            print(f"Migrated season results from {source} to {destination}")
+            return
 
 
 def _migrate_data_file_if_needed(destination_path, source_candidates, label):
@@ -9598,7 +9670,11 @@ def create_results_files():
     timestamp, timestampMDY, timestampHMS, adjusted_time = time_manager.get_adjusted_time()
 
     base_directory = appdata_path()
-    directory = os.path.join(base_directory, "Results", "Season_" + str(config.get_setting('season')))
+    season_value = str(config.get_setting('season'))
+    directory = os.path.join(base_directory, "Results", "Season_" + season_value)
+
+    _migrate_season_results_if_needed(directory, season_value)
+
     config.set_setting('directory', directory, persistent=True)
     if not os.path.exists(directory):
         os.makedirs(directory)
