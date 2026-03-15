@@ -168,12 +168,22 @@ logger.propagate = False  # All output goes strictly to the log file, not the co
 
 APPDATA_ROOT = Path('/appdata/local/mystats')
 APPDATA_ROOT.mkdir(parents=True, exist_ok=True)
+CYCLE_DATA_ROOT = APPDATA_ROOT / 'CycleData'
+CYCLE_DATA_ROOT.mkdir(parents=True, exist_ok=True)
+TEAM_DATA_ROOT = APPDATA_ROOT / 'TeamData'
+TEAM_DATA_ROOT.mkdir(parents=True, exist_ok=True)
 
 
 def appdata_path(*parts):
     path = APPDATA_ROOT.joinpath(*parts)
     path.parent.mkdir(parents=True, exist_ok=True)
     return str(path)
+
+
+def application_install_path():
+    if getattr(sys, 'frozen', False):
+        return str(Path(sys.executable).resolve().parent)
+    return str(Path(__file__).resolve().parent)
 
 # Log errors and milestones (INFO and above) to mystats.log only
 _log_file_handler = logging.FileHandler(appdata_path("mystats.log"), encoding="utf-8")
@@ -271,6 +281,7 @@ TEAM_POINTS_CACHE_LOCK = threading.Lock()
 TEAM_EMOTE_CACHE_LOCK = threading.Lock()
 TEAM_EMOTE_CACHE_TTL_SECONDS = 900
 TEAM_EMOTE_CACHE = {'expires_at': 0.0, 'channel': '', 'lookup': {}}
+TEAM_DATA_MIGRATION_DONE = False
 
 SUPPORTED_UI_LANGUAGES = {'en', 'es', 'fr', 'de', 'pt', 'au'}
 
@@ -963,13 +974,97 @@ def format_user_tag(value, default='unknown'):
 
 
 def _team_data_path():
-    base_dir = config.get_setting('directory') or '.'
-    return os.path.join(base_dir, TEAM_DATA_FILE)
+    _ensure_team_data_locations()
+    return str(TEAM_DATA_ROOT / TEAM_DATA_FILE)
 
 
 def _team_points_cache_path():
-    base_dir = config.get_setting('directory') or '.'
-    return os.path.join(base_dir, TEAM_POINTS_CACHE_FILE)
+    _ensure_team_data_locations()
+    return str(TEAM_DATA_ROOT / TEAM_POINTS_CACHE_FILE)
+
+
+def _ensure_team_data_locations():
+    global TEAM_DATA_MIGRATION_DONE
+    if TEAM_DATA_MIGRATION_DONE:
+        return
+    if 'config' not in globals():
+        return
+    _migrate_team_data_files_if_needed()
+    TEAM_DATA_MIGRATION_DONE = True
+
+
+def _season_directory_candidates():
+    results_root = APPDATA_ROOT / 'Results'
+    candidates = []
+    preferred = results_root / 'Season_67'
+    if preferred.exists():
+        candidates.append(preferred)
+
+    if results_root.exists():
+        season_dirs = sorted(
+            [d for d in results_root.iterdir() if d.is_dir() and d.name.lower().startswith('season_')],
+            key=lambda p: p.name,
+            reverse=True,
+        )
+        for season_dir in season_dirs:
+            if season_dir not in candidates:
+                candidates.append(season_dir)
+
+    current_directory = config.get_setting('directory')
+    if current_directory:
+        current_dir_path = Path(current_directory)
+        if current_dir_path not in candidates:
+            candidates.append(current_dir_path)
+
+    return candidates
+
+
+def _migrate_data_file_if_needed(destination_path, source_candidates, label):
+    destination = Path(destination_path)
+    if destination.exists():
+        return
+
+    seen = set()
+    for source in source_candidates:
+        source = Path(source)
+        source_key = str(source.resolve()) if source.exists() else str(source)
+        if source_key in seen:
+            continue
+        seen.add(source_key)
+
+        if not source.exists() or source == destination:
+            continue
+
+        try:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, destination)
+            print(f"Migrated {label} from {source} to {destination}")
+            return
+        except OSError as exc:
+            print(f"Failed to migrate {label} from {source} to {destination}: {exc}")
+
+
+def _migrate_team_data_files_if_needed():
+    team_destination = TEAM_DATA_ROOT / TEAM_DATA_FILE
+    team_cache_destination = TEAM_DATA_ROOT / TEAM_POINTS_CACHE_FILE
+
+    season_candidates = _season_directory_candidates()
+    team_sources = [season / TEAM_DATA_FILE for season in season_candidates]
+    team_cache_sources = [season / TEAM_POINTS_CACHE_FILE for season in season_candidates]
+
+    team_sources.extend([
+        APPDATA_ROOT / TEAM_DATA_FILE,
+        Path.cwd() / TEAM_DATA_FILE,
+        Path(__file__).resolve().parent / TEAM_DATA_FILE,
+    ])
+    team_cache_sources.extend([
+        APPDATA_ROOT / TEAM_POINTS_CACHE_FILE,
+        Path.cwd() / TEAM_POINTS_CACHE_FILE,
+        Path(__file__).resolve().parent / TEAM_POINTS_CACHE_FILE,
+    ])
+
+    _migrate_data_file_if_needed(team_destination, team_sources, 'team data')
+    _migrate_data_file_if_needed(team_cache_destination, team_cache_sources, 'team points cache')
 
 
 def _load_team_data():
@@ -3654,8 +3749,31 @@ def _invalidate_dashboard_cache():
 
 
 def _mycycle_file_path():
-    base_dir = config.get_setting('directory') or os.getcwd()
-    return os.path.join(base_dir, MYCYCLE_FILE_NAME)
+    return str(CYCLE_DATA_ROOT / MYCYCLE_FILE_NAME)
+
+
+def _migrate_mycycle_file_if_needed():
+    destination = CYCLE_DATA_ROOT / MYCYCLE_FILE_NAME
+    season_candidates = _season_directory_candidates()
+
+    legacy_candidates = [season / MYCYCLE_FILE_NAME for season in season_candidates]
+    legacy_candidates.extend([
+        APPDATA_ROOT / MYCYCLE_FILE_NAME,
+        Path.cwd() / MYCYCLE_FILE_NAME,
+        Path(__file__).resolve().parent / MYCYCLE_FILE_NAME,
+    ])
+
+    local_app_data = os.getenv('LOCALAPPDATA')
+    if local_app_data:
+        local_app_data_path = Path(local_app_data)
+        legacy_candidates.extend([
+            local_app_data_path / 'mystats' / MYCYCLE_FILE_NAME,
+            local_app_data_path / 'mystats' / 'data' / MYCYCLE_FILE_NAME,
+            local_app_data_path / 'MyStats' / MYCYCLE_FILE_NAME,
+            local_app_data_path / 'MyStats' / 'data' / MYCYCLE_FILE_NAME,
+        ])
+
+    _migrate_data_file_if_needed(destination, legacy_candidates, 'MyCycle data')
 
 
 def _empty_placement_counts(min_place, max_place):
@@ -6678,12 +6796,17 @@ def open_settings_window():
         tray_support_text += " [pystray not available]"
     ttk.Checkbutton(general_tab, text=tray_support_text, variable=minimize_to_tray_var).grid(row=6, column=0, columnspan=2, sticky="w", pady=(0, 4))
 
-    ttk.Label(general_tab, text=tr("Mystats Directory")).grid(row=8, column=0, sticky="w", pady=(0, 4))
-    directory_value = appdata_path()
-    directory_entry = ttk.Entry(general_tab, width=55)
-    directory_entry.grid(row=9, column=0, sticky="ew", pady=(0, 4), columnspan=2)
-    directory_entry.insert(0, directory_value)
-    directory_entry.config(state="readonly")
+    ttk.Label(general_tab, text="Application Directory").grid(row=8, column=0, sticky="w", pady=(0, 4))
+    application_directory_entry = ttk.Entry(general_tab, width=55)
+    application_directory_entry.grid(row=9, column=0, sticky="ew", pady=(0, 4), columnspan=2)
+    application_directory_entry.insert(0, application_install_path())
+    application_directory_entry.config(state="readonly")
+
+    ttk.Label(general_tab, text="MyStats Files Directory").grid(row=10, column=0, sticky="w", pady=(0, 4))
+    files_directory_entry = ttk.Entry(general_tab, width=55)
+    files_directory_entry.grid(row=11, column=0, sticky="ew", pady=(0, 4), columnspan=2)
+    files_directory_entry.insert(0, appdata_path())
+    files_directory_entry.config(state="readonly")
 
     def open_directory():
         directory_path = appdata_path()
@@ -6692,7 +6815,7 @@ def open_settings_window():
         else:
             messagebox.showerror("Error", "Directory path does not exist.")
 
-    ttk.Button(general_tab, text=tr("Open Location"), command=open_directory).grid(row=10, column=0, sticky="w", pady=(4, 0))
+    ttk.Button(general_tab, text=tr("Open Location"), command=open_directory).grid(row=12, column=0, sticky="w", pady=(4, 0))
     general_tab.grid_columnconfigure(0, weight=1)
 
     # --- Audio tab ---
@@ -8843,7 +8966,7 @@ class ConfigManager:
         self.transient_settings = {}
         self.persistent_keys = {'TWITCH_USERNAME', 'TWITCH_TOKEN', 'CHANNEL', 'chunk_alert', 'chunk_alert_value',
                                 'marble_day', 'allraces_file', 'announcedelay', 'announcedelayseconds',
-                                'directory', 'race_file', 'br_file', 'season', 'reset_audio', 'sync', 'MPL',
+                                'directory', 'app_install_directory', 'race_file', 'br_file', 'season', 'reset_audio', 'sync', 'MPL',
                                 'chunk_alert_sound', 'reset_audio_sound', 'audio_device', 'checkpoint_file',
                                 'tilt_player_file', 'active_event_ids', 'paused_event_ids', 'checkpoint_results_file',
                                 'tilts_results_file', 'tilt_level_file', 'map_data_file', 'map_results_file',
@@ -8920,6 +9043,7 @@ class ConfigManager:
             'minimize_to_tray': 'False',
             'tray_hint_toast_shown': 'False',
             'app_language': 'en',
+            'app_install_directory': '',
             'season_quests_enabled': 'True',
             'season_quest_target_races': '1000',
             'season_quest_target_points': '500000',
@@ -9156,6 +9280,7 @@ def get_internal_now_iso(timespec='seconds'):
 
 def data_sync():
     config.set_setting('data_sync', 'yes', persistent=False)
+    config.set_setting('app_install_directory', application_install_path(), persistent=True)
 
 
 def process_event_data(event_id):
@@ -9283,9 +9408,8 @@ def process_event_data(event_id):
         except Exception as e:
             logger.error("An error occurred while processing the file %s", checkpoint_file, exc_info=True)
 
-    # Use %localappdata%/mystats/data as the save directory
-    local_app_data = os.getenv('LOCALAPPDATA')
-    save_directory = os.path.join(local_app_data, 'mystats', 'data')
+    # Store event export files under MyStats appdata root
+    save_directory = appdata_path('data')
 
     # Ensure the directory exists
     if not os.path.exists(save_directory):
@@ -9367,6 +9491,45 @@ def write_overlays():
             f.write("0\n")
 
 
+def _marbles_savegames_dir_candidates():
+    candidates = []
+    local_app_data = os.getenv('LOCALAPPDATA')
+    if local_app_data:
+        candidates.append(Path(local_app_data) / "MarblesOnStream" / "Saved" / "SaveGames")
+
+    candidates.append(Path.home() / "AppData" / "Local" / "MarblesOnStream" / "Saved" / "SaveGames")
+
+    seen = set()
+    unique_candidates = []
+    for candidate in candidates:
+        resolved = str(candidate)
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        unique_candidates.append(candidate)
+    return unique_candidates
+
+
+def _resolve_marbles_savegame_file(filename):
+    candidates = [base / filename for base in _marbles_savegames_dir_candidates()]
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate)
+    return str(candidates[0]) if candidates else filename
+
+
+def _configure_savegame_path(setting_key, filename, timestamp):
+    resolved_path = _resolve_marbles_savegame_file(filename)
+    config.set_setting(setting_key, resolved_path, persistent=True)
+    try:
+        open(resolved_path, "r", encoding='utf-8', errors='ignore').close()
+    except FileNotFoundError:
+        with open(appdata_path('log.txt'), 'a', encoding='utf-8', errors='ignore') as f:
+            f.write(f"[{timestamp}]  - {resolved_path} does not exist\n")
+    except Exception:
+        logger.error("Unable to read savegame file at %s", resolved_path, exc_info=True)
+
+
 def create_results_files():
     timestamp, timestampMDY, timestampHMS, adjusted_time = time_manager.get_adjusted_time()
 
@@ -9375,6 +9538,8 @@ def create_results_files():
     config.set_setting('directory', directory, persistent=True)
     if not os.path.exists(directory):
         os.makedirs(directory)
+
+    _migrate_mycycle_file_if_needed()
 
     allraces = os.path.join(directory, "allraces_" + adjusted_time.strftime("%Y-%m-%d") + ".csv")
     config.set_setting('allraces_file', allraces, persistent=True)
@@ -9400,77 +9565,12 @@ def create_results_files():
         with open(map_results, 'w', encoding='utf-8') as commmap_tmp:
             pass
 
-    br_file = os.path.expanduser(r"~\AppData\Local\MarblesOnStream\Saved\SaveGames\LastSeasonRoyale.csv")
-    config.set_setting('br_file', br_file, persistent=True)
-    try:
-        open(br_file, "r", encoding='utf-8', errors='ignore').close()
-    except FileNotFoundError:
-        with open(appdata_path('log.txt'), 'a') as f:
-            f.write(
-                f"[{timestamp}]  - ~\\AppData\\Local\\MarblesOnStream\\Saved\\SaveGames\\LastSeasonRoyale.csv "
-                f"does not exist\n")
-    except Exception as e:
-        logger.error("We see no record of you hosting a Battle Royale.  Do that.", exc_info=True)
-
-    race_file = os.path.expanduser(r"~\AppData\Local\MarblesOnStream\Saved\SaveGames\LastSeasonRace.csv")
-    config.set_setting('race_file', race_file, persistent=True)
-    try:
-        open(race_file, "r", encoding='utf-8', errors='ignore').close()
-    except FileNotFoundError:
-        with open(appdata_path('log.txt'), 'a') as f:
-            f.write(
-                f"[{timestamp}]  - ~\\AppData\\Local\\MarblesOnStream\\Saved\\SaveGames\\LastSeasonRace.csv "
-                f"does not exist\n")
-    except Exception as e:
-        logger.error("We see no record of you hosting a map race.  Do that.", exc_info=True)
-
-    tilt_player_file = os.path.expanduser(r"~\AppData\Local\MarblesOnStream\Saved\SaveGames\LastTiltLevelPlayers.csv")
-    config.set_setting('tilt_player_file', tilt_player_file, persistent=True)
-    try:
-        open(tilt_player_file, "r", encoding='utf-8', errors='ignore').close()
-    except FileNotFoundError:
-        with open(appdata_path('log.txt'), 'a') as f:
-            f.write(
-                f"[{timestamp}]  - ~\\AppData\\Local\\MarblesOnStream\\Saved\\SaveGames\\LastTiltLevelPlayers.csv "
-                f"does not exist\n")
-    except Exception as e:
-        logger.error("No tilt file, tilt again or get tilted.", exc_info=True)
-
-    tilt_level_file = os.path.expanduser(r"~\AppData\Local\MarblesOnStream\Saved\SaveGames\LastTiltLevel.csv")
-    config.set_setting('tilt_level_file', tilt_level_file, persistent=True)
-    try:
-        open(tilt_level_file, "r", encoding='utf-8', errors='ignore').close()
-    except FileNotFoundError:
-        with open(appdata_path('log.txt'), 'a') as f:
-            f.write(
-                f"[{timestamp}]  - ~\\AppData\\Local\\MarblesOnStream\\Saved\\SaveGames\\LastTiltLevel.csv "
-                f"does not exist\n")
-    except Exception as e:
-        logger.error("No tilt file, tilt again or get tilted.", exc_info=True)
-
-    checkpoint_file = os.path.expanduser(r"~\AppData\Local\MarblesOnStream\Saved\SaveGames\LastRaceNumbersHit.csv")
-    config.set_setting('checkpoint_file', checkpoint_file, persistent=True)
-    try:
-        open(checkpoint_file, "r", encoding='utf-8', errors='ignore').close()
-    except FileNotFoundError:
-        with open(appdata_path('log.txt'), 'a') as f:
-            f.write(
-                f"[{timestamp}]  - ~\\AppData\\Local\\MarblesOnStream\\Saved\\SaveGames\\LastRaceNumbersHit.csv "
-                f"does not exist\n")
-    except Exception as e:
-        logger.error("We see no record.  Do something.", exc_info=True)
-
-    map_file = os.path.expanduser(r"~\AppData\Local\MarblesOnStream\Saved\SaveGames\LastCustomRaceMapPlayed.csv")
-    config.set_setting('map_data_file', map_file, persistent=True)
-    try:
-        open(map_file, "r", encoding='utf-8', errors='ignore').close()
-    except FileNotFoundError:
-        with open(appdata_path('log.txt'), 'a') as f:
-            f.write(
-                f"[{timestamp}]  - ~\\AppData\\Local\\MarblesOnStream\\Saved\\SaveGames\\LastCustomRaceMapPlayed.csv "
-                f"does not exist\n")
-    except Exception as e:
-        logger.error("We see no record.  Do something.", exc_info=True)
+    _configure_savegame_path('br_file', 'LastSeasonRoyale.csv', timestamp)
+    _configure_savegame_path('race_file', 'LastSeasonRace.csv', timestamp)
+    _configure_savegame_path('tilt_player_file', 'LastTiltLevelPlayers.csv', timestamp)
+    _configure_savegame_path('tilt_level_file', 'LastTiltLevel.csv', timestamp)
+    _configure_savegame_path('checkpoint_file', 'LastRaceNumbersHit.csv', timestamp)
+    _configure_savegame_path('map_data_file', 'LastCustomRaceMapPlayed.csv', timestamp)
 
 
 def load_racer_data():
@@ -10580,7 +10680,10 @@ def ensure_channel_name_configured(parent=None):
 # Replace messagebox.showwarning with show_update_message in ver_season_only()
 def ver_season_only():
     load_racer_data()
-    ensure_channel_name_configured(root)
+    channel = ensure_channel_name_configured(root)
+    if not channel:
+        print("Channel is missing. Skipping version/season API call.")
+        return None
 
     channel = config.get_setting('CHANNEL')
     api_url = f"https://mystats.camwow.tv/api/app/settings?channel={channel}"
@@ -10696,7 +10799,7 @@ def reset_season_stats():
     config.set_setting('new_season', 'False', persistent=False)
 
 
-def reset():
+def reset(run_version_check=True):
     reset_timestamp, reset_timestampmdy, reset_timestamphms, reset_adjusted_time = time_manager.get_adjusted_time()
     if config.get_setting('startup') == 'yes':
         config.set_setting('startup', 'no', persistent=False)
@@ -10728,7 +10831,8 @@ def reset():
 
     write_overlays()
     data_sync()
-    ver_season_only()
+    if run_version_check:
+        ver_season_only()
     create_results_files()
     update_config_labels()
 
@@ -10759,25 +10863,21 @@ def display_welcome_message(text_widget, version, config, timestamp):
 
 def startup(text_widget):
     print("\nCommunicating with server to check for updates...\n")
-    ensure_channel_name_configured(root)
+    channel = ensure_channel_name_configured(root)
     config.set_setting('startup', 'yes', persistent=False)
     config.set_setting('data_sync', 'yes', persistent=False)
-    create_results_files()
+    config.set_setting('app_install_directory', application_install_path(), persistent=True)
 
-    def _post_version_check():
-        """Run on main thread once the version-check thread completes."""
-        timestamp, timestampMDY, timestampHMS, adjusted_time = time_manager.get_adjusted_time()
-        if config.get_setting('new_season') == 'True':
-            reset_season_stats()
-        if config.get_setting('marble_day') != timestampMDY:
-            reset()
-
-    def _run_version_check():
+    if channel:
         ver_season_only()
-        root.after(0, _post_version_check)
 
-    threading.Thread(target=_run_version_check, daemon=True).start()
+    timestamp, timestampMDY, timestampHMS, adjusted_time = time_manager.get_adjusted_time()
+    if config.get_setting('new_season') == 'True':
+        reset_season_stats()
+    if config.get_setting('marble_day') != timestampMDY:
+        reset(run_version_check=False)
 
+    create_results_files()
     refresh_tilt_lifetime_xp_from_leaderboard()
     load_additional_settings()
     write_overlays()
@@ -13365,9 +13465,8 @@ def process_season(directory, season):
         except Exception as e:
             logger.error("An error occurred while processing the file %s", allraces, exc_info=True)
 
-    # Use %localappdata%/mystats/data as the save directory
-    local_app_data = os.getenv('LOCALAPPDATA')
-    save_directory = os.path.join(local_app_data, 'mystats', 'data')
+    # Store data sync exports under MyStats appdata root
+    save_directory = appdata_path('data')
 
     # Ensure the directory exists
     if not os.path.exists(save_directory):
