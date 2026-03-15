@@ -4868,7 +4868,6 @@ def _dashboard_dir_candidates():
     local_app_candidates = []
     if local_app_data:
         local_app_candidates = [
-            os.path.join(local_app_data, "MyStats", "MyStats", "modern_dashboard"),
             os.path.join(local_app_data, "MyStats", "modern_dashboard"),
             os.path.join(local_app_data, "mystats", "modern_dashboard"),
         ]
@@ -4904,7 +4903,6 @@ def _readme_file_candidates():
     local_app_candidates = []
     if local_app_data:
         local_app_candidates = [
-            os.path.join(local_app_data, "MyStats", "MyStats", "README.html"),
             os.path.join(local_app_data, "MyStats", "README.html"),
             os.path.join(local_app_data, "mystats", "README.html"),
         ]
