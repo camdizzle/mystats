@@ -4862,12 +4862,24 @@ OVERLAY_DIR = _resolve_overlay_dir()
 def _dashboard_dir_candidates():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     executable_dir = os.path.dirname(os.path.abspath(sys.executable))
+    install_dir = application_install_path()
     argv0_dir = launch_target_dir()
+    local_app_data = os.getenv('LOCALAPPDATA')
+    local_app_candidates = []
+    if local_app_data:
+        local_app_candidates = [
+            os.path.join(local_app_data, "MyStats", "MyStats", "modern_dashboard"),
+            os.path.join(local_app_data, "MyStats", "modern_dashboard"),
+            os.path.join(local_app_data, "mystats", "modern_dashboard"),
+        ]
+
     candidates = [
         os.path.join(script_dir, "modern_dashboard"),
+        os.path.join(install_dir, "modern_dashboard") if install_dir else '',
         os.path.join(argv0_dir, "modern_dashboard") if argv0_dir else '',
         os.path.join(executable_dir, "modern_dashboard"),
         os.path.join(os.getcwd(), "modern_dashboard"),
+        *local_app_candidates,
     ]
 
     meipass = getattr(sys, "_MEIPASS", None)
@@ -4886,12 +4898,24 @@ def _dashboard_dir_candidates():
 def _readme_file_candidates():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     executable_dir = os.path.dirname(os.path.abspath(sys.executable))
+    install_dir = application_install_path()
     argv0_dir = launch_target_dir()
+    local_app_data = os.getenv('LOCALAPPDATA')
+    local_app_candidates = []
+    if local_app_data:
+        local_app_candidates = [
+            os.path.join(local_app_data, "MyStats", "MyStats", "README.html"),
+            os.path.join(local_app_data, "MyStats", "README.html"),
+            os.path.join(local_app_data, "mystats", "README.html"),
+        ]
+
     candidates = [
         os.path.join(script_dir, "README.html"),
+        os.path.join(install_dir, "README.html") if install_dir else '',
         os.path.join(argv0_dir, "README.html") if argv0_dir else '',
         os.path.join(executable_dir, "README.html"),
         os.path.join(os.getcwd(), "README.html"),
+        *local_app_candidates,
     ]
 
     meipass = getattr(sys, "_MEIPASS", None)
