@@ -6368,6 +6368,7 @@ TOKEN_FILE_PATH = appdata_path('token_data.json')
 DEFAULT_BOT_USERNAME = 'mystats_results'
 TOKEN_REFRESH_EARLY_SECONDS = 300
 TOKEN_VALIDATION_CONSOLE_LOGGED = False
+TOKEN_VALIDATION_LOG_LOCK = threading.Lock()
 
 
 def clear_invalid_token_data(reason):
@@ -6648,9 +6649,11 @@ def verify_token(token, emit_console=True):
     logger.info("API call: Twitch token validation")
     response = requests.get(verify_url, headers=headers)
     if response.status_code == 200:
-        if emit_console and not TOKEN_VALIDATION_CONSOLE_LOGGED:
-            print("Token is valid.", end="\r\n")
-            TOKEN_VALIDATION_CONSOLE_LOGGED = True
+        if emit_console:
+            with TOKEN_VALIDATION_LOG_LOCK:
+                if not TOKEN_VALIDATION_CONSOLE_LOGGED:
+                    print("Token is valid.", end="\r\n")
+                    TOKEN_VALIDATION_CONSOLE_LOGGED = True
         return True
     else:
         if emit_console:
