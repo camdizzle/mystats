@@ -3840,12 +3840,22 @@ def _mycycle_file_path():
 def _migrate_mycycle_file_if_needed():
     destination = CYCLE_DATA_ROOT / MYCYCLE_FILE_NAME
     season_candidates = _season_directory_candidates()
+    install_root = Path(application_install_path())
+    script_root = Path(__file__).resolve().parent
 
     legacy_candidates = [season / MYCYCLE_FILE_NAME for season in season_candidates]
     legacy_candidates.extend([
         APPDATA_ROOT / MYCYCLE_FILE_NAME,
+        APPDATA_ROOT / 'data' / MYCYCLE_FILE_NAME,
         Path.cwd() / MYCYCLE_FILE_NAME,
-        Path(__file__).resolve().parent / MYCYCLE_FILE_NAME,
+        Path.cwd() / 'data' / MYCYCLE_FILE_NAME,
+        Path.cwd() / 'CycleData' / MYCYCLE_FILE_NAME,
+        install_root / MYCYCLE_FILE_NAME,
+        install_root / 'data' / MYCYCLE_FILE_NAME,
+        install_root / 'CycleData' / MYCYCLE_FILE_NAME,
+        script_root / MYCYCLE_FILE_NAME,
+        script_root / 'data' / MYCYCLE_FILE_NAME,
+        script_root / 'CycleData' / MYCYCLE_FILE_NAME,
     ])
 
     local_app_data = os.getenv('LOCALAPPDATA')
