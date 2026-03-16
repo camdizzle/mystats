@@ -5082,6 +5082,14 @@ def _build_overlay_header_stats(data_dir):
     season_entries = 0
     season_races = 0
     season_unique = set()
+    season_race_points = 0
+    season_race_entries = 0
+    season_race_unique = set()
+    season_race_only = 0
+    season_br_points = 0
+    season_br_entries = 0
+    season_br_unique = set()
+    season_brs = 0
 
     for allraces in glob.glob(os.path.join(data_dir, "allraces_*.csv")):
         try:
@@ -5093,6 +5101,7 @@ def _build_overlay_header_stats(data_dir):
                     if racer:
                         season_unique.add(racer.lower())
                     points = _safe_int(row[3])
+                    race_mode = str(row[4] or '').strip().lower() if len(row) > 4 else ''
                     if points == 0:
                         continue
                     if not racer:
@@ -5101,6 +5110,18 @@ def _build_overlay_header_stats(data_dir):
                     season_entries += 1
                     if _is_first_place_row(row):
                         season_races += 1
+                    if race_mode == 'br':
+                        season_br_points += points
+                        season_br_entries += 1
+                        season_br_unique.add(racer.lower())
+                        if _is_first_place_row(row):
+                            season_brs += 1
+                    else:
+                        season_race_points += points
+                        season_race_entries += 1
+                        season_race_unique.add(racer.lower())
+                        if _is_first_place_row(row):
+                            season_race_only += 1
         except Exception:
             continue
 
@@ -5112,6 +5133,10 @@ def _build_overlay_header_stats(data_dir):
     today_br_entries = 0
     today_br_unique = set()
     today_brs = 0
+    today_race_points = 0
+    today_race_entries = 0
+    today_race_unique = set()
+    today_race_only = 0
     today_file = config.get_setting('allraces_file')
     if today_file:
         try:
@@ -5138,6 +5163,12 @@ def _build_overlay_header_stats(data_dir):
                         today_br_unique.add(racer.lower())
                         if _is_first_place_row(row):
                             today_brs += 1
+                    else:
+                        today_race_points += points
+                        today_race_entries += 1
+                        today_race_unique.add(racer.lower())
+                        if _is_first_place_row(row):
+                            today_race_only += 1
         except Exception:
             pass
 
@@ -5148,9 +5179,18 @@ def _build_overlay_header_stats(data_dir):
         'unique_racers_season': len(season_unique),
         'total_races_today': today_races,
         'total_races_season': season_races,
+        'race_avg_points_today': round((today_race_points / today_race_entries), 2) if today_race_entries else 0,
+        'race_racers_today': len(today_race_unique),
+        'total_race_only_today': today_race_only,
+        'race_avg_points_season': round((season_race_points / season_race_entries), 2) if season_race_entries else 0,
+        'race_racers_season': len(season_race_unique),
+        'total_race_only_season': season_race_only,
         'br_avg_points_today': round((today_br_points / today_br_entries), 2) if today_br_entries else 0,
         'br_racers_today': len(today_br_unique),
         'total_brs_today': today_brs,
+        'br_avg_points_season': round((season_br_points / season_br_entries), 2) if season_br_entries else 0,
+        'br_racers_season': len(season_br_unique),
+        'total_brs_season': season_brs,
     }
 
 
