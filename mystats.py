@@ -5055,7 +5055,7 @@ def normalize_overlay_mode(value):
 
 
 def set_overlay_mode(mode):
-    config.set_setting('overlay_active_mode', normalize_overlay_mode(mode), persistent=False)
+    config.set_setting('overlay_active_mode', normalize_overlay_mode(mode), persistent=True)
 
 
 def get_overlay_mode():
@@ -5377,6 +5377,8 @@ def _overlay_recent_race_payload(race_file):
                     'placement': placement,
                     'name': _overlay_display_name(row[2], row[1]),
                     'points': _safe_int(row[3]),
+                    'kills': _safe_int(row[8] if len(row) > 8 else 0),
+                    'damage': _safe_int(row[9] if len(row) > 9 else 0),
                     'finished': not (len(row) >= 8 and str(row[7]).strip().lower() == 'true'),
                 })
     except Exception:
@@ -5502,7 +5504,7 @@ def _build_overlay_top3_payload():
         'title': 'MyStats Live Results',
         'views': views,
         'recent_race_top3': {
-            'title': 'Top 3 Latest Race',
+            'title': '👑 Latest BR Winner 👑' if str(recent_race.get('race_type') or '').strip().lower() == 'br' else 'Top 3 Latest Race',
             'rows': recent_race['top3_rows'],
             'race_key': recent_race['race_key'],
             'race_type': recent_race['race_type'],
@@ -9295,7 +9297,7 @@ class ConfigManager:
                                 'teams_tep_threshold', 'teams_tep_per_race', 'teams_tep_bonus_duration_minutes', 'teams_tep_bits_cooldown_minutes',
                                 'teams_tep_member_daily_cap', 'teams_tep_team_daily_cap',
                                 'teams_bonus_weight_15', 'teams_bonus_weight_25', 'teams_bonus_weight_35', 'teams_bonus_weight_67',
-                                'overlay_rotation_seconds', 'overlay_refresh_seconds', 'overlay_theme',
+                                'overlay_active_mode', 'overlay_rotation_seconds', 'overlay_refresh_seconds', 'overlay_theme',
                                 'overlay_card_opacity', 'overlay_text_scale', 'overlay_show_medals',
                                 'overlay_compact_rows', 'overlay_horizontal_layout', 'overlay_horizontal_feed_season', 'overlay_horizontal_feed_today',
                                 'overlay_horizontal_feed_races_season', 'overlay_horizontal_feed_brs_season', 'overlay_horizontal_feed_races_today',
@@ -9390,6 +9392,7 @@ class ConfigManager:
             'chunk_alert_value': '1000',
             'overlay_rotation_seconds': '10',
             'overlay_refresh_seconds': '3',
+            'overlay_active_mode': 'race',
             'overlay_server_port': '5000',
             'overlay_theme': 'midnight',
             'overlay_card_opacity': '84',
@@ -15474,13 +15477,19 @@ async def royale(bot):
             winner_label = winner_display
         return winner_login, winner_display, winner_label
 
-    def build_br_winner_message(*, crownwin, chunk_alert, winner_label, points, kills, damage, total_points, wins, races):
-        prefix = "🧃 " if chunk_alert else ""
+    def build_br_winner_message(*, crownwin, juice_alert, mega_win, winner_label, points, kills, damage, total_points, wins, races):
         event_text = "CROWN WIN! 👑" if crownwin else "Battle Royale Champion 🏆"
+        if mega_win:
+            alert_text = f"💥 MEGA WIN! {event_text}"
+        elif juice_alert:
+            alert_text = f"🧃 JUICE ALERT! {event_text}"
+        else:
+            alert_text = event_text
+
         wins_int = _safe_int(wins)
         races_int = _safe_int(races)
         return (
-            f"{prefix}{event_text}: {winner_label} +{points:,} points, +{kills:,} eliminations, +{damage:,} damage | "
+            f"{alert_text}: {winner_label} +{points:,} points, +{kills:,} eliminations, +{damage:,} damage | "
             f"Today's stats: {total_points:,} points, {wins_int} {pluralize(wins_int, 'win')}, {races_int:,} {pluralize(races_int, 'race')}"
         )
 
@@ -15798,9 +15807,13 @@ async def royale(bot):
                     wkills = str(winner_kills)
                     wdam = str(winner_damage)
 
+                    is_mega_win = current_score > 10000
+                    is_juice_alert = is_chunk_alert and not is_mega_win
+
                     message = build_br_winner_message(
                         crownwin=crownwin,
-                        chunk_alert=is_chunk_alert,
+                        juice_alert=is_juice_alert,
+                        mega_win=is_mega_win,
                         winner_label=winner_label,
                         points=current_score,
                         kills=winner_kills,

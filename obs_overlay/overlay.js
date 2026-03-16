@@ -475,6 +475,8 @@ function showLeaderboardView() {
   hideRecordOverlay();
   hideEventOverlay();
   document.body.classList.remove('top3-active');
+  document.body.classList.remove('br-winner-active');
+  document.body.classList.remove('br-mega-win-active');
   leaderboard?.classList.remove('is-top3-mode');
   if (splashScreen) {
     splashScreen.classList.remove('is-visible');
@@ -555,6 +557,37 @@ function renderTop3Rows(rows = [], title = '🔥 Latest Race Podium 🔥') {
   leaderboard.innerHTML = `${titleMarkup}${cardsMarkup}`;
 }
 
+function renderBrWinnerRows(rows = [], title = '👑 Battle Royale Champion 👑') {
+  if (!leaderboard) return;
+
+  const winner = rows.find((row) => row?.finished !== false) || rows[0];
+  if (!winner) return;
+
+  const isMegaWin = Number(winner.points || 0) > 10000;
+  document.body.classList.add('top3-active');
+  document.body.classList.add('br-winner-active');
+  if (isMegaWin) {
+    document.body.classList.add('br-mega-win-active');
+  } else {
+    document.body.classList.remove('br-mega-win-active');
+  }
+  leaderboard.classList.add('is-top3-mode');
+  leaderboard.scrollTop = 0;
+
+  const titleText = isMegaWin ? '💥 BR MEGA WIN 💥' : title;
+  const titleMarkup = `<li class="leaderboard-section-title" data-section-title="${escapeHtml(titleText)}">${escapeHtml(titleText)}</li>`;
+  const winnerMarkup = `
+    <li class="top3-card top3-card--1 top3-card--br-winner${isMegaWin ? ' top3-card--br-mega' : ''}">
+      <span class="top3-rank">${isMegaWin ? '💥 MEGA BR WINNER 💥' : '👑 BR WINNER'}</span>
+      <span class="top3-name">${escapeHtml(getDisplayName(winner, winner.placement || 1))}</span>
+      <span class="top3-points">Points Won: ${fmt(winner.points)} pts</span>
+      <span class="top3-meta">${fmt(winner.kills || 0)} kills • ${fmt(winner.damage || 0)} dmg</span>
+    </li>`;
+
+  leaderboard.innerHTML = `${titleMarkup}${winnerMarkup}`;
+}
+
+
 function showTop3ForTenSeconds(top3View) {
   if (settings.horizontalLayout) return;
   const finishedRows = (top3View?.rows || []).filter((row) => row?.finished !== false);
@@ -567,12 +600,19 @@ function showTop3ForTenSeconds(top3View) {
 
   const startPodiumView = () => {
     hideRecordOverlay();
-    renderTop3Rows(finishedRows, top3Title);
+    const raceType = normalizeRaceType(top3View?.race_type);
+    if (raceType === 'br') {
+      renderBrWinnerRows(finishedRows, top3Title || '👑 Battle Royale Champion 👑');
+    } else {
+      renderTop3Rows(finishedRows, top3Title);
+    }
 
     if (top3ShowTimeout) clearTimeout(top3ShowTimeout);
     top3ShowTimeout = setTimeout(() => {
       top3IsShowing = false;
       document.body.classList.remove('top3-active');
+      document.body.classList.remove('br-winner-active');
+      document.body.classList.remove('br-mega-win-active');
       leaderboard?.classList.remove('is-top3-mode');
       lastRenderedViewsKey = '';
       renderCombinedRows(currentViews);
@@ -1108,14 +1148,7 @@ function applyOverlayPayload(payload) {
     lastOverlayMode = overlayMode;
   }
 
-  if (currentSceneMode !== lastSceneMode) {
-    const prettyScene = String(currentSceneMode || 'race').replace(/[-_]+/g, ' ');
-    queueNarrativeEvent({
-      type: 'scene mode',
-      message: `Scene mode: ${prettyScene.toUpperCase()}`,
-    });
-    lastSceneMode = currentSceneMode;
-  }
+  lastSceneMode = currentSceneMode;
 
   currentLanguage = (racePayload?.settings?.language || 'en').toLowerCase();
   applyServerSettings(racePayload.settings || {});
@@ -1224,16 +1257,6 @@ function applyOverlayPayload(payload) {
 
   if (raceKey && raceKey !== lastRaceKey) {
     lastRaceKey = raceKey;
-    const firstPlace = Array.isArray(p?.recent_race_top3?.rows)
-      ? p.recent_race_top3.rows.find((row) => Number(row?.placement) === 1)
-      : null;
-    if (firstPlace?.name) {
-      const raceKind = normalizeRaceType(p?.recent_race_top3?.race_type);
-      queueNarrativeEvent({
-        type: raceKind === 'br' ? 'br winner' : 'race winner',
-        message: `${firstPlace.name} won with ${fmt(firstPlace.points)} points`,
-      });
-    }
     queueTop3Overlay(p.recent_race_top3);
   }
 }
