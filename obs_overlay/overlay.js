@@ -3,20 +3,35 @@ const leaderboard = $('leaderboard');
 const boardShell = document.querySelector('.board-shell');
 const splashScreen = $('splash-screen');
 const headerPillGroups = {
-  today: [
+  todayCombined: [
     $('stat-avg-today'),
     $('stat-uniq-today'),
     $('stat-races-today'),
   ],
-  season: [
+  seasonCombined: [
     $('stat-avg-season'),
     $('stat-uniq-season'),
     $('stat-races-season'),
   ],
-  br: [
+  todayRace: [
+    $('stat-race-avg-today'),
+    $('stat-race-racers-today'),
+    $('stat-race-total-today'),
+  ],
+  seasonRace: [
+    $('stat-race-avg-season'),
+    $('stat-race-racers-season'),
+    $('stat-race-total-season'),
+  ],
+  todayBr: [
     $('stat-br-avg-today'),
     $('stat-br-racers-today'),
     $('stat-br-total-today'),
+  ],
+  seasonBr: [
+    $('stat-br-avg-season'),
+    $('stat-br-racers-season'),
+    $('stat-br-total-season'),
   ],
 };
 const fmt = n => new Intl.NumberFormat().format(n || 0);
@@ -426,20 +441,29 @@ function updateHeaderStats(s = {}) {
   setPillValue('stat-avg-season', s.avg_points_season);
   setPillValue('stat-uniq-season', s.unique_racers_season);
   setPillValue('stat-races-season', s.total_races_season);
+  setPillValue('stat-race-avg-today', s.race_avg_points_today);
+  setPillValue('stat-race-racers-today', s.race_racers_today);
+  setPillValue('stat-race-total-today', s.total_race_only_today);
+  setPillValue('stat-race-avg-season', s.race_avg_points_season);
+  setPillValue('stat-race-racers-season', s.race_racers_season);
+  setPillValue('stat-race-total-season', s.total_race_only_season);
   setPillValue('stat-br-avg-today', s.br_avg_points_today);
   setPillValue('stat-br-racers-today', s.br_racers_today);
   setPillValue('stat-br-total-today', s.total_brs_today);
+  setPillValue('stat-br-avg-season', s.br_avg_points_season);
+  setPillValue('stat-br-racers-season', s.br_racers_season);
+  setPillValue('stat-br-total-season', s.total_brs_season);
   renderPillPage();
 }
 
 function getPillPagesForMode() {
   return currentPillMode === 'br'
-    ? [headerPillGroups.today, headerPillGroups.br]
-    : [headerPillGroups.today, headerPillGroups.season];
+    ? [headerPillGroups.seasonCombined, headerPillGroups.seasonBr, headerPillGroups.todayCombined, headerPillGroups.todayBr]
+    : [headerPillGroups.seasonCombined, headerPillGroups.seasonRace, headerPillGroups.todayCombined, headerPillGroups.todayRace];
 }
 
 function renderPillPage() {
-  const allPills = [...headerPillGroups.today, ...headerPillGroups.season, ...headerPillGroups.br];
+  const allPills = Object.values(headerPillGroups).flat();
   allPills.forEach((pill) => {
     if (pill) pill.style.display = 'none';
   });
@@ -1302,9 +1326,12 @@ startPillRotationTimer();
   const title = document.querySelector('.record-overlay__title');
   if (title) title.textContent = t('WORLD RECORD!');
   const mapping = {
-    'stat-avg-today':'Avg Points Today','stat-uniq-today':'All Racers Today','stat-races-today':'Total Races Today',
-    'stat-avg-season':'Avg Points Season','stat-uniq-season':'All Racers Season','stat-races-season':'Total Races Season',
-    'stat-br-avg-today':'Avg Pts Per BR','stat-br-racers-today':'BR Racers Today','stat-br-total-today':'Total BRs Today'
+    'stat-avg-today':'R+BR Avg Pts Today','stat-uniq-today':'R+BR Racers Today','stat-races-today':'R+BR Races Today',
+    'stat-avg-season':'R+BR Avg Pts Season','stat-uniq-season':'R+BR Racers Season','stat-races-season':'R+BR Races Season',
+    'stat-race-avg-today':'Race Avg Pts Today','stat-race-racers-today':'Racers Only Today','stat-race-total-today':'Races Only Today',
+    'stat-race-avg-season':'Race Avg Pts Season','stat-race-racers-season':'Racers Only Season','stat-race-total-season':'Races Only Season',
+    'stat-br-avg-today':'BR Avg Pts Today','stat-br-racers-today':'BR Racers Today','stat-br-total-today':'BR Total Runs Today',
+    'stat-br-avg-season':'BR Avg Pts Season','stat-br-racers-season':'BR Racers Season','stat-br-total-season':'BR Total Runs Season'
   };
   Object.entries(mapping).forEach(([id,key]) => {
     const n = document.querySelector(`#${id} .pill-title`);
