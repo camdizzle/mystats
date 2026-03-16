@@ -16,7 +16,7 @@ AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
 AppUpdatesURL={#MyAppURL}
 ; Keep updater installs anchored to the existing MyStats directory.
-DefaultDirName={localappdata}\MyStats
+DefaultDirName={code:GetDefaultInstallDir}
 ShowLanguageDialog=no
 DisableWelcomePage=yes
 DisableProgramGroupPage=yes
@@ -65,12 +65,12 @@ Name: "turkish"; MessagesFile: "compiler:Languages\Turkish.isl"
 Name: "ukrainian"; MessagesFile: "compiler:Languages\Ukrainian.isl"
 
 [Registry]
-Root: HKLM; Subkey: "Software\MyStats"; ValueType: string; ValueName: "InstallPath"; ValueData: "{localappdata}\MyStats"; Flags: uninsdeletekey
+Root: HKLM; Subkey: "Software\MyStats"; ValueType: string; ValueName: "InstallPath"; ValueData: "{app}"; Flags: uninsdeletekey
 Root: HKLM; Subkey: "Software\MyStats"; ValueType: string; ValueName: "Version"; ValueData: "{#MyAppVersion}"; Flags: uninsdeletevalue
 
 
 [Dirs]
-Name: "{localappdata}\MyStats\Results"; Flags: uninsneveruninstall
+Name: "{app}\Results"; Flags: uninsneveruninstall
 
 ; Force full obs_overlay replacement on update (remove existing folder before copying files).
 [InstallDelete]
@@ -114,6 +114,19 @@ begin
     CloseRunningMyStatsProcesses;
     MyStatsWasClosed := True;
   end;
+end;
+
+function GetDefaultInstallDir(Param: String): String;
+var
+  ExistingInstallPath: String;
+begin
+  // Reinstall to an existing custom install location when available.
+  if RegQueryStringValue(HKLM, 'Software\MyStats', 'InstallPath', ExistingInstallPath) and (ExistingInstallPath <> '') then
+    Result := ExistingInstallPath
+  else if RegQueryStringValue(HKCU, 'Software\MyStats', 'InstallPath', ExistingInstallPath) and (ExistingInstallPath <> '') then
+    Result := ExistingInstallPath
+  else
+    Result := ExpandConstant('{localappdata}\MyStats');
 end;
 
 function InitializeSetup(): Boolean;
