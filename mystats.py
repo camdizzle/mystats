@@ -801,13 +801,13 @@ def get_api_season_number(default='67'):
     return season_digits or default
 
 
-def fetch_pixelbypixel_leaderboard(statistic_name):
+def fetch_pixelbypixel_leaderboard(statistic_name, offset=0):
     season_number = get_api_season_number()
     api_url = (
         "https://pixelbypixel.studio/api/leaderboards"
-        f"?offset=0&statisticName={statistic_name}&seasonNumber={season_number}"
+        f"?offset={int(offset)}&statisticName={statistic_name}&seasonNumber={season_number}"
     )
-    logger.info("API call: leaderboards (statistic=%s, season=%s)", statistic_name, season_number)
+    logger.info("API call: leaderboards (statistic=%s, season=%s, offset=%s)", statistic_name, season_number, int(offset))
     response = requests.get(api_url, timeout=15)
     response.raise_for_status()
 
@@ -824,39 +824,49 @@ def refresh_tilt_lifetime_xp_from_leaderboard():
     if not channel_name:
         return
 
-    try:
-        leaderboard_data = fetch_pixelbypixel_leaderboard("TiltedExpertise")
-    except requests.RequestException as exc:
-        print(f"Could not refresh TiltedExpertise value: {exc}")
-        return
-
     def normalize_name(value):
         return str(value or '').strip().lower().lstrip('@')
 
-    for record in leaderboard_data:
-        if not isinstance(record, dict):
-            continue
-
-        identity_candidates = [
-            record.get('DisplayName'),
-            record.get('UserName'),
-            record.get('Username'),
-            record.get('ChannelName'),
-            record.get('TwitchName'),
-        ]
-        if channel_name not in {normalize_name(candidate) for candidate in identity_candidates if candidate}:
-            continue
-
-        stat_value = record.get('StatValue', 0)
+    for offset in range(0, 401, 100):
         try:
-            parsed_stat_value = str(max(0, int(float(stat_value))))
-        except (TypeError, ValueError):
+            leaderboard_data = fetch_pixelbypixel_leaderboard("TiltedExpertise", offset=offset)
+        except requests.RequestException as exc:
+            print(f"Could not refresh TiltedExpertise value (offset={offset}): {exc}")
+            continue
+
+        for record in leaderboard_data:
+            if not isinstance(record, dict):
+                continue
+
+            identity_candidates = [
+                record.get('DisplayName'),
+                record.get('UserName'),
+                record.get('Username'),
+                record.get('ChannelName'),
+                record.get('TwitchName'),
+            ]
+            if channel_name not in {normalize_name(candidate) for candidate in identity_candidates if candidate}:
+                continue
+
+            stat_value = record.get('StatValue', 0)
+            try:
+                parsed_stat_value = str(max(0, int(float(stat_value))))
+            except (TypeError, ValueError):
+                return
+
+            previous_base = str(config.get_setting('tilt_lifetime_base_xp') or '0')
+            if previous_base != parsed_stat_value:
+                config.set_setting('tilt_lifetime_base_xp', parsed_stat_value, persistent=True)
+                print(f"Tilt Starting Lifetime XP auto-set from API: {parsed_stat_value}")
+
+            # Keep runtime lifetime aligned with the latest API total to avoid stale/double-counted values.
+            if str(config.get_setting('tilt_lifetime_expertise') or '0') != parsed_stat_value:
+                set_tilt_runtime_setting('tilt_lifetime_expertise', parsed_stat_value)
             return
 
-        if config.get_setting('tilt_lifetime_base_xp') != parsed_stat_value:
-            config.set_setting('tilt_lifetime_base_xp', parsed_stat_value, persistent=True)
-            print(f"Tilt Starting Lifetime XP auto-set from API: {parsed_stat_value}")
-        return
+    config.set_setting('tilt_lifetime_base_xp', '0', persistent=True)
+    set_tilt_runtime_setting('tilt_lifetime_expertise', '0')
+    print("User not within the top 500 of lifetime expertise. Please enter manually in settings")
 
 
 def get_tilt_output_directory():
@@ -2854,6 +2864,60 @@ def get_tilt_xp_totals_from_results_files(target_date=None):
     season_xp = int(sum(math.floor(count * get_tilt_multiplier(level)) for (_, level), count in level_survivors.items()))
     day_xp = int(sum(math.floor(count * get_tilt_multiplier(level)) for (_, level), count in level_survivors_by_day.items()))
     return season_xp, day_xp
+
+
+def get_tilt_run_xp_from_results_files(target_run_id):
+    """Calculate (run_xp, last_level_xp) for a specific tilt run id from season result files."""
+    run_id_token = str(target_run_id or '').strip()
+    if not run_id_token:
+        return 0, 0
+
+    data_dir = config.get_setting('directory')
+    if not data_dir:
+        return 0, 0
+
+    survivors_by_level = defaultdict(int)
+
+    for tilts_file in sorted(glob.glob(os.path.join(data_dir, "tilts_*.csv"))):
+        try:
+            with open(tilts_file, 'rb') as f:
+                raw_data = f.read()
+            result = chardet.detect(raw_data)
+            encoding = result['encoding'] if result['encoding'] else 'utf-8'
+
+            with open(tilts_file, 'r', encoding=encoding, errors='ignore') as f:
+                reader = iter_csv_rows(f)
+                for row in reader:
+                    parsed = parse_tilt_result_row(row)
+                    if parsed is None:
+                        continue
+
+                    _, points, run_id = parsed
+                    if points <= 0 or len(row) < 2 or str(run_id or '').strip() != run_id_token:
+                        continue
+
+                    try:
+                        level_number = int(''.join(ch for ch in str(row[1]).strip() if ch.isdigit()) or '0')
+                    except (TypeError, ValueError):
+                        level_number = 0
+
+                    if level_number <= 0:
+                        continue
+
+                    survivors_by_level[level_number] += 1
+
+        except FileNotFoundError:
+            continue
+        except Exception:
+            logger.error("Unexpected error", exc_info=True)
+
+    if not survivors_by_level:
+        return 0, 0
+
+    run_xp = int(sum(math.floor(count * get_tilt_multiplier(level)) for level, count in survivors_by_level.items()))
+    last_level = max(survivors_by_level.keys())
+    last_level_xp = int(math.floor(survivors_by_level[last_level] * get_tilt_multiplier(last_level)))
+    return run_xp, last_level_xp
 
 
 def is_tilt_top_tiltee_milestone(count):
@@ -6436,8 +6500,6 @@ def save_token_data(token_info, reconnect_bot=False):
 
         # Reconnect the bot asynchronously with the new token
         restart_bot(token_info['access_token'])
-    else:
-        print("Token data saved successfully. Bot restart not required for proactive token refresh.")
 
 
 def restart_bot(new_token):
@@ -13137,13 +13199,53 @@ class Bot(commands.Bot):
         last_level_xp = get_int_setting('tilt_last_level_xp', 0)
         last_run_xp = get_int_setting('tilt_previous_run_xp', 0)
 
+        last_run_raw = config.get_setting('tilt_last_run_summary') or '{}'
+        try:
+            last_run = json.loads(last_run_raw)
+            if not isinstance(last_run, dict):
+                last_run = {}
+        except Exception:
+            last_run = {}
+
+        # Keep !xp informative after restarts by falling back to persisted last-run summary.
+        last_run_summary_xp = _safe_int(last_run.get('run_xp', last_run.get('run_expertise', 0)))
+        if last_run_xp <= 0 and last_run_summary_xp > 0:
+            last_run_xp = last_run_summary_xp
+
+        if last_level_xp <= 0:
+            # Derive last-level and run XP from tilt result files when runtime counters are empty.
+            fallback_run_id = str(last_run.get('run_id') or '').strip()
+            if fallback_run_id:
+                computed_run_xp, computed_last_level_xp = get_tilt_run_xp_from_results_files(fallback_run_id)
+                if last_run_xp <= 0 and computed_run_xp > 0:
+                    last_run_xp = computed_run_xp
+                if computed_last_level_xp > 0:
+                    last_level_xp = computed_last_level_xp
+
         marble_day = str(config.get_setting('marble_day') or '').strip()
         if not marble_day:
             _, _, _, adjusted_time = time_manager.get_adjusted_time()
             marble_day = adjusted_time.strftime("%Y-%m-%d")
 
         season_xp, today_xp = get_tilt_xp_totals_from_results_files(target_date=marble_day)
+
         lifetime_xp = get_int_setting('tilt_lifetime_expertise', 0)
+        lifetime_base_xp = get_int_setting('tilt_lifetime_base_xp', 0)
+
+        # If we still have no lifetime value, try a direct refresh now.
+        if lifetime_xp <= 0 and lifetime_base_xp <= 0:
+            refresh_tilt_lifetime_xp_from_leaderboard()
+            lifetime_xp = get_int_setting('tilt_lifetime_expertise', 0)
+            lifetime_base_xp = get_int_setting('tilt_lifetime_base_xp', 0)
+
+        # Never add season_xp to lifetime API totals (that double counts current season).
+        if lifetime_xp <= 0:
+            lifetime_xp = lifetime_base_xp
+
+        # During an active run, include current in-memory run XP until next API refresh.
+        current_run_id = str(config.get_setting('tilt_current_run_id') or '').strip()
+        if current_run_id and lifetime_base_xp > 0:
+            lifetime_xp = max(lifetime_xp, lifetime_base_xp + max(0, get_int_setting('tilt_run_xp', 0)))
 
         await send_chat_message(
             ctx.channel,
