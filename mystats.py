@@ -11884,7 +11884,7 @@ class Bot(commands.Bot):
 
         kick_days = team.get('inactive_days')
         kick_text = f"{kick_days}d" if kick_days else "Off"
-        recruiting_text = ":green_circle: OPEN" if team.get('is_recruiting') else ":red_circle: CLOSED"
+        recruiting_text = ":VoteYea: OPEN" if team.get('is_recruiting') else ":VoteNay: CLOSED"
         bonus_label = f"⚡+{_resolve_team_bonus_percent(active_bonus, 0)}%" if active_bonus else "⚡+0%"
 
         icon = team.get('logo') or ':white_check_mark:'
