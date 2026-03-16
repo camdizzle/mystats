@@ -9226,19 +9226,19 @@ flask_thread.start()
 
 def update_config_labels():
     # Update today's statistics with comma-separated values
-    total_points_t_label.config(text=f"Total Points: {int(config.get_setting('totalpointstoday')):,}")
-    total_count_t_label.config(text=f"Total Count: {int(config.get_setting('totalcounttoday')):,}")
-    avg_points_t_label.config(text=f"Avg Points: {float(config.get_setting('avgpointstoday')):,.2f}")
-    race_hs_t_label.config(text=f"Race HS: {int(config.get_setting('race_hs_today')):,}")
-    br_hs_t_label.config(text=f"BR HS: {int(config.get_setting('br_hs_today')):,}")
+    total_points_t_label.config(text=f"Total Points: {get_int_setting('totalpointstoday', 0):,}")
+    total_count_t_label.config(text=f"Total Count: {get_int_setting('totalcounttoday', 0):,}")
+    avg_points_t_label.config(text=f"Avg Points: {_safe_float(config.get_setting('avgpointstoday')):,.2f}")
+    race_hs_t_label.config(text=f"Race HS: {get_int_setting('race_hs_today', 0):,}")
+    br_hs_t_label.config(text=f"BR HS: {get_int_setting('br_hs_today', 0):,}")
 
     # Update season statistics with comma-separated values
-    total_points_label.config(text=f"Total Points: {int(config.get_setting('totalpointsseason')):,}")
-    total_count_label.config(text=f"Total Count: {int(config.get_setting('totalcountseason')):,}")
+    total_points_label.config(text=f"Total Points: {get_int_setting('totalpointsseason', 0):,}")
+    total_count_label.config(text=f"Total Count: {get_int_setting('totalcountseason', 0):,}")
 
     # Calculate average points for the season
-    total_points_season = float(config.get_setting('totalpointsseason'))
-    total_count_season = float(config.get_setting('totalcountseason'))
+    total_points_season = _safe_float(config.get_setting('totalpointsseason'))
+    total_count_season = _safe_float(config.get_setting('totalcountseason'))
 
     # Check to avoid division by zero
     if total_count_season > 0:
@@ -9248,8 +9248,8 @@ def update_config_labels():
 
     avg_points_label.config(text=f"Avg Points: {avg_points_season:,.2f}")
 
-    race_hs_label.config(text=f"Race HS: {int(config.get_setting('race_hs_season')):,}")
-    br_hs_label.config(text=f"BR HS: {int(config.get_setting('br_hs_season')):,}")
+    race_hs_label.config(text=f"Race HS: {get_int_setting('race_hs_season', 0):,}")
+    br_hs_label.config(text=f"BR HS: {get_int_setting('br_hs_season', 0):,}")
 
 
 # Redirect stdout to the text area after the widget is created
