@@ -51,6 +51,7 @@ import html
 import hashlib
 import unicodedata
 import shutil
+import filecmp
 from pathlib import Path
 
 if sys.platform == "win32":
@@ -166,21 +167,121 @@ TRAY_MINIMIZE_TOAST_MESSAGE = (
 logger = logging.getLogger("mystats")
 logger.propagate = False  # All output goes strictly to the log file, not the console
 
-def _resolve_appdata_root():
+LEGACY_APPDATA_DIR_NAMES = (
+    "mystats full installation",
+    "MyStats Full Installation",
+)
+
+
+def _local_appdata_base_path():
     local_app_data = os.getenv('LOCALAPPDATA')
     if local_app_data:
-        return Path(local_app_data) / 'mystats'
+        return Path(local_app_data)
 
-    # Fallback for Windows sessions where LOCALAPPDATA is unexpectedly unset.
     windows_local = Path.home() / 'AppData' / 'Local'
     if windows_local.exists():
-        return windows_local / 'mystats'
+        return windows_local
 
-    return Path('/appdata/local/mystats')
+    return Path('/appdata/local')
+
+
+def _merge_directory_tree(source_dir, destination_dir):
+    destination_dir.mkdir(parents=True, exist_ok=True)
+
+    for entry in list(source_dir.iterdir()):
+        target = destination_dir / entry.name
+
+        if entry.is_dir():
+            if target.exists() and target.is_dir():
+                _merge_directory_tree(entry, target)
+                try:
+                    entry.rmdir()
+                except OSError:
+                    pass
+            elif target.exists():
+                logger.warning("Skipping legacy directory migration conflict: %s -> %s", entry, target)
+            else:
+                shutil.move(str(entry), str(target))
+            continue
+
+        if target.exists() and target.is_file():
+            try:
+                if filecmp.cmp(str(entry), str(target), shallow=False):
+                    entry.unlink(missing_ok=True)
+                    continue
+            except OSError:
+                pass
+
+            conflict_target = destination_dir / f"{entry.stem}.from_legacy_full_installation{entry.suffix}"
+            suffix_counter = 1
+            while conflict_target.exists():
+                conflict_target = destination_dir / (
+                    f"{entry.stem}.from_legacy_full_installation_{suffix_counter}{entry.suffix}"
+                )
+                suffix_counter += 1
+
+            shutil.move(str(entry), str(conflict_target))
+            logger.warning("Preserved legacy file conflict as: %s", conflict_target)
+            continue
+
+        shutil.move(str(entry), str(target))
+
+
+def _migrate_legacy_full_installation_folder(destination_root):
+    local_app_data_base = _local_appdata_base_path()
+    destination_root = Path(destination_root)
+
+    for legacy_dir_name in LEGACY_APPDATA_DIR_NAMES:
+        legacy_root = local_app_data_base / legacy_dir_name
+        if not legacy_root.exists() or legacy_root == destination_root:
+            continue
+
+        try:
+            _merge_directory_tree(legacy_root, destination_root)
+            shutil.rmtree(legacy_root, ignore_errors=False)
+            logger.info("Migrated legacy installation folder %s -> %s", legacy_root, destination_root)
+        except OSError as exc:
+            logger.warning(
+                "Legacy installation folder migration was partial for %s -> %s (%s)",
+                legacy_root,
+                destination_root,
+                exc,
+            )
+
+
+def _rewrite_settings_install_paths(settings_file_path, destination_root):
+    settings_path = Path(settings_file_path)
+    if not settings_path.exists():
+        return
+
+    try:
+        original_text = settings_path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return
+
+    updated_text = original_text
+    local_app_data_base = _local_appdata_base_path()
+    destination_root = Path(destination_root)
+
+    for legacy_dir_name in LEGACY_APPDATA_DIR_NAMES:
+        legacy_path = str((local_app_data_base / legacy_dir_name).resolve())
+        updated_text = updated_text.replace(legacy_path, str(destination_root.resolve()))
+
+    if updated_text != original_text:
+        try:
+            settings_path.write_text(updated_text, encoding="utf-8", errors="ignore")
+            logger.info("Updated legacy install paths in settings file: %s", settings_path)
+        except OSError as exc:
+            logger.warning("Failed to update legacy install paths in settings file %s: %s", settings_path, exc)
+
+
+def _resolve_appdata_root():
+    return _local_appdata_base_path() / 'mystats'
 
 
 APPDATA_ROOT = _resolve_appdata_root()
 APPDATA_ROOT.mkdir(parents=True, exist_ok=True)
+_migrate_legacy_full_installation_folder(APPDATA_ROOT)
 CYCLE_DATA_ROOT = APPDATA_ROOT / 'CycleData'
 CYCLE_DATA_ROOT.mkdir(parents=True, exist_ok=True)
 TEAM_DATA_ROOT = APPDATA_ROOT / 'TeamData'
@@ -274,6 +375,10 @@ def _settings_file_candidates():
             local_app_data_path / "mystats" / "data" / "settings.txt",
             local_app_data_path / "MyStats" / "settings.txt",
             local_app_data_path / "MyStats" / "data" / "settings.txt",
+            local_app_data_path / "mystats full installation" / "settings.txt",
+            local_app_data_path / "mystats full installation" / "data" / "settings.txt",
+            local_app_data_path / "MyStats Full Installation" / "settings.txt",
+            local_app_data_path / "MyStats Full Installation" / "data" / "settings.txt",
         ])
 
     for candidate in legacy_candidates:
@@ -307,6 +412,7 @@ def _migrate_settings_file_if_needed(settings_candidates):
 def _resolve_settings_file_path():
     candidates = _settings_file_candidates()
     _migrate_settings_file_if_needed(candidates)
+    _rewrite_settings_install_paths(candidates[0], APPDATA_ROOT)
     return str(candidates[0])
 
 
