@@ -1880,7 +1880,13 @@ def _compute_team_bonus_races(channel_state, team_name, *, days=None):
         if isinstance(bucket, dict):
             day_key = _day_key_from_timestamp(datetime.now(timezone.utc))
             if days is None or int(days) <= 1:
-                return int(bucket.get('bonus_races_daily', {}).get(day_key, 0))
+                daily_counts = bucket.get('bonus_races_daily', {})
+                if isinstance(daily_counts, dict) and day_key in daily_counts:
+                    cached_value = int(daily_counts.get(day_key, 0))
+                    # Prefer cached positives for speed, but recompute zeros from bonus windows
+                    # so the command can self-heal after cache drift/restarts.
+                    if cached_value > 0:
+                        return cached_value
 
     team = channel_state.get('teams', {}).get(team_name)
     if not team:
@@ -14118,8 +14124,7 @@ async def tilted(bot):
             tilt_level_file = config.get_setting('tilt_level_file')
             current_modified_tilt = os.path.getmtime(tilt_level_file)
         except FileNotFoundError:
-            print("Tilt level file not found. Trying again.")
-            await asyncio.sleep(1)
+            await asyncio.sleep(10)
             continue
         except asyncio.CancelledError:
             print("Tilted task was cancelled.")
