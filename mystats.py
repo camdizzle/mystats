@@ -12305,15 +12305,15 @@ class Bot(commands.Bot):
         if ctx.author.name.lower() == 'camwow' or ctx.author.name.lower() == config.get_setting(
                 'CHANNEL').lower() or ctx.author.name.lower() == 'vibblez':
             await self.send_command_response(ctx, "ℹ️ Version " + str(version) + ", Season: " + str(config.get_setting('season')) +
-                                   ' | Total Races: ' + str(format(int(config.get_setting('totalcountseason')), ',')) +
+                                   ' | Total Races: ' + str(format(get_int_setting('totalcountseason', 0), ',')) +
                                    ' | Total Points: ' + str(
-                format(int(config.get_setting('totalpointsseason')), ',')) +
+                format(get_int_setting('totalpointsseason', 0), ',')) +
                                    ' | Race High Score: ' + str(
-                format(int(config.get_setting('race_hs_season')), ',')) +
-                                   ' | BR High Score: ' + str(format(int(config.get_setting('br_hs_season')), ',')) +
+                format(get_int_setting('race_hs_season', 0), ',')) +
+                                   ' | BR High Score: ' + str(format(get_int_setting('br_hs_season', 0), ',')) +
                                    ' | Marble Day: ' + str(config.get_setting('marble_day')) +
-                                   ' | Points Today: ' + format(int(config.get_setting('totalpointstoday')), ',') +
-                                   ' | Races Today: ' + format(int(config.get_setting('totalcounttoday')), ',') +
+                                   ' | Points Today: ' + format(get_int_setting('totalpointstoday', 0), ',') +
+                                   ' | Races Today: ' + format(get_int_setting('totalcounttoday', 0), ',') +
                                    ' | https://mystats.camwow.tv')
 
     async def send_pixelbypixel_top10(self, ctx, statistic_name, sort_by_stat=False):
@@ -14871,10 +14871,10 @@ async def race(bot):
             namecolordata = []
             config.set_setting('wr', 'no', persistent=False)
             last_modified_race = current_modified_race
-            t_points = int(config.get_setting('totalpointstoday'))
-            t_count = int(config.get_setting('totalcounttoday'))
-            s_t_points = int(config.get_setting('totalpointsseason'))
-            s_t_count = int(config.get_setting('totalcountseason'))
+            t_points = get_int_setting('totalpointstoday', 0)
+            t_count = get_int_setting('totalcounttoday', 0)
+            s_t_points = get_int_setting('totalpointsseason', 0)
+            s_t_count = get_int_setting('totalcountseason', 0)
 
             # Step 1: Process the map file only if the modification time has changed
             map_data_file = config.get_setting('map_data_file')
