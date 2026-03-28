@@ -1486,5 +1486,5 @@ window.addEventListener('hashchange', () => {
   const hashView = getRequestedViewFromLocation();
   if (hashView) setActiveView(hashView);
 });
-refreshIntervalHandle = setInterval(refresh, 15000);
+refreshIntervalHandle = setInterval(refresh, 60000);
 startDashboardStream();

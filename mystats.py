@@ -3551,7 +3551,14 @@ def get_race_dashboard_leaderboard(limit=250):
     if not data_dir:
         return []
 
-    for allraces in glob.glob(os.path.join(data_dir, "allraces_*.csv")):
+    allraces_files = glob.glob(os.path.join(data_dir, "allraces_*.csv"))
+    signature = _build_files_signature(allraces_files)
+    cached_signature = _race_dashboard_leaderboard_cache.get('signature')
+    if cached_signature == signature:
+        cached_rows = list(_race_dashboard_leaderboard_cache.get('rows', []))
+        return cached_rows[:limit]
+
+    for allraces in allraces_files:
         try:
             with open(allraces, 'rb') as f:
                 raw_data = f.read()
@@ -3630,6 +3637,8 @@ def get_race_dashboard_leaderboard(limit=250):
         ),
         reverse=True,
     )
+    _race_dashboard_leaderboard_cache['signature'] = signature
+    _race_dashboard_leaderboard_cache['rows'] = leaderboard
     return leaderboard[:limit]
 
 
@@ -3642,9 +3651,14 @@ def get_race_event_totals():
             'total_events': 0,
         }
 
+    allraces_files = glob.glob(os.path.join(data_dir, "allraces_*.csv"))
+    signature = _build_files_signature(allraces_files)
+    if _race_event_totals_cache.get('signature') == signature:
+        return copy.deepcopy(_race_event_totals_cache.get('value'))
+
     race_events = 0
     br_events = 0
-    for allraces in glob.glob(os.path.join(data_dir, "allraces_*.csv")):
+    for allraces in allraces_files:
         try:
             with open(allraces, 'rb') as f:
                 raw_data = f.read()
@@ -3664,11 +3678,14 @@ def get_race_event_totals():
         except Exception:
             continue
 
-    return {
+    payload = {
         'race_events': race_events,
         'br_events': br_events,
         'total_events': race_events + br_events,
     }
+    _race_event_totals_cache['signature'] = signature
+    _race_event_totals_cache['value'] = copy.deepcopy(payload)
+    return payload
 
 
 def open_quest_completion_window(parent_window):
@@ -4022,10 +4039,12 @@ MYCYCLE_SAVE_RETRIES = 3
 MYCYCLE_SAVE_RETRY_DELAY_S = 0.15
 
 _dashboard_main_cache = {'value': None, 'created_at': 0.0}
-_dashboard_main_cache_ttl_s = 5.0
+_dashboard_main_cache_ttl_s = 20.0
 _mycycle_aggregate_cache = {}
 _tilt_season_stats_cache = {'signature': None, 'value': ({'levels': 0, 'top_tiltees': 0, 'points': 0}, {})}
 _user_season_stats_cache = {'signature': None, 'value': {}}
+_race_dashboard_leaderboard_cache = {'signature': None, 'rows': []}
+_race_event_totals_cache = {'signature': None, 'value': {'race_events': 0, 'br_events': 0, 'total_events': 0}}
 
 RIVALS_MAX_PAIRS = 200
 RIVALS_MAX_MIN_RACES = 10000
@@ -6566,7 +6585,7 @@ def _build_dashboard_main_payload_for_args(args):
     return payload
 
 
-def _make_sse_response(payload_builder, *, poll_interval_s=1.0, heartbeat_interval_s=15.0):
+def _make_sse_response(payload_builder, *, poll_interval_s=3.0, heartbeat_interval_s=15.0):
     def generate():
         last_signature = None
         last_heartbeat = time.monotonic()
