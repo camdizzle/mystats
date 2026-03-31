@@ -468,7 +468,7 @@ UI_TEXT = {
         'Version': 'Version',
         'Close': 'Schließen',
         'Developed by\nCamWOW': 'Entwickelt von\nCamWOW',
-        'Contact Information\nDiscord: https://discord.gg/camwow\nWebsite: https://www.camwow.tv': 'Kontaktinformationen\nDiscord: https://discord.gg/camwow\nWebsite: https://www.camwow.tv',
+        'Contact Information\nDiscord: http://camwow.tv/discord\nWebsite: https://www.camwow.tv': 'Kontaktinformationen\nDiscord: http://camwow.tv/discord\nWebsite: https://www.camwow.tv',
         'Acknowledgments\nA heartfelt thank you to Vibblez for his incredible contributions, ideas, and unwavering support. His creative vision and technical expertise have been instrumental not only in shaping the MyStats application, but more specifically in elevating the website to new heights. From conceptualizing unique features to refining the user experience, his efforts have left an indelible mark on this project.': 'Danksagung\nEin herzliches Dankeschön an Vibblez für seine unglaublichen Beiträge, Ideen und unermüdliche Unterstützung. Seine kreative Vision und technische Expertise waren nicht nur für die Entwicklung der MyStats-Anwendung entscheidend, sondern insbesondere auch dafür, die Website auf ein neues Niveau zu heben. Von der Konzeption einzigartiger Funktionen bis zur Verfeinerung der Benutzererfahrung hat er dieses Projekt nachhaltig geprägt.',
         'The application is a companion tool for Marbles On Stream, designed to enhance user engagement and streamline data management. It tracks and processes race data in real-time, handles event management, and posts automated race results to Twitch chat. Key features include Battle Royale crown win tracking, checkpoint processing, event status toggling, and seamless integration with the Twitch API for authenticating users and dynamically updating relevant stats and events. The application provides a user-friendly interface built with Tkinter, ensuring that race results, event statuses, and other critical information are easily accessible to both streamers and their viewers.': 'Die Anwendung ist ein Begleittool für Marbles On Stream, das die Nutzerinteraktion verbessert und das Datenmanagement vereinfacht. Sie verfolgt und verarbeitet Renndaten in Echtzeit, verwaltet Events und veröffentlicht automatische Rennergebnisse im Twitch-Chat. Zu den Kernfunktionen gehören die Verfolgung von Battle-Royale-Kronensiegen, Checkpoint-Verarbeitung, das Umschalten von Event-Status sowie die nahtlose Integration der Twitch-API zur Authentifizierung und dynamischen Aktualisierung relevanter Statistiken und Events. Die Anwendung bietet eine benutzerfreundliche Tkinter-Oberfläche, sodass Rennergebnisse, Event-Status und andere wichtige Informationen für Streamer und Zuschauer leicht zugänglich sind.',
     },
@@ -6990,7 +6990,7 @@ def show_about_window():
     # Contact Information
     contact_label = ttk.Label(
         content_frame,
-        text=tr("Contact Information\nDiscord: https://discord.gg/camwow\nWebsite: https://www.camwow.tv"),
+        text=tr("Contact Information\nDiscord: http://camwow.tv/discord\nWebsite: https://www.camwow.tv"),
         font=("Arial", 9),
         justify="center"
     )
@@ -11382,7 +11382,7 @@ def display_welcome_message(text_widget, version, config, timestamp):
     text_widget.insert(tk.END, "CamWOW!!!", "bright_yellow")
     text_widget.insert(tk.END, "\nFor any questions, bugs or suggestions, visit our discord.\n")
     text_widget.insert(tk.END, "\n")
-    text_widget.insert(tk.END, "https://discord.gg/camwow\n", "yellow")
+    text_widget.insert(tk.END, "http://camwow.tv/discord\n", "yellow")
     text_widget.insert(tk.END, "\n")
     text_widget.insert(tk.END, f"The path to your MyStats files is: {config.get_setting('directory')}\n")
     text_widget.insert(tk.END, "\n")
