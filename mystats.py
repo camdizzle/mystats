@@ -712,6 +712,10 @@ def is_minimize_to_tray_enabled():
     return str(config.get_setting("minimize_to_tray") or "False").strip().lower() == "true"
 
 
+def is_windows_tray_notifications_enabled():
+    return str(config.get_setting("windows_tray_notifications") or "False").strip().lower() == "true"
+
+
 def minimize_to_tray():
     global is_hiding_to_tray, tray_hint_toast_shown
 
@@ -7247,10 +7251,12 @@ def open_settings_window():
     ttk.Separator(general_tab, orient="horizontal").grid(row=5, column=0, columnspan=2, sticky="ew", pady=8)
 
     minimize_to_tray_var = tk.BooleanVar(value=is_minimize_to_tray_enabled())
+    windows_tray_notifications_var = tk.BooleanVar(value=is_windows_tray_notifications_enabled())
     tray_support_text = "Minimize to system tray (double-click tray icon to reopen)"
     if not supports_system_tray():
         tray_support_text += " [pystray not available]"
     ttk.Checkbutton(general_tab, text=tray_support_text, variable=minimize_to_tray_var).grid(row=6, column=0, columnspan=2, sticky="w", pady=(0, 4))
+    ttk.Checkbutton(general_tab, text="Enable Windows tray notifications", variable=windows_tray_notifications_var).grid(row=7, column=0, columnspan=2, sticky="w", pady=(0, 4))
 
     ttk.Label(general_tab, text="Application Directory").grid(row=8, column=0, sticky="w", pady=(0, 4))
     application_directory_entry = ttk.Entry(general_tab, width=55)
@@ -8168,6 +8174,7 @@ def open_settings_window():
         announce_delay_var.set(False)
         reset_audio_var.set(False)
         minimize_to_tray_var.set(False)
+        windows_tray_notifications_var.set(False)
         app_language_var.set(LANGUAGE_DISPLAY_NAMES['en'])
         chat_br_results_var.set(True)
         chat_race_results_var.set(True)
@@ -8291,6 +8298,7 @@ def open_settings_window():
         selected_language_name = app_language_var.get()
         config.set_setting("app_language", app_language_name_to_code.get(selected_language_name, "en"), persistent=True)
         config.set_setting("minimize_to_tray", str(minimize_to_tray_var.get()), persistent=True)
+        config.set_setting("windows_tray_notifications", str(windows_tray_notifications_var.get()), persistent=True)
         config.set_setting("chunk_alert", str(chunk_alert_var.get()), persistent=True)
         config.set_setting("chunk_alert_value", chunk_alert_trigger_entry.get(), persistent=True)
         config.set_setting("announcedelay", str(announce_delay_var.get()), persistent=True)
@@ -9466,7 +9474,7 @@ class ConfigManager:
                                 'tilt_scroll_pause_ms', 'tiltsurvivors_min_levels', 'tiltdeath_min_levels',
                                 'update_later_clicks', 'update_later_version', 'pending_update_installer_path',
                                 'pending_update_silent_mode', 'pending_update_version_label',
-                                'minimize_to_tray', 'tray_hint_toast_shown', 'app_language', *TILT_RUNTIME_PERSISTENT_KEYS}
+                                'minimize_to_tray', 'windows_tray_notifications', 'tray_hint_toast_shown', 'app_language', *TILT_RUNTIME_PERSISTENT_KEYS}
         self.transient_keys = set([])
         self.defaults = {
             'chat_br_results': 'True',
@@ -9499,6 +9507,7 @@ class ConfigManager:
             'race_narrative_alert_max_items': '3',
             'chat_max_names': '25',
             'minimize_to_tray': 'False',
+            'windows_tray_notifications': 'False',
             'tray_hint_toast_shown': 'False',
             'app_language': 'en',
             'app_install_directory': '',
@@ -10383,6 +10392,9 @@ def _show_in_app_toast(title, message, duration=6):
         return False
 
 def show_windows_toast(title, message, duration=6):
+    if is_minimized_to_tray() and not is_windows_tray_notifications_enabled():
+        return
+
     is_frozen_build = bool(getattr(sys, "frozen", False))
 
     if win_toaster is not None:
