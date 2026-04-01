@@ -14991,6 +14991,8 @@ async def race(bot):
             map_data_file = config.get_setting('map_data_file')
             map_results_file = config.get_setting('map_results_file')
 
+            map_data_updated_this_race = False
+
             try:
                 # Get the current modification time of the map file
                 current_mod_time = os.path.getmtime(map_data_file)
@@ -15002,6 +15004,7 @@ async def race(bot):
                     parsed_map_data = read_latest_map_data(map_data_file)
                     if parsed_map_data:
                         cached_map_data.update(parsed_map_data)
+                        map_data_updated_this_race = True
                         with open(map_results_file, 'a', encoding='utf-8', errors='ignore', newline='') as f:
                             f.write(
                                 f"{cached_map_data['MapName']},{cached_map_data['MapBuilder']},{cached_map_data['MapCreatedDate']},"
@@ -15057,7 +15060,7 @@ async def race(bot):
             first_row_full = lines[1].replace('\x00', '').strip().split(',')
             race_finish_time = float(first_row_full[5])
 
-            if RecordTime and race_finish_time < RecordTime:
+            if map_data_updated_this_race and RecordTime and race_finish_time < RecordTime:
                 RecordAmount = RecordTime - race_finish_time
                 minutes, seconds = divmod(RecordAmount, 60)
                 pminutes, pseconds = divmod(RecordTime, 60)
@@ -15077,6 +15080,8 @@ async def race(bot):
                     f"New WR by {first_row_full[2]}: {formatted_CurrentTime} (saved {formatted_RecordAmount})"
                 )
             else:
+                if not map_data_updated_this_race:
+                    logger.info("Skipping world record check: map data file was not updated for this race.")
                 config.set_setting('wr', 'no', persistent=False)
 
             # first row with WR flagged
