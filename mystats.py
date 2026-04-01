@@ -1244,7 +1244,7 @@ def _run_one_time_season68_cleanup_if_needed(season_directory, season_value):
         config.set_setting(cleanup_flag_key, 'True', persistent=True)
         return
 
-    cutoff_timestamp = datetime.datetime(2026, 3, 31, 0, 0, 0).timestamp()
+    cutoff_timestamp = datetime(2026, 3, 31, 0, 0, 0).timestamp()
     removed_files = []
 
     for candidate in season_path.iterdir():
