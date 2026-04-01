@@ -1207,58 +1207,6 @@ def _season_directory_candidates():
     return candidates
 
 
-def _migrate_season_results_if_needed(season_directory, season_value):
-    destination = Path(season_directory)
-    destination.mkdir(parents=True, exist_ok=True)
-
-    destination_has_results = bool(list(destination.glob('allraces_*.csv')))
-    if destination_has_results:
-        return
-
-    source_candidates = []
-    current_directory = str(config.get_setting('directory') or '').strip()
-    if current_directory:
-        source_candidates.append(Path(current_directory))
-
-    for root in _legacy_results_roots():
-        source_candidates.append(root / f"Season_{season_value}")
-
-    seen = set()
-    patterns = [
-        'allraces_*.csv',
-        'checkpoints_*.csv',
-        'tilts_*.csv',
-        'maps_*.csv',
-        'competitive_raid_streamer_stats.jsonl',
-        'competitive_raid_payload_fields.json',
-    ]
-
-    for source in source_candidates:
-        source_key = str(source)
-        if source_key in seen:
-            continue
-        seen.add(source_key)
-
-        if not source.exists() or source == destination:
-            continue
-
-        copied_any = False
-        for pattern in patterns:
-            for source_file in source.glob(pattern):
-                destination_file = destination / source_file.name
-                if destination_file.exists():
-                    continue
-                try:
-                    shutil.copy2(source_file, destination_file)
-                    copied_any = True
-                except OSError as exc:
-                    logger.warning("Failed to migrate season file from %s to %s: %s", source_file, destination_file, exc)
-
-        if copied_any:
-            print(f"Migrated season results from {source} to {destination}")
-            return
-
-
 def _migrate_data_file_if_needed(destination_path, source_candidates, label):
     destination = Path(destination_path)
     if destination.exists():
@@ -1282,6 +1230,44 @@ def _migrate_data_file_if_needed(destination_path, source_candidates, label):
             return
         except OSError as exc:
             print(f"Failed to migrate {label} from {source} to {destination}: {exc}")
+
+
+def _run_one_time_season68_cleanup_if_needed(season_directory, season_value):
+    cleanup_flag_key = 'season68_pre03312026_cleanup_complete'
+    if str(season_value).strip() != '68':
+        return
+    if str(config.get_setting(cleanup_flag_key)) == 'True':
+        return
+
+    season_path = Path(season_directory)
+    if not season_path.exists():
+        config.set_setting(cleanup_flag_key, 'True', persistent=True)
+        return
+
+    cutoff_timestamp = datetime.datetime(2026, 3, 31, 0, 0, 0).timestamp()
+    removed_files = []
+
+    for candidate in season_path.iterdir():
+        if not candidate.is_file():
+            continue
+        try:
+            if candidate.stat().st_mtime < cutoff_timestamp:
+                candidate.unlink()
+                removed_files.append(candidate.name)
+        except OSError as exc:
+            logger.warning("Failed one-time Season 68 cleanup for %s: %s", candidate, exc)
+
+    if removed_files:
+        logger.info(
+            "One-time Season 68 cleanup removed %s file(s) with timestamps before 2026-03-31: %s",
+            len(removed_files),
+            ", ".join(sorted(removed_files)),
+        )
+        print(f"One-time Season 68 cleanup removed {len(removed_files)} file(s) before 2026-03-31.")
+    else:
+        logger.info("One-time Season 68 cleanup found no files before 2026-03-31 in %s", season_path)
+
+    config.set_setting(cleanup_flag_key, 'True', persistent=True)
 
 
 def _migrate_team_data_files_if_needed():
@@ -10033,11 +10019,11 @@ def create_results_files():
     season_value = str(config.get_setting('season'))
     directory = os.path.join(base_directory, "Results", "Season_" + season_value)
 
-    _migrate_season_results_if_needed(directory, season_value)
-
     config.set_setting('directory', directory, persistent=True)
     if not os.path.exists(directory):
         os.makedirs(directory)
+
+    _run_one_time_season68_cleanup_if_needed(directory, season_value)
 
     _migrate_mycycle_file_if_needed()
 
