@@ -93,3 +93,33 @@ This file lists chat-message outputs from `mystats.py` call sites and renders f-
 | 13800 | `self.send_command_response` | `No world records found.` |
 | 14627 | `send_chat_message` | `🏁 Tilt run complete! No results to display.` |
 | 14980 | `send_chat_message` | `🎺 Marble Day Reset! 🎺` |
+
+## Race and BR dynamic outputs (explicit samples)
+
+The table above captures direct call-site string arguments. Race/BR pipelines also build messages dynamically before sending; here are exact sample outputs for those runtime-built messages.
+
+### Race (sample outputs)
+- `🏁 Competitive raid host selected: @CamWOW (128 raiders)! Welcome competitive raiders—good luck and have fun!`
+- `🧾 Next competitive raid queue is open now: https://pixelbypixel.studio/competitions`
+- `🏁 Competitive raid summary | streamer: camwow | rank: 1 | score: 4200 | wins: 3`
+- `🎉 camwow has just completed their 120th race today! Congratulations! 🎉`
+- `Race Winners 🏆: No Winners!`
+- `🧃 WORLD RECORD 🌎`
+- `🧃 Top 10 Finishers 🏆: 🥇 CamWOW | 🥈 RacerX | 🥉 MarblePro`
+- `🧃 🌎 WORLD RECORD 🌎: 🥇 CamWOW +12,345 points | 🥈 RacerX +9,876 points`
+- `🧃 Race Winners 🏆: 🥇 CamWOW +4,500 points | 🥈 RacerX +3,900 points | 🥉 MarblePro +3,100 points`
+- `WORLD RECORD 🌎`
+- `Top 10 Finishers 🏆: 🥇 CamWOW | 🥈 RacerX | 🥉 MarblePro`
+- `🌎 WORLD RECORD 🌎: 🥇 CamWOW +12,345 points | 🥈 RacerX +9,876 points`
+- `Race Winners 🏆: 🥇 CamWOW +4,500 points | 🥈 RacerX +3,900 points | 🥉 MarblePro +3,100 points`
+- `Checkpoint Winners: CP1 - CamWOW, CP2 - RacerX, CP3 - MarblePro`
+- `🎺 Marble Day Reset! 🎺`
+
+### Battle Royale (sample outputs)
+- `🎉 camwow has just completed their 120th race today! Congratulations! 🎉`
+- `Battle Royale Champion 🏆: CamWOW +4,200 points, +18 eliminations, +7,900 damage | Today's stats: 55,000 points, 12 wins, 120 races`
+- `CROWN WIN! 👑: CamWOW +5,100 points, +22 eliminations, +8,300 damage | Today's stats: 60,100 points, 13 wins, 121 races`
+- `🧃 JUICE ALERT! Battle Royale Champion 🏆: CamWOW +7,800 points, +31 eliminations, +11,400 damage | Today's stats: 67,900 points, 14 wins, 122 races`
+- `💥 MEGA WIN! Battle Royale Champion 🏆: CamWOW +12,345 points, +41 eliminations, +16,200 damage | Today's stats: 80,245 points, 15 wins, 123 races`
+- `🔁 CamWOW completed a MyCycle in Season 1! Cycle #3 took 27 races.`
+- `🎯 Season Quest Complete: CamWOW finished 1,000 / 1,000 season races!`
