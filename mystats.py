@@ -7226,6 +7226,7 @@ def open_settings_window():
     race_br_sections.add(season_quests_tab, text=tr("Season Quests"))
 
     teams_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
+    testing_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
     notebook.add(teams_tab, text="MyTeams")
 
     # --- General tab ---
@@ -7252,21 +7253,24 @@ def open_settings_window():
 
     minimize_to_tray_var = tk.BooleanVar(value=is_minimize_to_tray_enabled())
     windows_tray_notifications_var = tk.BooleanVar(value=is_windows_tray_notifications_enabled())
+    testing_tab_enabled_var = tk.BooleanVar(value=str(config.get_setting("testing_tab_enabled") or "False") == "True")
     tray_support_text = "Minimize to system tray (double-click tray icon to reopen)"
     if not supports_system_tray():
         tray_support_text += " [pystray not available]"
     ttk.Checkbutton(general_tab, text=tray_support_text, variable=minimize_to_tray_var).grid(row=6, column=0, columnspan=2, sticky="w", pady=(0, 4))
     ttk.Checkbutton(general_tab, text="Enable Windows tray notifications", variable=windows_tray_notifications_var).grid(row=7, column=0, columnspan=2, sticky="w", pady=(0, 4))
 
-    ttk.Label(general_tab, text="Application Directory").grid(row=8, column=0, sticky="w", pady=(0, 4))
+    ttk.Checkbutton(general_tab, text="Enable Testing tab", variable=testing_tab_enabled_var).grid(row=8, column=0, columnspan=2, sticky="w", pady=(0, 6))
+
+    ttk.Label(general_tab, text="Application Directory").grid(row=9, column=0, sticky="w", pady=(0, 4))
     application_directory_entry = ttk.Entry(general_tab, width=55)
-    application_directory_entry.grid(row=9, column=0, sticky="ew", pady=(0, 4), columnspan=2)
+    application_directory_entry.grid(row=10, column=0, sticky="ew", pady=(0, 4), columnspan=2)
     application_directory_entry.insert(0, application_install_path())
     application_directory_entry.config(state="readonly")
 
-    ttk.Label(general_tab, text="MyStats Files Directory").grid(row=10, column=0, sticky="w", pady=(0, 4))
+    ttk.Label(general_tab, text="MyStats Files Directory").grid(row=11, column=0, sticky="w", pady=(0, 4))
     files_directory_entry = ttk.Entry(general_tab, width=55)
-    files_directory_entry.grid(row=11, column=0, sticky="ew", pady=(0, 4), columnspan=2)
+    files_directory_entry.grid(row=12, column=0, sticky="ew", pady=(0, 4), columnspan=2)
     files_directory_entry.insert(0, appdata_path())
     files_directory_entry.config(state="readonly")
 
@@ -7277,8 +7281,113 @@ def open_settings_window():
         else:
             messagebox.showerror("Error", "Directory path does not exist.")
 
-    ttk.Button(general_tab, text=tr("Open Location"), command=open_directory).grid(row=12, column=0, sticky="w", pady=(4, 0))
+    ttk.Button(general_tab, text=tr("Open Location"), command=open_directory).grid(row=13, column=0, sticky="w", pady=(4, 0))
     general_tab.grid_columnconfigure(0, weight=1)
+
+    # --- Testing tab ---
+    testing_tab.grid_columnconfigure(0, weight=1)
+    ttk.Label(testing_tab, text="Send test chat messages for Race / BR / Tilt output triggers.", style="Small.TLabel").grid(
+        row=0, column=0, sticky="w", pady=(0, 8)
+    )
+
+    race_test_wr_var = tk.BooleanVar(value=False)
+    race_test_chunk_var = tk.BooleanVar(value=False)
+    race_test_no_winner_var = tk.BooleanVar(value=False)
+
+    br_test_juice_var = tk.BooleanVar(value=False)
+    br_test_mega_var = tk.BooleanVar(value=False)
+    br_test_crown_var = tk.BooleanVar(value=False)
+
+    tilt_test_redacted_var = tk.BooleanVar(value=False)
+    tilt_test_run_complete_var = tk.BooleanVar(value=False)
+    tilt_test_no_results_var = tk.BooleanVar(value=False)
+
+    def _send_testing_message(category, message):
+        if bot is None or getattr(bot, "channel", None) is None or getattr(bot, "loop", None) is None:
+            messagebox.showwarning("Testing", "Bot channel is not connected yet, so test message was not sent.")
+            return
+        asyncio.run_coroutine_threadsafe(
+            send_chat_message(bot.channel, message, category=category),
+            bot.loop
+        )
+
+    def send_race_test_message():
+        if race_test_no_winner_var.get():
+            message = "Race Winners 🏆: No Winners!"
+        else:
+            prefix = "🌎 WORLD RECORD 🌎: " if race_test_wr_var.get() else "Race Winners 🏆: "
+            entries = [
+                "🥇 RacerOne +3,100 points",
+                "🥈 RacerTwo +2,500 points",
+                "🥉 RacerThree +1,900 points",
+            ]
+            if race_test_chunk_var.get():
+                prefix = "🧃 " + prefix
+            message = prefix + " | ".join(entries)
+        _send_testing_message("race", message)
+
+    def send_br_test_message():
+        winner_label = "RacerOne"
+        if br_test_mega_var.get():
+            prefix = "👑 Mega Chunk Alert!"
+        elif br_test_juice_var.get():
+            prefix = "🧃 Juice Alert!"
+        else:
+            prefix = "👑 BR Winner!"
+        if br_test_crown_var.get():
+            winner_label = f"👑 {winner_label}"
+        message = (
+            f"{prefix} {winner_label} | Score 8,450 | Kills 7 | Damage 24,100 | "
+            f"BR Totals: 122,500 points / 18 wins / 63 races"
+        )
+        _send_testing_message("br", message)
+
+    def send_tilt_test_message():
+        if tilt_test_run_complete_var.get():
+            if tilt_test_no_results_var.get():
+                message = "🏁 Tilt run complete! No results to display."
+            else:
+                message = "🏁 Tilt run complete! Final standings: RacerOne - 4500 points, RacerTwo - 3800 points, RacerThree - 3200 points"
+        else:
+            survivors = "Redacted x5" if tilt_test_redacted_var.get() else "RacerOne, RacerTwo, RacerThree, RacerFour, RacerFive"
+            message = (
+                "✅ End of Tilt Level 12 | Level Completion Time: 00:43.215 | "
+                f"Top Tiltee: RacerOne | Points Earned: 2,300 | Survivors: {survivors}"
+            )
+        _send_testing_message("tilt", message)
+
+    race_test_frame = ttk.LabelFrame(testing_tab, text="Race Results Test", style="Card.TLabelframe")
+    race_test_frame.grid(row=1, column=0, sticky="ew", pady=(0, 10))
+    ttk.Checkbutton(race_test_frame, text="World Record", variable=race_test_wr_var).grid(row=0, column=0, sticky="w", padx=10, pady=(8, 4))
+    ttk.Checkbutton(race_test_frame, text="Chunk/Juice Prefix", variable=race_test_chunk_var).grid(row=1, column=0, sticky="w", padx=10, pady=2)
+    ttk.Checkbutton(race_test_frame, text="No Winner", variable=race_test_no_winner_var).grid(row=2, column=0, sticky="w", padx=10, pady=2)
+    ttk.Button(race_test_frame, text="Send Race Test", command=send_race_test_message).grid(row=3, column=0, sticky="w", padx=10, pady=(6, 8))
+
+    br_test_frame = ttk.LabelFrame(testing_tab, text="BR Results Test", style="Card.TLabelframe")
+    br_test_frame.grid(row=2, column=0, sticky="ew", pady=(0, 10))
+    ttk.Checkbutton(br_test_frame, text="Juice Alert", variable=br_test_juice_var).grid(row=0, column=0, sticky="w", padx=10, pady=(8, 4))
+    ttk.Checkbutton(br_test_frame, text="Mega Chunk", variable=br_test_mega_var).grid(row=1, column=0, sticky="w", padx=10, pady=2)
+    ttk.Checkbutton(br_test_frame, text="Crown Winner", variable=br_test_crown_var).grid(row=2, column=0, sticky="w", padx=10, pady=2)
+    ttk.Button(br_test_frame, text="Send BR Test", command=send_br_test_message).grid(row=3, column=0, sticky="w", padx=10, pady=(6, 8))
+
+    tilt_test_frame = ttk.LabelFrame(testing_tab, text="Tilt Results Test", style="Card.TLabelframe")
+    tilt_test_frame.grid(row=3, column=0, sticky="ew")
+    ttk.Checkbutton(tilt_test_frame, text="Redacted Survivors", variable=tilt_test_redacted_var).grid(row=0, column=0, sticky="w", padx=10, pady=(8, 4))
+    ttk.Checkbutton(tilt_test_frame, text="Run Complete Message", variable=tilt_test_run_complete_var).grid(row=1, column=0, sticky="w", padx=10, pady=2)
+    ttk.Checkbutton(tilt_test_frame, text="No Results (Run Complete)", variable=tilt_test_no_results_var).grid(row=2, column=0, sticky="w", padx=10, pady=2)
+    ttk.Button(tilt_test_frame, text="Send Tilt Test", command=send_tilt_test_message).grid(row=3, column=0, sticky="w", padx=10, pady=(6, 8))
+
+    def refresh_testing_tab_visibility():
+        existing_tabs = notebook.tabs()
+        testing_tab_id = str(testing_tab)
+        if testing_tab_enabled_var.get():
+            if testing_tab_id not in existing_tabs:
+                notebook.add(testing_tab, text="Testing")
+        elif testing_tab_id in existing_tabs:
+            notebook.forget(testing_tab)
+
+    testing_tab_enabled_var.trace_add("write", lambda *_: refresh_testing_tab_visibility())
+    refresh_testing_tab_visibility()
 
     # --- Audio tab ---
     ttk.Label(audio_tab, text="Audio alerts and output device settings", style="Small.TLabel").grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 8))
@@ -8175,6 +8284,7 @@ def open_settings_window():
         reset_audio_var.set(False)
         minimize_to_tray_var.set(False)
         windows_tray_notifications_var.set(False)
+        testing_tab_enabled_var.set(False)
         app_language_var.set(LANGUAGE_DISPLAY_NAMES['en'])
         chat_br_results_var.set(True)
         chat_race_results_var.set(True)
@@ -8299,6 +8409,7 @@ def open_settings_window():
         config.set_setting("app_language", app_language_name_to_code.get(selected_language_name, "en"), persistent=True)
         config.set_setting("minimize_to_tray", str(minimize_to_tray_var.get()), persistent=True)
         config.set_setting("windows_tray_notifications", str(windows_tray_notifications_var.get()), persistent=True)
+        config.set_setting("testing_tab_enabled", str(testing_tab_enabled_var.get()), persistent=True)
         config.set_setting("chunk_alert", str(chunk_alert_var.get()), persistent=True)
         config.set_setting("chunk_alert_value", chunk_alert_trigger_entry.get(), persistent=True)
         config.set_setting("announcedelay", str(announce_delay_var.get()), persistent=True)
@@ -9474,7 +9585,8 @@ class ConfigManager:
                                 'tilt_scroll_pause_ms', 'tiltsurvivors_min_levels', 'tiltdeath_min_levels',
                                 'update_later_clicks', 'update_later_version', 'pending_update_installer_path',
                                 'pending_update_silent_mode', 'pending_update_version_label',
-                                'minimize_to_tray', 'windows_tray_notifications', 'tray_hint_toast_shown', 'app_language', *TILT_RUNTIME_PERSISTENT_KEYS}
+                                'minimize_to_tray', 'windows_tray_notifications', 'tray_hint_toast_shown', 'app_language',
+                                'testing_tab_enabled', *TILT_RUNTIME_PERSISTENT_KEYS}
         self.transient_keys = set([])
         self.defaults = {
             'chat_br_results': 'True',
@@ -9510,6 +9622,7 @@ class ConfigManager:
             'windows_tray_notifications': 'False',
             'tray_hint_toast_shown': 'False',
             'app_language': 'en',
+            'testing_tab_enabled': 'False',
             'app_install_directory': '',
             'season_quests_enabled': 'True',
             'season_quest_target_races': '1000',
@@ -15072,7 +15185,7 @@ async def race(bot):
             first_row_full = lines[1].replace('\x00', '').strip().split(',')
             race_finish_time = float(first_row_full[5])
 
-            if map_data_updated_this_race and RecordTime and race_finish_time < RecordTime:
+            if (not nowinner) and map_data_updated_this_race and RecordTime and race_finish_time < RecordTime:
                 RecordAmount = RecordTime - race_finish_time
                 minutes, seconds = divmod(RecordAmount, 60)
                 pminutes, pseconds = divmod(RecordTime, 60)
