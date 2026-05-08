@@ -7010,6 +7010,14 @@ def open_settings():
     open_settings_window()
 
 
+def check_for_updates_from_menu():
+    """Trigger the server-backed season/version check from the main menu."""
+    print("\nManual update check requested from menu...\n")
+    season = ver_season_only()
+    if season is not None:
+        update_config_labels()
+
+
 # Updated show_help function to display the commands in a messagebox
 # Function to display the help window centered in the main window
 def show_help(bot_instance, root):
@@ -9509,6 +9517,7 @@ menu_bar.add_cascade(label="Edit", menu=edit_menu)
 # Create the Help menu
 help_menu = Menu(menu_bar, tearoff=0)
 help_menu.add_command(label="View Commands", command=lambda: show_help(bot, root))
+help_menu.add_command(label="Check for Updates", command=check_for_updates_from_menu)
 help_menu.add_command(label=tr("About"), command=show_about_window)
 menu_bar.add_cascade(label="Help", menu=help_menu)
 
@@ -11465,6 +11474,10 @@ def reset(run_version_check=True):
     config.set_setting('hscore', 0, persistent=False)
     config.set_setting('br_hs_today', 0, persistent=False)
     config.set_setting('race_hs_today', 0, persistent=False)
+    config.set_setting('tilt_total_xp_today', 0, persistent=True)
+    config.set_setting('tilt_total_deaths_today', 0, persistent=True)
+    config.set_setting('tilt_best_run_xp_today', 0, persistent=True)
+    config.set_setting('tilt_highest_level_points_today', 0, persistent=True)
 
     with open(appdata_path('HighScore.txt'), 'w', encoding='utf-8', errors='ignore') as hs:
         hs.write(str(config.get_setting('hscore_name')) + '\n')
