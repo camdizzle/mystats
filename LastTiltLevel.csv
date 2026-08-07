@@ -1,0 +1,2 @@
+SchemaVersion,SnapshotId,GeneratedAtUtc,Status,GameMode,SessionType,Level,Difficulty,LevelDurationSeconds,LevelPassed,PlayerCount,FinishedCount,EliminatedCount,TopTilteePlatform,TopTilteeUsername,StandardPointsPerFinisher,ExpertiseEarned,TotalExpertise,LiveStreamActive
+4,9655ef82-45e9-a12d-8a72-879fcc6a2ce9,2026-08-07T02:54:33.281Z,Final,Tilted,Simulation,1,1,18.513905,true,50,50,0,,,2,0,10314,false
