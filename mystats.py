@@ -53,6 +53,7 @@ import unicodedata
 import shutil
 import filecmp
 from pathlib import Path
+from mos_race_parser import parse_race_exports
 
 if sys.platform == "win32":
     import ctypes
@@ -10184,6 +10185,8 @@ def create_results_files():
 
     _configure_savegame_path('br_file', 'LastSeasonRoyale.csv', timestamp)
     _configure_savegame_path('race_file', 'LastSeasonRace.csv', timestamp)
+    _configure_savegame_path('race_summary_file', 'LastSeasonRaceSummary.csv', timestamp)
+    _configure_savegame_path('last_watched_marble_file', 'LastWatchedMarble.csv', timestamp)
     _configure_savegame_path('tilt_player_file', 'LastTiltLevelPlayers.csv', timestamp)
     _configure_savegame_path('tilt_level_file', 'LastTiltLevel.csv', timestamp)
     _configure_savegame_path('checkpoint_file', 'LastRaceNumbersHit.csv', timestamp)
@@ -15170,21 +15173,21 @@ async def race(bot):
             RecordSetDate = cached_map_data['RecordSetDate']
             RecordStreamer = cached_map_data['RecordStreamer']
 
-            with open(config.get_setting('race_file'), 'rb') as f:
-                data = f.read()
+            lines = parse_race_exports(
+                config.get_setting('race_file'),
+                config.get_setting('race_summary_file'),
+                config.get_setting('last_watched_marble_file'),
+            )
+            if not lines:
+                logger.warning("Race exports did not contain any racer rows.")
+                continue
 
-            result = chardet.detect(data)
-            encoding = result['encoding']
-
-            with open(config.get_setting('race_file'), 'r', encoding=encoding, errors='ignore') as f:
-                lines = f.readlines()
-
-            if all(line.split(',')[6].strip() == 'true' for line in lines[1:]):
+            if all(row[6].strip().lower() == 'true' for row in lines):
                 nowinner = True
             else:
                 nowinner = False
 
-            marbcount = len(lines) - 1
+            marbcount = len(lines)
             event_ids_tmp = config.get_setting('active_event_ids')
 
             if event_ids_tmp is not None:
@@ -15195,7 +15198,7 @@ async def race(bot):
                 event_ids = [0]
 
             # Step 3: Comparison between race finish time and record time
-            first_row_full = lines[1].replace('\x00', '').strip().split(',')
+            first_row_full = lines[0]
             race_finish_time = float(first_row_full[5])
 
             if (not nowinner) and map_data_updated_this_race and RecordTime and race_finish_time < RecordTime:
@@ -15230,7 +15233,7 @@ async def race(bot):
                 first_row = [first_row_full[0], first_row_full[1], first_row_full[2], first_row_full[4], 'Race',
                              timestamp, marbcount, first_row_full[6], 0, 0, event_ids, 0]
 
-            first_row_color = lines[1].replace('\x00', '').strip().split(',')
+            first_row_color = first_row_full
 
             racedata.append(first_row)
             namecolordata.append(first_row_color)
@@ -15242,8 +15245,7 @@ async def race(bot):
             totalpointsrace += int(first_row_full[4])
 
             # Process remaining lines
-            for line in lines[2:]:
-                cleaned_line = line.replace('\x00', '').strip().split(',')
+            for cleaned_line in lines[1:]:
                 row = [cleaned_line[0], cleaned_line[1], cleaned_line[2], cleaned_line[4], 'Race', timestamp, marbcount,
                        cleaned_line[6], 0, 0, event_ids, 0]
                 color_row = cleaned_line
