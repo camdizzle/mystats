@@ -53,7 +53,6 @@ import unicodedata
 import shutil
 import filecmp
 from pathlib import Path
-from mos_race_parser import parse_race_exports
 
 if sys.platform == "win32":
     import ctypes
@@ -354,6 +353,358 @@ def append_csv_rows_safely(file_path, rows):
         writer.writerows(rows)
         csv_file.flush()
         os.fsync(csv_file.fileno())
+
+
+# Keep the Marbles compatibility parsers in this file. MyStats is distributed
+# as one standalone Python program, so these helpers must not become a local
+# parser import.
+def _mos_key(value):
+    return re.sub(r"[^a-z0-9]", "", str(value or "").lower())
+
+
+def _mos_decode(raw_data):
+    if raw_data.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return raw_data.decode("utf-16", errors="replace").replace("\x00", "")
+    if raw_data.startswith(b"\xef\xbb\xbf"):
+        return raw_data.decode("utf-8-sig", errors="replace").replace("\x00", "")
+    detected = chardet.detect(raw_data).get("encoding") or "utf-8"
+    try:
+        return raw_data.decode(detected, errors="replace").replace("\x00", "")
+    except (LookupError, UnicodeDecodeError):
+        return raw_data.decode("utf-8", errors="replace").replace("\x00", "")
+
+
+def _read_mos_table(path):
+    """Read a Marbles CSV and return (rows, raw records, has_header)."""
+    if not path:
+        return [], [], False
+    try:
+        with open(path, "rb") as source:
+            raw_data = source.read()
+    except (FileNotFoundError, PermissionError, OSError):
+        return [], [], False
+
+    text = _mos_decode(raw_data)
+    sample = "\n".join(text.splitlines()[:10])
+    try:
+        delimiter = csv.Sniffer().sniff(sample, delimiters=",\t;").delimiter
+    except csv.Error:
+        delimiter = "\t" if "\t" in sample else ";" if ";" in sample else ","
+    rows = [
+        [str(cell).strip() for cell in row]
+        for row in csv.reader(io.StringIO(text), delimiter=delimiter)
+        if any(str(cell).strip() for cell in row)
+    ]
+    if not rows:
+        return [], [], False
+
+    known_headers = {
+        _mos_key(alias)
+        for aliases in tuple(RACE_EXPORT_ALIASES.values()) + tuple(ROYALE_EXPORT_ALIASES.values())
+        + tuple(TILT_LEVEL_ALIASES.values()) + tuple(TILT_PLAYER_ALIASES.values())
+        for alias in aliases
+    }
+    known_headers.update(_mos_key(header) for header in (
+        'SchemaVersion', 'SnapshotId', 'GeneratedAtUtc', 'Status', 'GameMode',
+        'SessionType', 'MapName', 'MapCreator', 'PlayerCount', 'FinishedCount',
+        'EliminatedCount', 'WinnerPlatform', 'WinnerUsername', 'Platform',
+        'WatchState', 'TargetType', 'SeasonPointsTotal', 'SeasonWinsTotal',
+        'SeasonMatchesPlayedTotal', 'SeasonEliminations', 'SeasonGamesPlayed',
+        'SeasonWins', 'SeasonRank', 'MatchScore', 'CurrentHealth', 'MaxHealth',
+    ))
+    normalized_first = [_mos_key(cell) for cell in rows[0]]
+    has_header = sum(cell in known_headers for cell in normalized_first if cell) >= 1
+    if has_header:
+        headers = []
+        used = defaultdict(int)
+        for index, cell in enumerate(rows[0]):
+            header = str(cell).strip().lstrip("\ufeff") or f"column_{index}"
+            used[header] += 1
+            headers.append(header if used[header] == 1 else f"{header}_{used[header]}")
+        data_rows = rows[1:]
+        raw_records = [
+            {headers[index]: value for index, value in enumerate(row) if index < len(headers)}
+            for row in data_rows
+        ]
+    else:
+        data_rows = rows
+        raw_records = [
+            {f"column_{index}": value for index, value in enumerate(row)}
+            for row in data_rows
+        ]
+    return data_rows, raw_records, has_header
+
+
+RACE_EXPORT_ALIASES = {
+    "position": ("Position", "Place", "Placement", "Rank", "FinishPosition", "FinalPosition"),
+    "login": ("Username", "UserName", "User", "Login", "TwitchLogin", "TwitchUsername", "TwitchName", "PlayerName", "MarbleOwner", "MarbleOwnerName"),
+    "display": ("DisplayName", "TwitchDisplayName", "MarbleName", "Name", "PlayerDisplayName", "MarbleOwnerDisplayName"),
+    "color": ("Color", "NameColor", "NameColorHex", "UsernameColor", "HexColor", "Colour", "MarbleOwnerColor"),
+    "points": ("Points", "PointsEarned", "PointsAwarded", "RacePoints", "SeasonPointsEarned", "Score"),
+    "time": ("Time", "FinishTime", "FinishTimeSeconds", "TimeInRaceSeconds", "RaceTime", "RaceTimeSeconds", "CompletionTime"),
+    "eliminated": ("Eliminated", "IsEliminated", "DNF", "DidNotFinish", "Out"),
+    "survived": ("Survived", "Alive", "Finished", "DidFinish", "Completed"),
+    "snapshot": ("SnapshotId", "SnapshotGuid"),
+    "id": ("Id", "PlayerId", "MarbleId", "UserGuid", "SteamId", "TwitchId", "MarbleOwnerId"),
+}
+
+ROYALE_EXPORT_ALIASES = {
+    **RACE_EXPORT_ALIASES,
+    "kills": ("Kills", "MatchKills", "Eliminations", "KillCount", "EliminationCount"),
+    "damage": ("Damage", "DamageGiven", "MatchDamageDealt", "TotalDamage", "DamageDealt"),
+    "killer": ("Killer", "KillerName", "EliminatedBy", "Attacker"),
+    "victim": ("Victim", "VictimName", "EliminatedPlayer", "Target"),
+    "weapon": ("Weapon", "WeaponName", "EliminationWeapon", "DamageSource"),
+}
+
+TILT_LEVEL_ALIASES = {
+    "level": ("CurrentLevel", "Level", "LevelNumber"),
+    "elapsed": ("ElapsedTime", "LevelDurationSeconds", "TimeElapsed", "CompletionTime", "Time"),
+    "top": ("CurrentTopTiltee", "TopTiltee", "TopTilteeUsername", "TopPlayer", "TopUser"),
+    "level_points": ("StandardPointsPerFinisher", "LevelPoints", "Points", "LevelExp"),
+    "level_expertise": ("ExpertiseEarned", "LevelExpertise", "LevelXP"),
+    "total_points": ("TotalPoints", "TotalExp", "TotalExpertise", "TotalXP"),
+    "live": ("Live", "IsLive", "LiveStreamActive"),
+    "passed": ("LevelPassed", "Passed", "Completed", "IsCompleted"),
+}
+
+TILT_PLAYER_ALIASES = {
+    "login": ("Username", "UserName", "User", "Login", "TwitchLogin", "TwitchUsername"),
+    "display": ("DisplayName", "TwitchDisplayName", "Name"),
+    "points": ("PointsEarned", "LevelPointsEarned", "Points", "Score", "LevelPoints"),
+    "eliminated": ("Eliminated", "IsEliminated", "Dead", "Died", "DNF"),
+    "survived": ("Survived", "Alive", "IsAlive", "Completed", "Passed"),
+    "level": ("LastLevelJoined", "CurrentLevel", "Level", "LevelNumber"),
+    "id": ("Id", "PlayerId", "UserGuid", "TwitchId"),
+}
+
+
+def _canonical_mos_records(path, aliases, positional_fields):
+    rows, raw_records, has_header = _read_mos_table(path)
+    canonical = []
+    alias_lookup = {
+        _mos_key(alias): field
+        for field, field_aliases in aliases.items()
+        for alias in field_aliases
+    }
+    for row_index, (row, raw_record) in enumerate(zip(rows, raw_records)):
+        record = {"__index": row_index, "__raw": raw_record, "__header": has_header}
+        if has_header:
+            for header, value in raw_record.items():
+                field = alias_lookup.get(_mos_key(header))
+                if field and str(value).strip() and not str(record.get(field, "")).strip():
+                    record[field] = str(value).strip()
+        else:
+            for index, field in enumerate(positional_fields):
+                if index < len(row):
+                    record[field] = str(row[index]).strip()
+        canonical.append(record)
+    return canonical
+
+
+def _record_match_keys(record):
+    keys = []
+    stable_id = str(record.get("id", "")).strip().lower()
+    login = str(record.get("login", "")).strip().lower().lstrip("@")
+    position = str(record.get("position", "")).strip()
+    if stable_id:
+        keys.append(("id", stable_id))
+    if login:
+        keys.append(("login", login))
+    if position:
+        keys.append(("position", position))
+    return keys
+
+
+def _merge_mos_records(primary, extra_tables):
+    """Merge split exports by stable keys; use row order only when provably aligned."""
+    indexes = []
+    for table in extra_tables:
+        by_key = {}
+        for record in table:
+            for key in _record_match_keys(record):
+                by_key.setdefault(key, record)
+        indexes.append(by_key)
+
+    merged = []
+    for index, source in enumerate(primary):
+        combined = dict(source)
+        for table, by_key in zip(extra_tables, indexes):
+            match = next((by_key[key] for key in _record_match_keys(source) if key in by_key), None)
+            source_snapshot = str(source.get('snapshot', '')).strip()
+            match_snapshot = str((match or {}).get('snapshot', '')).strip()
+            if match is not None and source_snapshot and match_snapshot and source_snapshot != match_snapshot:
+                match = None
+            # Row-order fallback is safe only for equal-size player tables that
+            # contain no identities of their own. A one-row event summary must
+            # never be smeared across all racers.
+            if match is None and len(table) == len(primary) and len(primary) > 1:
+                table_has_identity = any(_record_match_keys(record) for record in table)
+                if not table_has_identity:
+                    candidate = table[index]
+                    candidate_snapshot = str(candidate.get('snapshot', '')).strip()
+                    if not source_snapshot or not candidate_snapshot or source_snapshot == candidate_snapshot:
+                        match = candidate
+            if match:
+                for key, value in match.items():
+                    if key.startswith("__"):
+                        continue
+                    if not str(combined.get(key, "")).strip() and str(value).strip():
+                        combined[key] = value
+        merged.append(combined)
+    return merged
+
+
+def _normalize_eliminated(record, default="false"):
+    true_tokens = {"true", "yes", "y", "1", "eliminated", "dead", "died", "failed", "dnf", "out"}
+    false_tokens = {"false", "no", "n", "0", "survived", "alive", "passed", "completed", "winner", "finished", "active"}
+    eliminated = str(record.get("eliminated", "")).strip().lower()
+    survived = str(record.get("survived", "")).strip().lower()
+    if eliminated in true_tokens:
+        return "true"
+    if eliminated in false_tokens:
+        return "false"
+    if survived in true_tokens:
+        return "false"
+    if survived in false_tokens:
+        return "true"
+    return default
+
+
+def parse_race_exports(race_path, summary_path=None, watched_path=None):
+    """Return the established seven-field race contract from split exports."""
+    positional = ("position", "login", "display", "color", "points", "time", "eliminated")
+    race_records = _canonical_mos_records(race_path, RACE_EXPORT_ALIASES, positional)
+    summary_records = _canonical_mos_records(summary_path, RACE_EXPORT_ALIASES, positional)
+    watched_records = _canonical_mos_records(watched_path, RACE_EXPORT_ALIASES, positional)
+    records = _merge_mos_records(race_records, (summary_records, watched_records))
+    parsed = []
+    for index, record in enumerate(records):
+        login = str(record.get("login", "")).strip().lstrip("@")
+        display = str(record.get("display", "")).strip() or login
+        if not login:
+            login = display.lower()
+        parsed.append([
+            str(record.get("position", "")).strip() or str(index + 1),
+            login,
+            display,
+            str(record.get("color", "")).strip(),
+            str(record.get("points", "")).strip() or "0",
+            str(record.get("time", "")).strip() or "0",
+            _normalize_eliminated(record),
+        ])
+    return parsed
+
+
+def parse_royale_exports(royale_path, summary_path=None):
+    """Return the established eight-field Battle Royale contract."""
+    positional = ("position", "login", "display", "color", "points", "eliminated", "kills", "damage")
+    royale_records = _canonical_mos_records(royale_path, ROYALE_EXPORT_ALIASES, positional)
+    summary_records = _canonical_mos_records(summary_path, ROYALE_EXPORT_ALIASES, positional)
+    records = _merge_mos_records(royale_records, (summary_records,))
+    parsed = []
+    for index, record in enumerate(records):
+        login = str(record.get("login", "")).strip().lstrip("@")
+        display = str(record.get("display", "")).strip() or login
+        if not login:
+            login = display.lower()
+        parsed.append([
+            str(record.get("position", "")).strip() or str(index + 1),
+            login,
+            display,
+            str(record.get("color", "")).strip(),
+            str(record.get("points", "")).strip() or "0",
+            _normalize_eliminated(record),
+            str(record.get("kills", "")).strip() or "0",
+            str(record.get("damage", "")).strip() or "0",
+        ])
+    return parsed
+
+
+def parse_tilt_player_exports(path):
+    """Return username, display name, points, outcome, and level."""
+    positional = ("login", "display", "points", "time_on_board", "level", "top_tiltee")
+    records = _canonical_mos_records(path, TILT_PLAYER_ALIASES, positional)
+    parsed = []
+    for record in records:
+        login = str(record.get("login", "")).strip().lstrip("@")
+        if not login:
+            continue
+        points = str(record.get("points", "")).strip() or "0"
+        explicit_outcome = bool(str(record.get("eliminated", "")).strip() or str(record.get("survived", "")).strip())
+        status = _normalize_eliminated(record, default="") if explicit_outcome else ""
+        status = "eliminated" if status == "true" else "survived" if status == "false" else ""
+        parsed.append([
+            login,
+            str(record.get("display", "")).strip() or login,
+            points,
+            status,
+            str(record.get("level", "")).strip() or "0",
+        ])
+    return parsed
+
+
+def _append_unique_archive_rows(file_path, rows, key_start=1):
+    """Append rows whose stable payload has not already been archived today."""
+    if not file_path or not rows:
+        return 0
+    existing = set()
+    try:
+        with open(file_path, "r", newline="", encoding="utf-8", errors="ignore") as source:
+            existing = {tuple(row[key_start:]) for row in iter_csv_rows(source)}
+    except FileNotFoundError:
+        pass
+    unique = []
+    for row in rows:
+        key = tuple(str(value) for value in row[key_start:])
+        if key in existing:
+            continue
+        existing.add(key)
+        unique.append(row)
+    if unique:
+        append_csv_rows_safely(file_path, unique)
+    return len(unique)
+
+
+def _archive_mos_sources(file_path, timestamp, sources):
+    rows = []
+    for source_name, source_path in sources:
+        _, raw_records, _ = _read_mos_table(source_path)
+        for record in raw_records:
+            payload = json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            rows.append([timestamp, source_name, payload])
+    return _append_unique_archive_rows(file_path, rows, key_start=1)
+
+
+def _raw_record_value(record, *aliases):
+    values = {_mos_key(key): value for key, value in (record or {}).items()}
+    for alias in aliases:
+        value = values.get(_mos_key(alias))
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return ""
+
+
+def read_mos_event_summary(path):
+    """Read the single event-level Race/Royale summary row."""
+    _, records, _ = _read_mos_table(path)
+    if not records:
+        return {}
+    record = records[0]
+    return {
+        'schema_version': _raw_record_value(record, 'SchemaVersion'),
+        'snapshot_id': _raw_record_value(record, 'SnapshotId'),
+        'generated_at': _raw_record_value(record, 'GeneratedAtUtc'),
+        'status': _raw_record_value(record, 'Status'),
+        'game_mode': _raw_record_value(record, 'GameMode'),
+        'session_type': _raw_record_value(record, 'SessionType'),
+        'map_name': _raw_record_value(record, 'MapName'),
+        'map_creator': _raw_record_value(record, 'MapCreator'),
+        'player_count': _raw_record_value(record, 'PlayerCount'),
+        'finished_count': _raw_record_value(record, 'FinishedCount'),
+        'eliminated_count': _raw_record_value(record, 'EliminatedCount'),
+        'winner_username': _raw_record_value(record, 'WinnerUsername'),
+    }
 
 
 def _settings_file_candidates():
@@ -1060,34 +1411,48 @@ def format_tilt_duration(total_seconds):
     return f"{minutes}:{secs:02d}"
 
 def parse_tilt_level_state(level_rows):
-    """Parse LastTiltLevel.csv using header aliases when possible, with positional fallbacks."""
-    if len(level_rows) < 2:
+    """Parse LastTiltLevel.csv without depending on exact header punctuation or order."""
+    rows = [row for row in (level_rows or []) if any(str(cell).strip() for cell in row)]
+    if not rows:
         return None
 
-    headers = [h.strip().lower() for h in level_rows[0]]
-    row = level_rows[1]
-    index_by_header = {h: idx for idx, h in enumerate(headers)}
+    alias_lookup = {
+        _mos_key(alias): field
+        for field, aliases in TILT_LEVEL_ALIASES.items()
+        for alias in aliases
+    }
+    first_keys = [_mos_key(cell) for cell in rows[0]]
+    has_header = any(key in alias_lookup for key in first_keys)
+    if has_header:
+        if len(rows) < 2:
+            return None
+        record = {}
+        for index, key in enumerate(first_keys):
+            field = alias_lookup.get(key)
+            if field and index < len(rows[1]):
+                record[field] = str(rows[1][index]).strip()
+    else:
+        row = rows[0]
+        positional_fields = ("level", "elapsed", "top", "level_points", "total_points", "live", "passed")
+        record = {
+            field: str(row[index]).strip()
+            for index, field in enumerate(positional_fields)
+            if index < len(row)
+        }
 
-    def get_field(alias_list, fallback_index=None, default=''):
-        for alias in alias_list:
-            idx = index_by_header.get(alias)
-            if idx is not None and idx < len(row):
-                return row[idx].strip()
-        if fallback_index is not None and fallback_index < len(row):
-            return row[fallback_index].strip()
-        return default
-
-    current_level_raw = get_field(['level', 'currentlevel'], fallback_index=0, default='0')
+    current_level_raw = record.get('level', '0')
     digits_only = ''.join(ch for ch in current_level_raw if ch.isdigit())
     current_level = int(digits_only or '0')
 
-    elapsed_time = get_field(['timeelapsed', 'elapsedtime', 'time'], fallback_index=1, default='0:00')
-    top_tiltee = get_field(['toptiltee', 'topplayer', 'topuser'], fallback_index=2, default='')
-
-    level_xp_raw = get_field(['points', 'levelexp', 'expertise'], fallback_index=3, default='0')
-    total_xp_raw = get_field(['totalexp', 'totalexpertise'], fallback_index=4, default='0')
-    live_raw = get_field(['live', 'islive'], fallback_index=5, default='')
-    level_passed_raw = get_field(['levelpassed', 'passed'], fallback_index=6, default='false').lower()
+    elapsed_time = record.get('elapsed', '0:00')
+    top_tiltee = record.get('top', '')
+    # Never substitute TotalExp for LevelExp: TotalExp is cumulative and doing
+    # so would overcount every level after the first.
+    level_xp_raw = record.get('level_points', '0')
+    total_xp_raw = record.get('total_points', '0')
+    level_expertise_raw = record.get('level_expertise', '0')
+    live_raw = record.get('live', '')
+    level_passed_raw = str(record.get('passed', 'false')).lower()
 
     try:
         level_xp = int(float(level_xp_raw))
@@ -1099,12 +1464,19 @@ def parse_tilt_level_state(level_rows):
     except (TypeError, ValueError):
         total_xp = 0
 
+    try:
+        level_expertise = int(float(level_expertise_raw))
+    except (TypeError, ValueError):
+        level_expertise = 0
+
     return {
         'current_level': current_level,
         'elapsed_time': elapsed_time,
         'top_tiltee': top_tiltee,
         'level_xp': level_xp,
+        'level_expertise': level_expertise,
         'total_xp': total_xp,
+        'total_xp_present': bool(str(record.get('total_points', '')).strip()),
         'live': live_raw,
         'level_passed': level_passed_raw == 'true'
     }
@@ -2873,6 +3245,19 @@ def parse_tilt_result_detail(row):
         return None
 
     username, points, run_id = parsed
+    display_name = str(row[3]).strip() if len(row) > 3 else username
+    try:
+        level_number = int(''.join(ch for ch in str(row[1]).strip() if ch.isdigit()) or '0')
+    except (TypeError, ValueError):
+        level_number = 0
+
+    explicit_status = str(row[5]).strip().lower() if len(row) > 5 else ''
+    if explicit_status in ('survived', 'alive', 'passed', 'completed', 'winner', 'active'):
+        survived = True
+    elif explicit_status in ('eliminated', 'dead', 'died', 'failed', 'dnf', 'out'):
+        survived = False
+    else:
+        survived = None
 
     def parse_flag_token(value, allow_numeric=True):
         token = str(value).strip().lower()
@@ -2884,7 +3269,7 @@ def parse_tilt_result_detail(row):
             return token == '1'
         return None
 
-    is_top_tiltee = False
+    is_top_tiltee = None
     # Tilt result exports have evolved over time. We parse from the tail and
     # prefer explicit boolean words first, then fall back to nearby numeric
     # flags (for older 1/0 formats).
@@ -2896,7 +3281,7 @@ def parse_tilt_result_detail(row):
             is_top_tiltee = parsed_flag
             break
 
-    if not is_top_tiltee:
+    if is_top_tiltee is None:
         for candidate in (row[-1], row[-2] if len(row) >= 2 else None, row[-3] if len(row) >= 3 else None):
             token = str(candidate or '').strip()
             if not token or '[' in token or ']' in token or ',' in token:
@@ -2909,8 +3294,11 @@ def parse_tilt_result_detail(row):
     return {
         'run_id': run_id,
         'username': username,
+        'display_name': display_name or username,
+        'level': level_number,
         'points': points,
-        'is_top_tiltee': is_top_tiltee,
+        'survived': survived,
+        'is_top_tiltee': bool(is_top_tiltee),
     }
 
 
@@ -2938,18 +3326,17 @@ def get_tilt_xp_totals_from_results_files(target_date=None):
             with open(tilts_file, 'r', encoding=encoding, errors='ignore') as f:
                 reader = iter_csv_rows(f)
                 for row in reader:
-                    parsed = parse_tilt_result_row(row)
-                    if parsed is None:
+                    detail = parse_tilt_result_detail(row)
+                    if detail is None:
                         continue
 
-                    _, points, run_id = parsed
-                    if points <= 0 or len(row) < 2:
+                    survived = detail['survived'] is True or (
+                        detail['survived'] is None and detail['points'] > 0
+                    )
+                    if not survived:
                         continue
-
-                    try:
-                        level_number = int(''.join(ch for ch in str(row[1]).strip() if ch.isdigit()) or '0')
-                    except (TypeError, ValueError):
-                        level_number = 0
+                    run_id = detail['run_id']
+                    level_number = detail['level']
 
                     if level_number <= 0:
                         continue
@@ -2991,18 +3378,16 @@ def get_tilt_run_xp_from_results_files(target_run_id):
             with open(tilts_file, 'r', encoding=encoding, errors='ignore') as f:
                 reader = iter_csv_rows(f)
                 for row in reader:
-                    parsed = parse_tilt_result_row(row)
-                    if parsed is None:
+                    detail = parse_tilt_result_detail(row)
+                    if detail is None:
                         continue
 
-                    _, points, run_id = parsed
-                    if points <= 0 or len(row) < 2 or str(run_id or '').strip() != run_id_token:
+                    survived = detail['survived'] is True or (
+                        detail['survived'] is None and detail['points'] > 0
+                    )
+                    if not survived or str(detail['run_id'] or '').strip() != run_id_token:
                         continue
-
-                    try:
-                        level_number = int(''.join(ch for ch in str(row[1]).strip() if ch.isdigit()) or '0')
-                    except (TypeError, ValueError):
-                        level_number = 0
+                    level_number = detail['level']
 
                     if level_number <= 0:
                         continue
@@ -3296,7 +3681,7 @@ def get_tilt_season_stats():
 
                 if username not in user_stats:
                     user_stats[username] = {
-                        'display_name': detail['username'].strip() or username,
+                        'display_name': detail.get('display_name', '').strip() or detail['username'].strip() or username,
                         'tilt_levels': 0,
                         'tilt_top_tiltee': 0,
                         'tilt_points': 0,
@@ -5734,6 +6119,10 @@ def _build_tilt_overlay_payload():
                             'deaths': 0,
                         }
                     totals[username]['points'] += _safe_int(detail.get('points', 0))
+                    if detail.get('survived') is False or (
+                        detail.get('survived') is None and _safe_int(detail.get('points', 0)) <= 0
+                    ):
+                        totals[username]['deaths'] += 1
         except Exception:
             return []
 
@@ -6191,10 +6580,13 @@ def _aggregate_tilt_from_directories(directories):
                         totals['levels'] += 1
                         if detail.get('is_top_tiltee'):
                             totals['top_tiltee'] += 1
+                        if detail.get('survived') is False or (
+                            detail.get('survived') is None and _safe_int(detail.get('points', 0)) <= 0
+                        ):
+                            totals['deaths'] += 1
             except Exception:
                 continue
 
-    totals['deaths'] = max(0, int(totals['levels']) - int(totals['top_tiltee']))
     totals['participants'] = len(users)
     totals['ppr'] = round((totals['points'] / totals['levels']), 2) if totals['levels'] else 0.0
     totals['survival_rate'] = round(((totals['levels'] - totals['deaths']) / totals['levels']) * 100, 2) if totals['levels'] else 0.0
@@ -9557,6 +9949,9 @@ class ConfigManager:
                                 'chunk_alert_sound', 'reset_audio_sound', 'audio_device', 'checkpoint_file',
                                 'tilt_player_file', 'active_event_ids', 'paused_event_ids', 'checkpoint_results_file',
                                 'tilts_results_file', 'tilt_level_file', 'map_data_file', 'map_results_file',
+                                'race_summary_file', 'last_watched_marble_file', 'br_summary_file',
+                                'last_watched_results_file', 'map_races_results_file', 'br_details_results_file',
+                                'tilt_details_results_file',
                                 'UI_THEME', 'chat_br_results', 'chat_race_results', 'chat_leaderboard_show_medals', 'chat_tilt_results',
                                 'chat_tilt_suppress_offline', 'chat_tilt_redact_survivor_names',
                                 'chat_mystats_command', 'chat_all_commands', 'chat_narrative_alerts', 'competitive_raid_monitor_enabled', 'competitive_raid_phase', 'competitive_raid_queue_started_at', 'competitive_raid_live_started_at', 'competitive_raid_last_summary_live_started_at', 'competitive_raid_last_queue_open_live_started_at',
@@ -10144,6 +10539,17 @@ def _configure_savegame_path(setting_key, filename, timestamp):
         logger.error("Unable to read savegame file at %s", resolved_path, exc_info=True)
 
 
+def _configure_savegame_path_candidates(setting_key, filenames, timestamp):
+    """Configure the first existing spelling, retaining compatibility aliases."""
+    for filename in filenames:
+        resolved_path = _resolve_marbles_savegame_file(filename)
+        if os.path.exists(resolved_path):
+            config.set_setting(setting_key, resolved_path, persistent=True)
+            return resolved_path
+    _configure_savegame_path(setting_key, filenames[0], timestamp)
+    return config.get_setting(setting_key)
+
+
 def create_results_files():
     timestamp, timestampMDY, timestampHMS, adjusted_time = time_manager.get_adjusted_time()
 
@@ -10183,7 +10589,25 @@ def create_results_files():
         with open(map_results, 'w', encoding='utf-8') as commmap_tmp:
             pass
 
+    optional_result_files = {
+        'last_watched_results_file': "lastwatched_" + adjusted_time.strftime("%Y-%m-%d") + ".csv",
+        'map_races_results_file': "mapraces_" + adjusted_time.strftime("%Y-%m-%d") + ".csv",
+        'br_details_results_file': "brdetails_" + adjusted_time.strftime("%Y-%m-%d") + ".csv",
+        'tilt_details_results_file': "tiltdetails_" + adjusted_time.strftime("%Y-%m-%d") + ".csv",
+    }
+    for setting_key, filename in optional_result_files.items():
+        result_path = os.path.join(directory, filename)
+        config.set_setting(setting_key, result_path, persistent=True)
+        if not os.path.exists(result_path):
+            with open(result_path, 'w', encoding='utf-8'):
+                pass
+
     _configure_savegame_path('br_file', 'LastSeasonRoyale.csv', timestamp)
+    _configure_savegame_path_candidates(
+        'br_summary_file',
+        ('LastSeasonRoyaleSummary.csv', 'LastSeasonRoyalSummary.csv'),
+        timestamp,
+    )
     _configure_savegame_path('race_file', 'LastSeasonRace.csv', timestamp)
     _configure_savegame_path('race_summary_file', 'LastSeasonRaceSummary.csv', timestamp)
     _configure_savegame_path('last_watched_marble_file', 'LastWatchedMarble.csv', timestamp)
@@ -11564,6 +11988,130 @@ if not pending_update_resumed:
 import copy
 
 
+def _safe_float_value(value, default=0.0):
+    try:
+        return float(str(value).strip())
+    except (TypeError, ValueError):
+        return default
+
+
+def _season_result_rows(pattern):
+    directory = config.get_setting('directory') or ''
+    for file_path in sorted(glob.glob(os.path.join(directory, pattern))):
+        try:
+            with open(file_path, 'r', encoding='utf-8-sig', errors='ignore') as source:
+                for row in iter_csv_rows(source):
+                    if row:
+                        yield row
+        except (FileNotFoundError, PermissionError, OSError):
+            continue
+
+
+def load_map_race_history():
+    history = []
+    for row in _season_result_rows('mapraces_*.csv'):
+        if len(row) < 12:
+            continue
+        history.append({
+            'timestamp': row[0], 'map_name': row[1], 'map_builder': row[2],
+            'username': row[3], 'display_name': row[4] or row[3],
+            'position': _safe_int(row[5]), 'points': _safe_int(row[6]),
+            'finish_time': _safe_float_value(row[7]),
+            'eliminated': str(row[8]).strip().lower() == 'true',
+            'marble_count': _safe_int(row[9]), 'record_time': _safe_float_value(row[10]),
+            'record_holder': row[11],
+        })
+    return history
+
+
+def load_royale_history():
+    history = []
+    for row in _season_result_rows('allraces_*.csv'):
+        if len(row) < 10 or str(row[4]).strip().upper() != 'BR':
+            continue
+        history.append({
+            'position': _safe_int(row[0]), 'username': str(row[1]).strip(),
+            'display_name': str(row[2]).strip() or str(row[1]).strip(),
+            'points': _safe_int(row[3]), 'timestamp': str(row[5]).strip(),
+            'marble_count': _safe_int(row[6]),
+            'eliminated': str(row[7]).strip().lower() == 'true',
+            'kills': _safe_int(row[8]), 'damage': _safe_int(row[9]),
+        })
+    return history
+
+
+def load_royale_detail_history():
+    details = []
+    for row in _season_result_rows('brdetails_*.csv'):
+        if len(row) < 3:
+            continue
+        try:
+            record = json.loads(row[2])
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if isinstance(record, dict):
+            details.append({'timestamp': row[0], 'source': row[1], 'record': record})
+    return details
+
+
+def load_tilt_history():
+    history = []
+    for row in _season_result_rows('tilts_*.csv'):
+        detail = parse_tilt_result_detail(row)
+        if detail is not None:
+            history.append(detail)
+    return history
+
+
+def load_tilt_detail_events():
+    events = {}
+    for row in _season_result_rows('tiltdetails_*.csv'):
+        if len(row) < 3:
+            continue
+        try:
+            record = json.loads(row[2])
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if not isinstance(record, dict):
+            continue
+        snapshot_id = _raw_record_value(record, 'SnapshotId') or f"{row[0]}:{row[1]}"
+        event = events.setdefault(snapshot_id, {'timestamp': row[0], 'level': None, 'players': []})
+        if row[1] == 'level':
+            event['level'] = record
+        elif row[1] == 'players':
+            event['players'].append(record)
+    return sorted(events.values(), key=lambda event: event.get('timestamp', ''))
+
+
+def _group_history_events(history):
+    grouped = []
+    by_timestamp = {}
+    for record in history:
+        timestamp = record.get('timestamp', '')
+        if timestamp not in by_timestamp:
+            by_timestamp[timestamp] = []
+            grouped.append(by_timestamp[timestamp])
+        by_timestamp[timestamp].append(record)
+    return grouped
+
+
+def _target_username(ctx, username=None):
+    return (username or getattr(ctx.author, 'name', '') or '').split()[0].lstrip('@')
+
+
+def _chat_safe(message, max_length=480):
+    text = str(message)
+    return text if len(text) <= max_length else text[:max_length - 1].rstrip() + '…'
+
+
+def _format_race_time(seconds):
+    value = _safe_float_value(seconds)
+    if value <= 0:
+        return 'DNF'
+    minutes, remainder = divmod(value, 60)
+    return f"{int(minutes):02d}:{remainder:06.3f}"
+
+
 class Bot(commands.Bot):
     TEAM_COMMAND_NAMES = {
         'createteam', 'invite', 'cocaptain', 'acceptteam', 'denyteam', 'kick', 'leave',
@@ -12735,9 +13283,15 @@ class Bot(commands.Bot):
         excluded_commands = {'commands', 'mplreset', 'highfive'} | team_hidden
         if not self._teams_feature_enabled():
             excluded_commands.add('teamhelp')
-        commands_list = [f'!{cmd.name}' for cmd in self.commands.values() if cmd.name not in excluded_commands]
-        commands_description = ', '.join(commands_list)
-        await ctx.send(f'MyStats commands: {commands_description}')
+        commands_list = sorted(f'!{cmd.name}' for cmd in self.commands.values() if cmd.name not in excluded_commands)
+        for message in chunked_join_messages(
+            'MyStats commands: ',
+            'MyStats commands (cont): ',
+            commands_list,
+            separator=', ',
+            max_length=480,
+        ):
+            await ctx.send(message)
 
     @commands.command(name='teamhelp')
     async def team_help(self, ctx):
@@ -13293,6 +13847,471 @@ class Bot(commands.Bot):
         )
 
 
+    @commands.command(name='lastrace')
+    async def lastrace_command(self, ctx, username: str = None):
+        events = _group_history_events(load_map_race_history())
+        if not events:
+            await ctx.send("No map race history has been captured yet.")
+            return
+        latest = events[-1]
+        target = _target_username(ctx, username) if username else ''
+        result = next((row for row in latest if row['username'].lower() == target.lower()), None) if target else min(latest, key=lambda row: row['position'] or 999999)
+        if result is None:
+            await ctx.send(f"No result for @{target} in the latest race.")
+            return
+        outcome = 'DNF' if result['eliminated'] else _format_race_time(result['finish_time'])
+        await ctx.send(_chat_safe(
+            f"Last Race | {result['map_name'] or 'Unknown map'} by {result['map_builder'] or 'Unknown'} | "
+            f"{result['display_name']}: #{result['position']} / {result['marble_count']}, "
+            f"{result['points']:,} pts, {outcome}"
+        ))
+
+    @commands.command(name='racecard')
+    async def racecard_command(self, ctx, username: str = None):
+        target = _target_username(ctx, username)
+        rows = [row for row in load_map_race_history() if row['username'].lower() == target.lower()]
+        if not rows:
+            await ctx.send(f"No map race history found for @{target}.")
+            return
+        wins = sum(row['position'] == 1 for row in rows)
+        podiums = sum(1 <= row['position'] <= 3 for row in rows)
+        completed = [row for row in rows if not row['eliminated']]
+        avg_finish = sum(row['position'] for row in rows) / len(rows)
+        by_map = defaultdict(list)
+        for row in rows:
+            by_map[row['map_name']].append(row['position'])
+        best_map = min(by_map, key=lambda name: sum(by_map[name]) / len(by_map[name])) if by_map else 'Unknown'
+        await ctx.send(_chat_safe(
+            f"Race Card @{target} | {len(rows)} races, {wins} wins, {podiums} podiums, "
+            f"{sum(row['points'] for row in rows):,} pts | Avg finish {avg_finish:.2f} | "
+            f"Completion {len(completed) / len(rows) * 100:.1f}% | Best map: {best_map}"
+        ))
+
+    @commands.command(name='maprecord')
+    async def maprecord_command(self, ctx, *, map_name: str = None):
+        history = load_map_race_history()
+        if not history:
+            await ctx.send("No map race history has been captured yet.")
+            return
+        query = (map_name or history[-1]['map_name']).strip().lower()
+        rows = [row for row in history if query in row['map_name'].lower()]
+        if not rows:
+            await ctx.send(f"No recorded races match '{map_name}'.")
+            return
+        official = next((row for row in reversed(rows) if row['record_time'] > 0), None)
+        if official:
+            await ctx.send(_chat_safe(
+                f"Map Record | {official['map_name']}: {_format_race_time(official['record_time'])} by "
+                f"{official['record_holder'] or 'Unknown'}"
+            ))
+            return
+        valid = [row for row in rows if not row['eliminated'] and row['finish_time'] > 0]
+        if not valid:
+            await ctx.send(f"No valid finish recorded for {rows[-1]['map_name']}.")
+            return
+        fastest = min(valid, key=lambda row: row['finish_time'])
+        await ctx.send(_chat_safe(
+            f"Observed Map Record | {fastest['map_name']}: {_format_race_time(fastest['finish_time'])} by {fastest['display_name']}"
+        ))
+
+    @commands.command(name='bestmaps')
+    async def bestmaps_command(self, ctx, username: str = None):
+        target = _target_username(ctx, username)
+        by_map = defaultdict(list)
+        for row in load_map_race_history():
+            if row['username'].lower() == target.lower():
+                by_map[row['map_name']].append(row['position'])
+        ranked = sorted(
+            ((name, len(places), sum(places) / len(places)) for name, places in by_map.items() if len(places) >= 3),
+            key=lambda item: (item[2], -item[1], item[0].lower()),
+        )[:3]
+        if not ranked:
+            await ctx.send(f"@{target} needs at least 3 results on a map before !bestmaps can rank it.")
+            return
+        await ctx.send(_chat_safe(
+            f"Best Maps @{target} | " + " | ".join(f"{index}. {name} — {average:.2f} avg ({count})" for index, (name, count, average) in enumerate(ranked, 1))
+        ))
+
+    @commands.command(name='top10map')
+    async def top10map_command(self, ctx, *, map_name: str = None):
+        if not map_name:
+            await ctx.send("Usage: !top10map <map name>")
+            return
+        matching = [row for row in load_map_race_history() if map_name.lower() in row['map_name'].lower()]
+        by_user = defaultdict(list)
+        display = {}
+        for row in matching:
+            by_user[row['username']].append(row['position'])
+            display[row['username']] = row['display_name']
+        ranked = sorted(
+            ((user, len(places), sum(places) / len(places)) for user, places in by_user.items() if len(places) >= 3),
+            key=lambda item: (item[2], -item[1], item[0].lower()),
+        )[:10]
+        if not ranked:
+            await ctx.send(f"No racers have 3 results on a map matching '{map_name}'.")
+            return
+        title = matching[-1]['map_name'] if matching else map_name
+        await ctx.send(_chat_safe(
+            f"Top 10 {title} | " + " | ".join(f"{i}. {display[user]} {avg:.2f} avg" for i, (user, _, avg) in enumerate(ranked, 1))
+        ))
+
+    @commands.command(name='builderstats')
+    async def builderstats_command(self, ctx, *, builder_name: str = None):
+        if not builder_name:
+            await ctx.send("Usage: !builderstats <builder name>")
+            return
+        rows = [row for row in load_map_race_history() if builder_name.lower() in row['map_builder'].lower()]
+        if not rows:
+            await ctx.send(f"No map races found for builder '{builder_name}'.")
+            return
+        events = len({row['timestamp'] for row in rows})
+        eliminated = sum(row['eliminated'] for row in rows)
+        await ctx.send(_chat_safe(
+            f"Builder Stats | {rows[-1]['map_builder']} — {len({row['map_name'] for row in rows})} maps, "
+            f"{events} races, {len(rows)} marble runs, {eliminated / len(rows) * 100:.1f}% observed elimination"
+        ))
+
+    @commands.command(name='hardestmaps')
+    async def hardestmaps_command(self, ctx):
+        by_map = defaultdict(list)
+        event_counts = defaultdict(set)
+        for row in load_map_race_history():
+            by_map[row['map_name']].append(row['eliminated'])
+            event_counts[row['map_name']].add(row['timestamp'])
+        ranked = sorted(
+            ((name, len(event_counts[name]), sum(values) / len(values) * 100) for name, values in by_map.items() if len(event_counts[name]) >= 3),
+            key=lambda item: (-item[2], -item[1], item[0].lower()),
+        )[:5]
+        if not ranked:
+            await ctx.send("No maps have at least 3 recorded races yet.")
+            return
+        await ctx.send(_chat_safe(
+            "Hardest Maps | " + " | ".join(f"{i}. {name} {rate:.1f}% elim ({races} races)" for i, (name, races, rate) in enumerate(ranked, 1))
+        ))
+
+    def _br_rows_for(self, username):
+        return [row for row in load_royale_history() if row['username'].lower() == username.lower()]
+
+    async def _send_br_personal_stat(self, ctx, label, value_key, username=None, per_game=False):
+        target = _target_username(ctx, username)
+        rows = self._br_rows_for(target)
+        if not rows:
+            await ctx.send(f"No Royale history found for @{target}.")
+            return
+        total = sum(row[value_key] for row in rows)
+        value = total / len(rows) if per_game else total
+        rendered = f"{value:.2f}" if per_game else f"{value:,}"
+        await ctx.send(f"@{target} {label}: {rendered} ({len(rows)} Royales)")
+
+    async def _send_br_leaderboard(self, ctx, label, value_key, per_game=False):
+        by_user = defaultdict(list)
+        display = {}
+        for row in load_royale_history():
+            by_user[row['username']].append(row)
+            display[row['username']] = row['display_name']
+        ranked = []
+        for user, rows in by_user.items():
+            if per_game and len(rows) < 25:
+                continue
+            total = sum(row[value_key] for row in rows)
+            ranked.append((user, total / len(rows) if per_game else total, len(rows)))
+        ranked.sort(key=lambda item: (-item[1], -item[2], item[0].lower()))
+        if not ranked:
+            suffix = " with at least 25 Royales" if per_game else ""
+            await ctx.send(f"No {label} data{suffix} yet.")
+            return
+        await ctx.send(_chat_safe(
+            f"Top 10 {label} | " + " | ".join(
+                f"{i}. {display[user]} {value:.2f}" if per_game else f"{i}. {display[user]} {int(value):,}"
+                for i, (user, value, _) in enumerate(ranked[:10], 1)
+            )
+        ))
+
+    @commands.command(name='lastroyale')
+    async def lastroyale_command(self, ctx, username: str = None):
+        events = _group_history_events(load_royale_history())
+        if not events:
+            await ctx.send("No Royale history has been captured yet.")
+            return
+        latest = events[-1]
+        target = _target_username(ctx, username) if username else ''
+        result = next((row for row in latest if row['username'].lower() == target.lower()), None) if target else min(latest, key=lambda row: row['position'] or 999999)
+        if result is None:
+            await ctx.send(f"No result for @{target} in the latest Royale.")
+            return
+        await ctx.send(_chat_safe(
+            f"Last Royale | {result['display_name']}: #{result['position']} / {result['marble_count']}, "
+            f"{result['points']:,} pts, {result['kills']:,} kills, {result['damage']:,} damage"
+        ))
+
+    @commands.command(name='brcard')
+    async def brcard_command(self, ctx, username: str = None):
+        target = _target_username(ctx, username)
+        rows = self._br_rows_for(target)
+        if not rows:
+            await ctx.send(f"No Royale history found for @{target}.")
+            return
+        wins = sum(row['position'] == 1 for row in rows)
+        kills = sum(row['kills'] for row in rows)
+        damage = sum(row['damage'] for row in rows)
+        await ctx.send(_chat_safe(
+            f"BR Card @{target} | {len(rows)} Royales, {wins} wins ({wins / len(rows) * 100:.1f}%), "
+            f"{sum(row['points'] for row in rows):,} pts | {kills:,} kills ({kills / len(rows):.2f}/BR) | "
+            f"{damage:,} damage ({damage / len(rows):.2f}/BR)"
+        ))
+
+    @commands.command(name='kills')
+    async def kills_command(self, ctx, username: str = None):
+        await self._send_br_personal_stat(ctx, 'kills', 'kills', username)
+
+    @commands.command(name='damage')
+    async def damage_command(self, ctx, username: str = None):
+        await self._send_br_personal_stat(ctx, 'damage', 'damage', username)
+
+    @commands.command(name='damagegiven')
+    async def damagegiven_command(self, ctx, username: str = None):
+        await self._send_br_personal_stat(ctx, 'damage given', 'damage', username)
+
+    @commands.command(name='kpr')
+    async def kpr_command(self, ctx, username: str = None):
+        await self._send_br_personal_stat(ctx, 'kills per Royale', 'kills', username, per_game=True)
+
+    @commands.command(name='dpr')
+    async def dpr_command(self, ctx, username: str = None):
+        await self._send_br_personal_stat(ctx, 'damage per Royale', 'damage', username, per_game=True)
+
+    @commands.command(name='top10kills')
+    async def top10kills_command(self, ctx):
+        await self._send_br_leaderboard(ctx, 'Kills', 'kills')
+
+    @commands.command(name='top10damage')
+    async def top10damage_command(self, ctx):
+        await self._send_br_leaderboard(ctx, 'Damage', 'damage')
+
+    @commands.command(name='top10kpr')
+    async def top10kpr_command(self, ctx):
+        await self._send_br_leaderboard(ctx, 'KPR (min 25)', 'kills', per_game=True)
+
+    @commands.command(name='top10dpr')
+    async def top10dpr_command(self, ctx):
+        await self._send_br_leaderboard(ctx, 'DPR (min 25)', 'damage', per_game=True)
+
+    @commands.command(name='brstreak')
+    async def brstreak_command(self, ctx, username: str = None):
+        target = _target_username(ctx, username)
+        results = []
+        for event in _group_history_events(load_royale_history()):
+            result = next((row for row in event if row['username'].lower() == target.lower()), None)
+            if result:
+                results.append(result['position'] == 1)
+        if not results:
+            await ctx.send(f"No Royale history found for @{target}.")
+            return
+        longest = current = running = 0
+        for won in results:
+            running = running + 1 if won else 0
+            longest = max(longest, running)
+        for won in reversed(results):
+            if not won:
+                break
+            current += 1
+        await ctx.send(f"BR Streak @{target} | Longest: {longest} | Current: {current}")
+
+    @commands.command(name='slayer')
+    async def slayer_command(self, ctx):
+        history = load_royale_history()
+        if not history:
+            await ctx.send("No Royale combat history has been captured yet.")
+            return
+        best = max(history, key=lambda row: (row['kills'], row['damage']))
+        await ctx.send(f"Slayer | {best['display_name']} — {best['kills']:,} kills, {best['damage']:,} damage")
+
+    def _combat_attribution(self, username, mode):
+        target = username.lower()
+        counts = defaultdict(int)
+        for item in load_royale_detail_history():
+            record = item['record']
+            killer = _raw_record_value(record, 'Killer', 'KillerName', 'EliminatedBy', 'Attacker')
+            victim = _raw_record_value(record, 'Victim', 'VictimName', 'EliminatedPlayer', 'Target')
+            if mode == 'nemesis' and victim.lower() == target and killer:
+                counts[killer] += 1
+            if mode == 'victims' and killer.lower() == target and victim:
+                counts[victim] += 1
+        return counts
+
+    @commands.command(name='nemesis')
+    async def nemesis_command(self, ctx, username: str = None):
+        target = _target_username(ctx, username)
+        counts = self._combat_attribution(target, 'nemesis')
+        if not counts:
+            await ctx.send(f"No killer/victim attribution has been captured for @{target}.")
+            return
+        name, count = max(counts.items(), key=lambda item: item[1])
+        await ctx.send(f"@{target}'s nemesis: {name} ({count} eliminations)")
+
+    @commands.command(name='victims')
+    async def victims_command(self, ctx, username: str = None):
+        target = _target_username(ctx, username)
+        counts = self._combat_attribution(target, 'victims')
+        if not counts:
+            await ctx.send(f"No killer/victim attribution has been captured for @{target}.")
+            return
+        name, count = max(counts.items(), key=lambda item: item[1])
+        await ctx.send(f"@{target}'s top victim: {name} ({count} eliminations)")
+
+    @commands.command(name='weaponstats')
+    async def weaponstats_command(self, ctx, username: str = None):
+        target = _target_username(ctx, username)
+        weapons = defaultdict(lambda: {'uses': 0, 'damage': 0})
+        for item in load_royale_detail_history():
+            record = item['record']
+            actor = _raw_record_value(record, 'Username', 'Killer', 'KillerName', 'Attacker')
+            weapon = _raw_record_value(record, 'Weapon', 'WeaponName', 'EliminationWeapon', 'DamageSource')
+            if actor.lower() != target.lower() or not weapon:
+                continue
+            weapons[weapon]['uses'] += 1
+            weapons[weapon]['damage'] += _safe_int(_raw_record_value(record, 'Damage', 'DamageGiven', 'MatchDamageDealt'))
+        if not weapons:
+            await ctx.send(f"No weapon attribution has been captured for @{target}.")
+            return
+        ranked = sorted(weapons.items(), key=lambda item: (item[1]['damage'], item[1]['uses']), reverse=True)[:5]
+        await ctx.send(_chat_safe(
+            f"Weapon Stats @{target} | " + " | ".join(f"{name}: {stats['uses']} uses, {stats['damage']:,} dmg" for name, stats in ranked)
+        ))
+
+    @commands.command(name='lasttilt')
+    async def lasttilt_command(self, ctx):
+        events = [event for event in load_tilt_detail_events() if event.get('level')]
+        if not events:
+            await ctx.send("No completed Tilt detail has been captured yet.")
+            return
+        event = events[-1]
+        level = event['level']
+        player_count = _safe_int(_raw_record_value(level, 'PlayerCount')) or len(event['players'])
+        eliminated = _safe_int(_raw_record_value(level, 'EliminatedCount'))
+        survivors = max(0, player_count - eliminated)
+        await ctx.send(_chat_safe(
+            f"Last Tilt | Level {_raw_record_value(level, 'Level', 'CurrentLevel') or '?'} | "
+            f"Time {_raw_record_value(level, 'LevelDurationSeconds', 'ElapsedTime') or '?'}s | "
+            f"Top Tiltee: {_raw_record_value(level, 'TopTilteeUsername', 'CurrentTopTiltee') or 'None'} | "
+            f"Survivors {survivors}, Deaths {eliminated}, Points {_raw_record_value(level, 'StandardPointsPerFinisher', 'LevelExp') or '0'}"
+        ))
+
+    @commands.command(name='tiltlevel')
+    async def tiltlevel_command(self, ctx):
+        await ctx.send(_chat_safe(
+            f"Tilt Level | Current: {config.get_setting('tilt_current_level') or '0'} | "
+            f"Elapsed: {config.get_setting('tilt_current_elapsed') or '0:00'} | "
+            f"Top Tiltee: {config.get_setting('tilt_current_top_tiltee') or 'None'}"
+        ))
+
+    @commands.command(name='tiltcard')
+    async def tiltcard_command(self, ctx, username: str = None):
+        target = _target_username(ctx, username)
+        rows = [row for row in load_tilt_history() if row['username'].lower() == target.lower()]
+        if not rows:
+            await ctx.send(f"No Tilt history found for @{target}.")
+            return
+        survived = [row for row in rows if row['survived'] is True or (row['survived'] is None and row['points'] > 0)]
+        tops = sum(row['is_top_tiltee'] for row in rows)
+        best_level = max((row['level'] for row in survived), default=0)
+        await ctx.send(_chat_safe(
+            f"Tilt Card @{target} | {len(rows)} levels, {sum(row['points'] for row in rows):,} pts, "
+            f"{tops} Top Tiltees | {len(survived)} survivors, {len(rows) - len(survived)} deaths "
+            f"({len(survived) / len(rows) * 100:.1f}% survive) | Best level {best_level}"
+        ))
+
+    @commands.command(name='tiltdeaths')
+    async def tiltdeaths_command(self, ctx, username: str = None):
+        target = _target_username(ctx, username)
+        rows = [row for row in load_tilt_history() if row['username'].lower() == target.lower()]
+        if not rows:
+            await ctx.send(f"No Tilt history found for @{target}.")
+            return
+        deaths = sum(row['survived'] is False or (row['survived'] is None and row['points'] <= 0) for row in rows)
+        await ctx.send(f"Tilt Deaths @{target} | {deaths} deaths / {len(rows)} levels | {(len(rows) - deaths) / len(rows) * 100:.1f}% survival")
+
+    @commands.command(name='toprate')
+    async def toprate_command(self, ctx, username: str = None):
+        target = _target_username(ctx, username)
+        rows = [row for row in load_tilt_history() if row['username'].lower() == target.lower()]
+        if not rows:
+            await ctx.send(f"No Tilt history found for @{target}.")
+            return
+        tops = sum(row['is_top_tiltee'] for row in rows)
+        await ctx.send(f"Top Tiltee Rate @{target} | {tops} tops / {len(rows)} levels ({tops / len(rows) * 100:.1f}%)")
+
+    @commands.command(name='top10toprate')
+    async def top10toprate_command(self, ctx):
+        by_user = defaultdict(list)
+        for row in load_tilt_history():
+            by_user[row['username']].append(row)
+        ranked = sorted(
+            ((user, len(rows), sum(row['is_top_tiltee'] for row in rows), sum(row['is_top_tiltee'] for row in rows) / len(rows) * 100)
+             for user, rows in by_user.items() if len(rows) >= 20),
+            key=lambda item: (-item[3], -item[2], item[0].lower()),
+        )[:10]
+        if not ranked:
+            await ctx.send("No players have at least 20 Tilt levels for Top Tiltee rate.")
+            return
+        await ctx.send(_chat_safe(
+            "Top 10 Top Tiltee Rate | " + " | ".join(f"{i}. {user} {rate:.1f}% ({tops}/{levels})" for i, (user, levels, tops, rate) in enumerate(ranked, 1))
+        ))
+
+    @commands.command(name='tiltstreak')
+    async def tiltstreak_command(self, ctx, username: str = None):
+        target = _target_username(ctx, username)
+        rows = [row for row in load_tilt_history() if row['username'].lower() == target.lower()]
+        if not rows:
+            await ctx.send(f"No Tilt history found for @{target}.")
+            return
+        outcomes = [row['survived'] is True or (row['survived'] is None and row['points'] > 0) for row in rows]
+        longest = current = running = 0
+        for survived in outcomes:
+            running = running + 1 if survived else 0
+            longest = max(longest, running)
+        for survived in reversed(outcomes):
+            if not survived:
+                break
+            current += 1
+        await ctx.send(f"Tilt Survival Streak @{target} | Longest: {longest} | Current: {current}")
+
+    @commands.command(name='hardesttiltlevels')
+    async def hardesttiltlevels_command(self, ctx):
+        by_level = defaultdict(list)
+        for row in load_tilt_history():
+            survived = row['survived'] is True or (row['survived'] is None and row['points'] > 0)
+            by_level[row['level']].append(survived)
+        ranked = sorted(
+            ((level, len(outcomes), (len(outcomes) - sum(outcomes)) / len(outcomes) * 100)
+             for level, outcomes in by_level.items() if level > 0 and len(outcomes) >= 20),
+            key=lambda item: (-item[2], -item[1], item[0]),
+        )[:5]
+        if not ranked:
+            await ctx.send("No Tilt level has at least 20 recorded attempts yet.")
+            return
+        await ctx.send(_chat_safe(
+            "Hardest Tilt Levels | " + " | ".join(f"{i}. L{level} {rate:.1f}% elim ({attempts})" for i, (level, attempts, rate) in enumerate(ranked, 1))
+        ))
+
+    @commands.command(name='fastestlevel')
+    async def fastestlevel_command(self, ctx, level: str = None):
+        requested = _safe_int(level) if level else None
+        candidates = []
+        for event in load_tilt_detail_events():
+            record = event.get('level') or {}
+            level_number = _safe_int(_raw_record_value(record, 'Level', 'CurrentLevel'))
+            passed = parse_boolean_token(_raw_record_value(record, 'LevelPassed', 'Passed'), default=False)
+            elapsed = _safe_float_value(_raw_record_value(record, 'LevelDurationSeconds', 'ElapsedTime'))
+            if passed and elapsed > 0 and (requested is None or level_number == requested):
+                candidates.append((elapsed, level_number))
+        if not candidates:
+            suffix = f" {requested}" if requested else ''
+            await ctx.send(f"No completed timing captured for Tilt level{suffix}.")
+            return
+        elapsed, level_number = min(candidates)
+        await ctx.send(f"Fastest Tilt Level | Level {level_number}: {_format_race_time(elapsed)}")
+
     @commands.command(name='mytilts')
     async def mytilts_command(self, ctx, username: str = None):
         if username is None:
@@ -13329,22 +14348,25 @@ class Bot(commands.Bot):
                 with open(tilts_file, 'r', encoding=encoding, errors='ignore') as f:
                     reader = iter_csv_rows(f)
                     for row in reader:
-                        parsed = parse_tilt_result_row(row)
-                        if parsed is None:
+                        detail = parse_tilt_result_detail(row)
+                        if detail is None:
                             continue
 
-                        racer, points, run_id = parsed
+                        racer = detail['username']
+                        points = detail['points']
+                        run_id = detail['run_id']
+                        died = detail['survived'] is False or (detail['survived'] is None and points <= 0)
                         if racer.lower() != target_name.lower():
                             continue
 
                         latest_run_by_user = run_id
                         points_season += points
-                        if points <= 0:
+                        if died:
                             deaths_season += 1
 
                         if file_date == today_date:
                             points_today += points
-                            if points <= 0:
+                            if died:
                                 deaths_today += 1
 
                         if len(row) > 1:
@@ -13360,7 +14382,9 @@ class Bot(commands.Bot):
                             # were eliminated on it. Treat a level as completed only when the
                             # player's cumulative score increased from their prior row in the
                             # same run (or from zero when first seen in that run).
-                            if previous_points is None:
+                            if detail['survived'] is not None:
+                                level_completed = detail['survived']
+                            elif previous_points is None:
                                 level_completed = points > 0
                             else:
                                 level_completed = points > previous_points
@@ -13374,7 +14398,7 @@ class Bot(commands.Bot):
                         run_match = bool(current_run_id) and run_id == current_run_id
                         if run_match:
                             points_run += points
-                            if points <= 0:
+                            if died:
                                 deaths_run += 1
 
             except FileNotFoundError:
@@ -13396,14 +14420,16 @@ class Bot(commands.Bot):
                     with open(tilts_file, 'r', encoding=encoding, errors='ignore') as f:
                         reader = iter_csv_rows(f)
                         for row in reader:
-                            parsed = parse_tilt_result_row(row)
-                            if parsed is None:
+                            detail = parse_tilt_result_detail(row)
+                            if detail is None:
                                 continue
-                            racer, points, run_id = parsed
+                            racer = detail['username']
+                            points = detail['points']
+                            run_id = detail['run_id']
                             if racer.lower() != target_name.lower() or run_id != current_run_id:
                                 continue
                             points_run += points
-                            if points <= 0:
+                            if detail['survived'] is False or (detail['survived'] is None and points <= 0):
                                 deaths_run += 1
                 except Exception:
                     continue
@@ -13453,12 +14479,21 @@ class Bot(commands.Bot):
             run_deaths = get_int_setting('tilt_run_deaths_total', 0)
             top_tiltee = str(config.get_setting('tilt_current_top_tiltee') or 'None')
             top_tiltee_count = get_int_setting('tilt_current_top_tiltee_count', 0)
+            current_players = [
+                row for row in parse_tilt_player_exports(config.get_setting('tilt_player_file'))
+                if _safe_int(row[4]) in (0, run_level)
+            ]
+            active_count = len(current_players)
+            survivor_count = sum(
+                1 for row in current_players
+                if row[3] == 'survived' or (not row[3] and _safe_int(row[2]) > 0)
+            )
 
             message = (
                 f"🏃‍➡️ This Run ({run_status}) | Level: {run_level:,} | Elapsed: {run_elapsed} | "
                 f"Leader: {leader_text} | Run Pts: {run_points:,} | "
                 f"Run Expertise: {run_xp:,} | Top Tiltee: {top_tiltee} ({top_tiltee_count:,}) | "
-                f"Run Deaths: {run_deaths:,}"
+                f"Run Deaths: {run_deaths:,} | Active: {active_count:,} | Survivors: {survivor_count:,}"
             )
         else:
             last_run_raw = config.get_setting('tilt_last_run_summary') or '{}'
@@ -13646,6 +14681,7 @@ class Bot(commands.Bot):
     async def tiltsurvivors_command(self, ctx):
         run_max_levels = defaultdict(int)
         player_run_levels = defaultdict(set)
+        explicit_totals = defaultdict(lambda: {'deaths': 0, 'levels_participated': 0})
 
         for tilts_file in glob.glob(os.path.join(config.get_setting('directory'), "tilts_*.csv")):
             try:
@@ -13657,17 +14693,21 @@ class Bot(commands.Bot):
                 with open(tilts_file, 'r', encoding=encoding, errors='ignore') as f:
                     reader = iter_csv_rows(f)
                     for row in reader:
-                        parsed = parse_tilt_result_row(row)
-                        if parsed is None or len(row) < 2:
+                        detail = parse_tilt_result_detail(row)
+                        if detail is None:
                             continue
 
-                        username, _, run_id = parsed
-                        try:
-                            level_number = int(''.join(ch for ch in str(row[1]).strip() if ch.isdigit()) or '0')
-                        except (TypeError, ValueError):
-                            continue
+                        username = detail['username']
+                        run_id = detail['run_id']
+                        level_number = detail['level']
 
                         if level_number <= 0:
+                            continue
+
+                        if detail['survived'] is not None:
+                            explicit_totals[username]['levels_participated'] += 1
+                            if not detail['survived']:
+                                explicit_totals[username]['deaths'] += 1
                             continue
 
                         run_max_levels[run_id] = max(run_max_levels[run_id], level_number)
@@ -13677,11 +14717,13 @@ class Bot(commands.Bot):
             except Exception as e:
                 logger.error("Unexpected error", exc_info=True)
 
-        if not player_run_levels:
+        if not player_run_levels and not explicit_totals:
             await send_chat_message(ctx.channel, "⚖️ No tilt data available yet.", category="mystats")
             return
 
         player_totals = defaultdict(lambda: {'deaths': 0, 'levels_participated': 0})
+        for username, totals in explicit_totals.items():
+            player_totals[username].update(totals)
 
         for (username, run_id), levels_survived in player_run_levels.items():
             run_max_level = run_max_levels.get(run_id, 0)
@@ -14482,19 +15524,21 @@ async def tilted(bot):
                 tilt_top_tiltee_ledger = {}
 
             tilt_player_file = config.get_setting('tilt_player_file')
-            tilt_rows = safe_read_csv_rows(tilt_player_file)
-            player_data_rows = tilt_rows[1:] if len(tilt_rows) > 1 else []
+            player_data_rows = parse_tilt_player_exports(tilt_player_file)
+            _archive_mos_sources(
+                config.get_setting('tilt_details_results_file'),
+                get_internal_now_iso(timespec='seconds'),
+                (('level', tilt_level_file), ('players', tilt_player_file)),
+            )
 
             active_players = []
             survivors = []
             deaths_this_level = 0
 
             for row in player_data_rows:
-                if len(row) < 5:
-                    continue
-
                 username = row[0].strip() if len(row) > 0 else ''
                 points_raw = row[2].strip() if len(row) > 2 else '0'
+                player_status = row[3].strip().lower() if len(row) > 3 else ''
                 player_level_raw = row[4].strip() if len(row) > 4 else '0'
 
                 if not username:
@@ -14505,8 +15549,10 @@ async def tilted(bot):
                 except ValueError:
                     player_level = 0
 
-                if player_level != current_level:
+                if player_level not in (0, current_level):
                     continue
+                if player_level == 0:
+                    row[4] = str(current_level)
 
                 try:
                     player_points = int(float(points_raw))
@@ -14515,9 +15561,16 @@ async def tilted(bot):
 
                 active_players.append((username, player_points, row))
 
-                if player_points > 0:
+                survived_level = (
+                    player_status == 'survived'
+                    or (not player_status and player_points > 0)
+                )
+                if survived_level:
                     survivors.append((username, player_points, row))
-                    run_ledger[username] = int(run_ledger.get(username, 0)) + level_points
+                    # LevelPointsEarned is explicitly per player in the current
+                    # export. Use it directly; TotalExpertise is cumulative and
+                    # StandardPointsPerFinisher is only the level rule/default.
+                    run_ledger[username] = int(run_ledger.get(username, 0)) + player_points
                 else:
                     deaths_this_level += 1
                     run_deaths_ledger[username] = int(run_deaths_ledger.get(username, 0)) + 1
@@ -14595,9 +15648,12 @@ async def tilted(bot):
             ):
                 lifetime_expertise = adjusted_total_xp
 
-            if adjusted_total_xp > lifetime_expertise:
-                lifetime_expertise = adjusted_total_xp
-            lifetime_expertise += earned_xp
+            if level_state.get('total_xp_present'):
+                # TotalExpertise already includes the current level. Adding the
+                # locally derived XP again would double-count every update.
+                lifetime_expertise = max(lifetime_expertise, adjusted_total_xp)
+            else:
+                lifetime_expertise += earned_xp
             set_tilt_runtime_setting('tilt_lifetime_expertise', str(lifetime_expertise))
 
             if level_passed:
@@ -15173,6 +16229,24 @@ async def race(bot):
             RecordSetDate = cached_map_data['RecordSetDate']
             RecordStreamer = cached_map_data['RecordStreamer']
 
+            race_summary = read_mos_event_summary(config.get_setting('race_summary_file'))
+            _, race_source_records, _ = _read_mos_table(config.get_setting('race_file'))
+            race_snapshot = _raw_record_value(race_source_records[0], 'SnapshotId') if race_source_records else ''
+            if (
+                race_snapshot and race_summary.get('snapshot_id')
+                and race_snapshot != race_summary['snapshot_id']
+            ):
+                logger.warning(
+                    "Ignoring stale race summary snapshot %s while race snapshot is %s",
+                    race_summary['snapshot_id'],
+                    race_snapshot,
+                )
+                race_summary = {}
+            if race_summary.get('map_name'):
+                MapName = race_summary['map_name']
+            if race_summary.get('map_creator'):
+                MapBuilder = race_summary['map_creator']
+
             lines = parse_race_exports(
                 config.get_setting('race_file'),
                 config.get_setting('race_summary_file'),
@@ -15188,6 +16262,44 @@ async def race(bot):
                 nowinner = False
 
             marbcount = len(lines)
+            source_event_timestamp = race_summary.get('generated_at') or timestamp
+
+            _, watched_records, _ = _read_mos_table(config.get_setting('last_watched_marble_file'))
+            watched_rows = [
+                [
+                    _raw_record_value(record, 'GeneratedAtUtc') or source_event_timestamp,
+                    json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+                ]
+                for record in watched_records
+            ]
+            _append_unique_archive_rows(
+                config.get_setting('last_watched_results_file'),
+                watched_rows,
+                key_start=0,
+            )
+
+            map_race_rows = [
+                [
+                    source_event_timestamp,
+                    MapName or '',
+                    MapBuilder or '',
+                    row[1],
+                    row[2],
+                    row[0],
+                    row[4],
+                    row[5],
+                    row[6],
+                    marbcount,
+                    RecordTime or 0,
+                    RecordHolder or '',
+                ]
+                for row in lines
+            ]
+            _append_unique_archive_rows(
+                config.get_setting('map_races_results_file'),
+                map_race_rows,
+                key_start=0,
+            )
             event_ids_tmp = config.get_setting('active_event_ids')
 
             if event_ids_tmp is not None:
@@ -15928,17 +17040,10 @@ async def royale(bot):
 
             while attempts < max_retries:
                 try:
-                    # First, attempt to open the br_file and read it as binary to detect encoding
-                    with open(config.get_setting('br_file'), 'rb') as f:
-                        data = f.read()
-
-                    # Detect the file encoding using chardet
-                    result = chardet.detect(data)
-                    encoding = result['encoding']
-
-                    # Open the file using the detected encoding and parse CSV rows
-                    with open(config.get_setting('br_file'), 'r', encoding=encoding, errors='ignore') as f:
-                        parsed_rows = list(iter_csv_rows(f))
+                    parsed_rows = parse_royale_exports(
+                        config.get_setting('br_file'),
+                        config.get_setting('br_summary_file'),
+                    )
 
                     # If file reading is successful, break out of the retry loop
                     break
@@ -15959,11 +17064,17 @@ async def royale(bot):
             else:
                 # Ensure that parsed_rows is not empty before accessing elements
                 if parsed_rows:
-                    first_row = parsed_rows[0]
-                    has_header = not str(first_row[0]).strip().isdigit() if first_row else False
-                    data_rows = parsed_rows[1:] if has_header else parsed_rows
+                    data_rows = parsed_rows
 
                     marbcount = len(data_rows)
+                    _archive_mos_sources(
+                        config.get_setting('br_details_results_file'),
+                        get_internal_now_iso(timespec='seconds'),
+                        (
+                            ('royale', config.get_setting('br_file')),
+                            ('summary', config.get_setting('br_summary_file')),
+                        ),
+                    )
 
                     # Handle active_event_ids
                     event_ids_tmp = config.get_setting('active_event_ids')
