@@ -445,6 +445,10 @@ RACE_EXPORT_ALIASES = {
     "eliminated": ("Eliminated", "IsEliminated", "DNF", "DidNotFinish", "Out"),
     "survived": ("Survived", "Alive", "Finished", "DidFinish", "Completed"),
     "snapshot": ("SnapshotId", "SnapshotGuid"),
+    "platform": ("Platform", "PlayerPlatform"),
+    "season_points_total": ("SeasonPointsTotal", "SeasonPoints"),
+    "season_wins_total": ("SeasonWinsTotal", "SeasonWins"),
+    "season_matches_total": ("SeasonMatchesPlayedTotal", "SeasonGamesPlayed", "SeasonMatches"),
     "id": ("Id", "PlayerId", "MarbleId", "UserGuid", "SteamId", "TwitchId", "MarbleOwnerId"),
 }
 
@@ -452,6 +456,7 @@ ROYALE_EXPORT_ALIASES = {
     **RACE_EXPORT_ALIASES,
     "kills": ("Kills", "MatchKills", "Eliminations", "KillCount", "EliminationCount"),
     "damage": ("Damage", "DamageGiven", "MatchDamageDealt", "TotalDamage", "DamageDealt"),
+    "survival_time": ("SurvivalTimeSeconds", "SurvivalTime", "TimeAliveSeconds"),
     "killer": ("Killer", "KillerName", "EliminatedBy", "Attacker"),
     "victim": ("Victim", "VictimName", "EliminatedPlayer", "Target"),
     "weapon": ("Weapon", "WeaponName", "EliminationWeapon", "DamageSource"),
@@ -466,6 +471,7 @@ TILT_LEVEL_ALIASES = {
     "total_points": ("TotalPoints", "TotalExp", "TotalExpertise", "TotalXP"),
     "live": ("Live", "IsLive", "LiveStreamActive"),
     "passed": ("LevelPassed", "Passed", "Completed", "IsCompleted"),
+    "difficulty": ("Difficulty", "LevelDifficulty"),
 }
 
 TILT_PLAYER_ALIASES = {
@@ -674,6 +680,44 @@ def _archive_mos_sources(file_path, timestamp, sources):
             payload = json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
             rows.append([timestamp, source_name, payload])
     return _append_unique_archive_rows(file_path, rows, key_start=1)
+
+
+def _season_snapshot_rows(source_path, summary_path, game_mode):
+    """Build optional season snapshots without changing established result rows."""
+    _, records, _ = _read_mos_table(source_path)
+    summary = read_mos_event_summary(summary_path)
+    rows = []
+    for record in records:
+        username = _raw_record_value(record, 'Username', 'UserName', 'Login').lstrip('@')
+        if not username:
+            continue
+        record_snapshot = _raw_record_value(record, 'SnapshotId')
+        summary_matches = (
+            not record_snapshot or not summary.get('snapshot_id')
+            or record_snapshot == summary.get('snapshot_id')
+        )
+        # Marbles exports use blank numeric season cells to mean zero.
+        rows.append([
+            (summary.get('generated_at') if summary_matches else '') or get_internal_now_iso(timespec='seconds'),
+            record_snapshot or (summary.get('snapshot_id') if summary_matches else '') or '',
+            game_mode,
+            (summary.get('session_type') if summary_matches else '') or '',
+            username,
+            _raw_record_value(record, 'DisplayName') or username,
+            _raw_record_value(record, 'Platform'),
+            _safe_int(_raw_record_value(record, 'SeasonPointsEarned')),
+            _safe_int(_raw_record_value(record, 'SeasonPointsTotal', 'SeasonPoints')),
+            _safe_int(_raw_record_value(record, 'SeasonWinsTotal', 'SeasonWins')),
+            _safe_int(_raw_record_value(record, 'SeasonMatchesPlayedTotal', 'SeasonGamesPlayed')),
+        ])
+    return rows
+
+
+def archive_season_snapshots(source_path, summary_path, game_mode):
+    rows = _season_snapshot_rows(source_path, summary_path, game_mode)
+    return _append_unique_archive_rows(
+        config.get_setting('season_snapshots_results_file'), rows, key_start=1
+    )
 
 
 def _raw_record_value(record, *aliases):
@@ -1475,10 +1519,12 @@ def parse_tilt_level_state(level_rows):
         'top_tiltee': top_tiltee,
         'level_xp': level_xp,
         'level_expertise': level_expertise,
+        'level_expertise_present': 'level_expertise' in record,
         'total_xp': total_xp,
         'total_xp_present': bool(str(record.get('total_points', '')).strip()),
         'live': live_raw,
-        'level_passed': level_passed_raw == 'true'
+        'level_passed': level_passed_raw == 'true',
+        'difficulty': str(record.get('difficulty', '')).strip(),
     }
 
 
@@ -10594,6 +10640,7 @@ def create_results_files():
         'map_races_results_file': "mapraces_" + adjusted_time.strftime("%Y-%m-%d") + ".csv",
         'br_details_results_file': "brdetails_" + adjusted_time.strftime("%Y-%m-%d") + ".csv",
         'tilt_details_results_file': "tiltdetails_" + adjusted_time.strftime("%Y-%m-%d") + ".csv",
+        'season_snapshots_results_file': "seasonsnapshots_" + adjusted_time.strftime("%Y-%m-%d") + ".csv",
     }
     for setting_key, filename in optional_result_files.items():
         result_path = os.path.join(directory, filename)
@@ -12052,6 +12099,97 @@ def load_royale_detail_history():
         if isinstance(record, dict):
             details.append({'timestamp': row[0], 'source': row[1], 'record': record})
     return details
+
+
+def load_season_snapshots():
+    snapshots = []
+    for row in _season_result_rows('seasonsnapshots_*.csv'):
+        if len(row) < 11:
+            continue
+        snapshots.append({
+            'timestamp': row[0], 'snapshot_id': row[1], 'game_mode': row[2],
+            'session_type': row[3], 'username': row[4],
+            'display_name': row[5] or row[4], 'platform': row[6],
+            'points_earned': _safe_int(row[7]), 'season_points': _safe_int(row[8]),
+            'season_wins': _safe_int(row[9]), 'season_matches': _safe_int(row[10]),
+        })
+    return snapshots
+
+
+def latest_season_snapshot(username):
+    target = str(username or '').strip().lower().lstrip('@')
+    candidates = [row for row in load_season_snapshots() if row['username'].lower() == target]
+    # Include current exports even before their monitor has archived the event.
+    for source_key, summary_key, mode in (
+        ('race_file', 'race_summary_file', 'Race'),
+        ('br_file', 'br_summary_file', 'BR'),
+    ):
+        for row in _season_snapshot_rows(config.get_setting(source_key), config.get_setting(summary_key), mode):
+            if str(row[4]).lower() == target:
+                candidates.append({
+                    'timestamp': row[0], 'snapshot_id': row[1], 'game_mode': row[2],
+                    'session_type': row[3], 'username': row[4], 'display_name': row[5],
+                    'platform': row[6], 'points_earned': _safe_int(row[7]),
+                    'season_points': _safe_int(row[8]), 'season_wins': _safe_int(row[9]),
+                    'season_matches': _safe_int(row[10]),
+                })
+    return max(candidates, key=lambda row: str(row.get('timestamp', ''))) if candidates else None
+
+
+def load_royale_player_details(username=None):
+    target = str(username or '').strip().lower().lstrip('@')
+    details = []
+    seen = set()
+    for item in load_royale_detail_history():
+        if item['source'] != 'royale':
+            continue
+        record = item['record']
+        player = _raw_record_value(record, 'Username', 'UserName', 'Login').lstrip('@')
+        if target and player.lower() != target:
+            continue
+        snapshot_id = _raw_record_value(record, 'SnapshotId')
+        key = (snapshot_id or item['timestamp'], player.lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        details.append({
+            'timestamp': item['timestamp'], 'snapshot_id': snapshot_id, 'username': player,
+            'display_name': _raw_record_value(record, 'DisplayName') or player,
+            'survival_time': _safe_float_value(_raw_record_value(record, 'SurvivalTimeSeconds')),
+            'kills': _safe_int(_raw_record_value(record, 'MatchKills')),
+            'damage': _safe_int(_raw_record_value(record, 'MatchDamageDealt')),
+        })
+    return details
+
+
+def read_last_watched_state():
+    _, records, _ = _read_mos_table(config.get_setting('last_watched_marble_file'))
+    if not records:
+        return {}
+    record = records[0]
+    numeric_fields = {
+        'position': ('Position',), 'race_time': ('RaceTimeSeconds',), 'kills': ('MatchKills',),
+        'season_eliminations': ('SeasonEliminations',), 'lap': ('Lap',), 'checkpoint': ('Checkpoint',),
+        'distance_checkpoint': ('DistanceToCheckpointMeters',), 'distance_finish': ('DistanceToFinishMeters',),
+        'level': ('Level',), 'season_points': ('SeasonPoints',), 'season_games': ('SeasonGamesPlayed',),
+        'season_wins': ('SeasonWins',), 'season_rank': ('SeasonRank',), 'match_score': ('MatchScore',),
+        'match_damage': ('MatchDamageDealt',), 'health': ('CurrentHealth',), 'max_health': ('MaxHealth',),
+        'speed': ('SpeedKph',),
+    }
+    state = {key: _safe_float_value(_raw_record_value(record, *aliases)) for key, aliases in numeric_fields.items()}
+    for key, aliases in {
+        'snapshot_id': ('SnapshotId',), 'generated_at': ('GeneratedAtUtc',), 'status': ('Status',),
+        'game_mode': ('GameMode',), 'session_type': ('SessionType',), 'map_name': ('MapName',),
+        'watch_state': ('WatchState',), 'target_type': ('TargetType',), 'username': ('Username',),
+        'display_name': ('DisplayName',), 'platform': ('Platform',), 'skin': ('SkinId',),
+        'skin_stack': ('SkinStack',), 'mesh': ('MeshId',), 'spawn_effect': ('SpawnEffectId',),
+        'finish_effect': ('FinishEffectId',), 'trail': ('TrailEffectId',), 'pin': ('PinId',),
+        'player_card': ('PlayerCardId',), 'death_effect': ('DeathEffectId',),
+    }.items():
+        state[key] = _raw_record_value(record, *aliases)
+    for key, aliases in {'finished': ('Finished',), 'eliminated': ('Eliminated',), 'winner': ('Winner',)}.items():
+        state[key] = parse_boolean_token(_raw_record_value(record, *aliases), default=False)
+    return state
 
 
 def load_tilt_history():
@@ -13838,6 +13976,12 @@ class Bot(commands.Bot):
             f"Season - {seasonwins_formatted} wins, {seasonpts_formatted} points, {seasonraces_formatted} races, PPR: {season_avg_points_formatted}. | "
             f"World Records - {counts['world_record_count']}"
         )
+        official = latest_season_snapshot(winnersname)
+        if official:
+            output_msg += (
+                f" | Official MOS Season - {official['season_wins']:,} wins, "
+                f"{official['season_points']:,} points, {official['season_matches']:,} matches"
+            )
 
         await send_chat_message(
             ctx.channel,
@@ -13860,10 +14004,15 @@ class Bot(commands.Bot):
             await ctx.send(f"No result for @{target} in the latest race.")
             return
         outcome = 'DNF' if result['eliminated'] else _format_race_time(result['finish_time'])
+        season = latest_season_snapshot(result['username'])
+        season_text = (
+            f" | MOS Season: {season['season_points']:,} pts, {season['season_wins']:,} wins / "
+            f"{season['season_matches']:,} matches" if season else ''
+        )
         await ctx.send(_chat_safe(
             f"Last Race | {result['map_name'] or 'Unknown map'} by {result['map_builder'] or 'Unknown'} | "
             f"{result['display_name']}: #{result['position']} / {result['marble_count']}, "
-            f"{result['points']:,} pts, {outcome}"
+            f"{result['points']:,} pts, {outcome}{season_text}"
         ))
 
     @commands.command(name='racecard')
@@ -13881,11 +14030,45 @@ class Bot(commands.Bot):
         for row in rows:
             by_map[row['map_name']].append(row['position'])
         best_map = min(by_map, key=lambda name: sum(by_map[name]) / len(by_map[name])) if by_map else 'Unknown'
+        season = latest_season_snapshot(target)
+        official_text = (
+            f" | MOS Season {season['season_points']:,} pts, {season['season_wins']:,} wins / "
+            f"{season['season_matches']:,} matches | Coverage {len(rows):,}/{season['season_matches']:,}"
+            if season else ''
+        )
         await ctx.send(_chat_safe(
             f"Race Card @{target} | {len(rows)} races, {wins} wins, {podiums} podiums, "
             f"{sum(row['points'] for row in rows):,} pts | Avg finish {avg_finish:.2f} | "
-            f"Completion {len(completed) / len(rows) * 100:.1f}% | Best map: {best_map}"
+            f"Completion {len(completed) / len(rows) * 100:.1f}% | Best map: {best_map}{official_text}"
         ))
+
+    @commands.command(name='seasoncard')
+    async def seasoncard_command(self, ctx, username: str = None):
+        target = _target_username(ctx, username)
+        season = latest_season_snapshot(target)
+        if not season:
+            await ctx.send(f"No official Marbles season snapshot found for @{target}.")
+            return
+        win_rate = season['season_wins'] / season['season_matches'] * 100 if season['season_matches'] else 0
+        await ctx.send(_chat_safe(
+            f"MOS Season Card @{target} | {season['season_points']:,} points | "
+            f"{season['season_wins']:,} wins / {season['season_matches']:,} matches ({win_rate:.1f}%) | "
+            f"Latest: {season['points_earned']:+,} pts in {season['game_mode'] or 'event'} | "
+            f"Platform: {season['platform'] or 'Unknown'}"
+        ))
+
+    @commands.command(name='coverage')
+    async def coverage_command(self, ctx, username: str = None):
+        target = _target_username(ctx, username)
+        season = latest_season_snapshot(target)
+        if not season:
+            await ctx.send(f"No official Marbles season snapshot found for @{target}.")
+            return
+        observed = sum(row['username'].lower() == target.lower() for row in load_map_race_history())
+        observed += sum(row['username'].lower() == target.lower() for row in load_royale_history())
+        total = season['season_matches']
+        rate = observed / total * 100 if total else 0
+        await ctx.send(f"Coverage @{target} | MyStats captured {observed:,} of {total:,} official matches ({rate:.1f}%).")
 
     @commands.command(name='maprecord')
     async def maprecord_command(self, ctx, *, map_name: str = None):
@@ -14039,9 +14222,17 @@ class Bot(commands.Bot):
         if result is None:
             await ctx.send(f"No result for @{target} in the latest Royale.")
             return
+        detail = next((row for row in reversed(load_royale_player_details(result['username']))), None)
+        survival_text = f", survived {_format_race_time(detail['survival_time'])}" if detail and detail['survival_time'] > 0 else ''
+        season = latest_season_snapshot(result['username'])
+        season_text = (
+            f" | MOS Season: {season['season_points']:,} pts, {season['season_wins']:,} wins / "
+            f"{season['season_matches']:,} matches" if season else ''
+        )
         await ctx.send(_chat_safe(
             f"Last Royale | {result['display_name']}: #{result['position']} / {result['marble_count']}, "
             f"{result['points']:,} pts, {result['kills']:,} kills, {result['damage']:,} damage"
+            f"{survival_text}{season_text}"
         ))
 
     @commands.command(name='brcard')
@@ -14054,11 +14245,35 @@ class Bot(commands.Bot):
         wins = sum(row['position'] == 1 for row in rows)
         kills = sum(row['kills'] for row in rows)
         damage = sum(row['damage'] for row in rows)
+        detail_rows = load_royale_player_details(target)
+        survival_times = [row['survival_time'] for row in detail_rows if row['survival_time'] > 0]
+        survival_text = (
+            f" | Survival avg {_format_race_time(sum(survival_times) / len(survival_times))}, "
+            f"best {_format_race_time(max(survival_times))}" if survival_times else ''
+        )
+        season = latest_season_snapshot(target)
+        official_text = (
+            f" | MOS Season {season['season_points']:,} pts, {season['season_wins']:,} wins / "
+            f"{season['season_matches']:,} matches" if season else ''
+        )
         await ctx.send(_chat_safe(
             f"BR Card @{target} | {len(rows)} Royales, {wins} wins ({wins / len(rows) * 100:.1f}%), "
             f"{sum(row['points'] for row in rows):,} pts | {kills:,} kills ({kills / len(rows):.2f}/BR) | "
-            f"{damage:,} damage ({damage / len(rows):.2f}/BR)"
+            f"{damage:,} damage ({damage / len(rows):.2f}/BR){survival_text}{official_text}"
         ))
+
+    @commands.command(name='survival')
+    async def survival_command(self, ctx, username: str = None):
+        target = _target_username(ctx, username)
+        rows = [row for row in load_royale_player_details(target) if row['survival_time'] > 0]
+        if not rows:
+            await ctx.send(f"No Royale survival-time history found for @{target}.")
+            return
+        average = sum(row['survival_time'] for row in rows) / len(rows)
+        await ctx.send(
+            f"BR Survival @{target} | Avg {_format_race_time(average)} | "
+            f"Best {_format_race_time(max(row['survival_time'] for row in rows))} | {len(rows):,} Royales"
+        )
 
     @commands.command(name='kills')
     async def kills_command(self, ctx, username: str = None):
@@ -14179,6 +14394,77 @@ class Bot(commands.Bot):
             f"Weapon Stats @{target} | " + " | ".join(f"{name}: {stats['uses']} uses, {stats['damage']:,} dmg" for name, stats in ranked)
         ))
 
+    @commands.command(name='watching')
+    async def watching_command(self, ctx):
+        state = read_last_watched_state()
+        if not state or not state.get('username'):
+            await ctx.send("No watched marble snapshot is available.")
+            return
+        name = state.get('display_name') or state['username']
+        season_text = (
+            f" | Season: {int(state['season_points']):,} pts, {int(state['season_wins']):,} wins / "
+            f"{int(state['season_games']):,} games, rank {int(state['season_rank']):,}, "
+            f"{int(state['season_eliminations']):,} eliminations"
+        )
+        await ctx.send(_chat_safe(
+            f"Watching | {name} (@{state['username']}) | {state.get('game_mode') or 'Unknown mode'} "
+            f"{state.get('session_type') or ''} | {state.get('map_name') or 'Unknown map'} | "
+            f"State: {state.get('watch_state') or state.get('status') or 'Unknown'}{season_text}"
+        ))
+
+    @commands.command(name='where')
+    async def where_command(self, ctx):
+        state = read_last_watched_state()
+        if not state or not state.get('username'):
+            await ctx.send("No watched marble snapshot is available.")
+            return
+        parts = [f"Watched Marble @{state['username']}"]
+        if state['level']:
+            parts.append(f"Level {int(state['level'])}")
+        if state['lap']:
+            parts.append(f"Lap {int(state['lap'])}")
+        if state['checkpoint']:
+            parts.append(f"Checkpoint {int(state['checkpoint'])}")
+        if state['position']:
+            parts.append(f"Position #{int(state['position'])}")
+        if state['distance_finish']:
+            parts.append(f"{state['distance_finish']:.1f}m to finish")
+        if state['speed']:
+            parts.append(f"{state['speed']:.1f} kph")
+        await ctx.send(_chat_safe(" | ".join(parts)))
+
+    @commands.command(name='health')
+    async def health_command(self, ctx):
+        state = read_last_watched_state()
+        if not state or not state.get('username'):
+            await ctx.send("No watched marble snapshot is available.")
+            return
+        health = int(state['health'])
+        maximum = int(state['max_health'])
+        percent = health / maximum * 100 if maximum else 0
+        await ctx.send(
+            f"Health @{state['username']} | {health:,}/{maximum:,} ({percent:.1f}%) | "
+            f"Damage {int(state['match_damage']):,} | Kills {int(state['kills']):,}"
+        )
+
+    @commands.command(name='marbleloadout')
+    async def marbleloadout_command(self, ctx):
+        state = read_last_watched_state()
+        if not state or not state.get('username'):
+            await ctx.send("No watched marble snapshot is available.")
+            return
+        items = [
+            ('Skin', state.get('skin')), ('Stack', state.get('skin_stack')),
+            ('Mesh', state.get('mesh')), ('Trail', state.get('trail')),
+            ('Pin', state.get('pin')), ('Card', state.get('player_card')),
+            ('Spawn', state.get('spawn_effect')), ('Finish', state.get('finish_effect')),
+            ('Death', state.get('death_effect')),
+        ]
+        visible = [f"{label}: {value}" for label, value in items if value]
+        await ctx.send(_chat_safe(
+            f"Marble Loadout @{state['username']} | " + (" | ".join(visible) if visible else "No equipped item IDs reported")
+        ))
+
     @commands.command(name='lasttilt')
     async def lasttilt_command(self, ctx):
         events = [event for event in load_tilt_detail_events() if event.get('level')]
@@ -14190,19 +14476,29 @@ class Bot(commands.Bot):
         player_count = _safe_int(_raw_record_value(level, 'PlayerCount')) or len(event['players'])
         eliminated = _safe_int(_raw_record_value(level, 'EliminatedCount'))
         survivors = max(0, player_count - eliminated)
+        difficulty = _raw_record_value(level, 'Difficulty') or 'Unknown'
+        passed = parse_boolean_token(_raw_record_value(level, 'LevelPassed', 'Passed'), default=False)
         await ctx.send(_chat_safe(
-            f"Last Tilt | Level {_raw_record_value(level, 'Level', 'CurrentLevel') or '?'} | "
+            f"Last Tilt | Level {_raw_record_value(level, 'Level', 'CurrentLevel') or '?'} ({difficulty}) | "
             f"Time {_raw_record_value(level, 'LevelDurationSeconds', 'ElapsedTime') or '?'}s | "
             f"Top Tiltee: {_raw_record_value(level, 'TopTilteeUsername', 'CurrentTopTiltee') or 'None'} | "
-            f"Survivors {survivors}, Deaths {eliminated}, Points {_raw_record_value(level, 'StandardPointsPerFinisher', 'LevelExp') or '0'}"
+            f"{'Passed' if passed else 'Failed'} | Survivors {survivors}, Deaths {eliminated}, "
+            f"Points {_raw_record_value(level, 'StandardPointsPerFinisher', 'LevelExp') or '0'} | "
+            f"Expertise +{_safe_int(_raw_record_value(level, 'ExpertiseEarned')):,}, "
+            f"total {_safe_int(_raw_record_value(level, 'TotalExpertise', 'TotalExp')):,}"
         ))
 
     @commands.command(name='tiltlevel')
     async def tiltlevel_command(self, ctx):
+        level_rows = safe_read_csv_rows(config.get_setting('tilt_level_file'))
+        state = parse_tilt_level_state(level_rows) or {}
         await ctx.send(_chat_safe(
-            f"Tilt Level | Current: {config.get_setting('tilt_current_level') or '0'} | "
-            f"Elapsed: {config.get_setting('tilt_current_elapsed') or '0:00'} | "
-            f"Top Tiltee: {config.get_setting('tilt_current_top_tiltee') or 'None'}"
+            f"Tilt Level | Current: {state.get('current_level', config.get_setting('tilt_current_level') or '0')} "
+            f"({state.get('difficulty') or 'Unknown'}) | "
+            f"Elapsed: {state.get('elapsed_time', config.get_setting('tilt_current_elapsed') or '0:00')} | "
+            f"Top Tiltee: {state.get('top_tiltee') or config.get_setting('tilt_current_top_tiltee') or 'None'} | "
+            f"Expertise +{_safe_int(state.get('level_expertise')):,}, total {_safe_int(state.get('total_xp')):,} | "
+            f"Live: {'Yes' if parse_boolean_token(state.get('live'), default=False) else 'No'}"
         ))
 
     @commands.command(name='tiltcard')
@@ -15578,7 +15874,11 @@ async def tilted(bot):
             terminal_run_death = 1 if (not level_passed and 1 <= len(survivors) <= 2) else 0
             deaths_this_level += terminal_run_death
 
-            earned_xp = int(math.floor(len(survivors) * get_tilt_multiplier(current_level)))
+            earned_xp = (
+                level_state['level_expertise']
+                if level_state.get('level_expertise_present')
+                else int(math.floor(len(survivors) * get_tilt_multiplier(current_level)))
+            )
             level_elapsed_seconds = parse_tilt_elapsed_to_seconds(elapsed_time)
             run_total_seconds = get_int_setting('tilt_run_total_seconds', 0) + level_elapsed_seconds
             run_xp = get_int_setting('tilt_run_xp', 0) + earned_xp
@@ -16232,6 +16532,9 @@ async def race(bot):
             race_summary = read_mos_event_summary(config.get_setting('race_summary_file'))
             _, race_source_records, _ = _read_mos_table(config.get_setting('race_file'))
             race_snapshot = _raw_record_value(race_source_records[0], 'SnapshotId') if race_source_records else ''
+            if race_snapshot and race_snapshot == str(config.get_setting('last_race_snapshot_id') or ''):
+                logger.info("Skipping already processed race snapshot %s", race_snapshot)
+                continue
             if (
                 race_snapshot and race_summary.get('snapshot_id')
                 and race_snapshot != race_summary['snapshot_id']
@@ -16255,6 +16558,12 @@ async def race(bot):
             if not lines:
                 logger.warning("Race exports did not contain any racer rows.")
                 continue
+
+            archive_season_snapshots(
+                config.get_setting('race_file'),
+                config.get_setting('race_summary_file'),
+                'Race',
+            )
 
             if all(row[6].strip().lower() == 'true' for row in lines):
                 nowinner = True
@@ -16370,6 +16679,8 @@ async def race(bot):
                 s_t_points += int(row[3])
 
             append_csv_rows_safely(config.get_setting('allraces_file'), racedata)
+            if race_snapshot:
+                config.set_setting('last_race_snapshot_id', race_snapshot, persistent=True)
 
             _record_live_team_points_rows(config.get_setting('CHANNEL'), racedata)
 
@@ -16548,8 +16859,9 @@ async def race(bot):
                 if not filtered_data:
                     # No racers earned points, show top 10 finishers regardless of points
                     filtered_top10_data = [item for item in namecolordata if item[6] == 'false'][:10]
-                    text_widget.insert(tk.END, "\nTop 10 Finishers: ", "white")
-                    text_widget.insert(tk.END, f"({marbcount})", "yellow")
+                    text_widget.insert(tk.END, "\nTop 10 Finishers (", "white")
+                    text_widget.insert(tk.END, f"{marbcount}", "yellow")
+                    text_widget.insert(tk.END, f" {pluralize(marbcount, 'marble')}): ", "white")
 
                     for i, data in enumerate(filtered_top10_data):
                         wname = data[1] if data[1] != data[2].lower() else data[2]
@@ -17066,6 +17378,15 @@ async def royale(bot):
                 if parsed_rows:
                     data_rows = parsed_rows
 
+                    _, royale_source_records, _ = _read_mos_table(config.get_setting('br_file'))
+                    royale_snapshot = (
+                        _raw_record_value(royale_source_records[0], 'SnapshotId')
+                        if royale_source_records else ''
+                    )
+                    if royale_snapshot and royale_snapshot == str(config.get_setting('last_royale_snapshot_id') or ''):
+                        logger.info("Skipping already processed Royale snapshot %s", royale_snapshot)
+                        continue
+
                     marbcount = len(data_rows)
                     _archive_mos_sources(
                         config.get_setting('br_details_results_file'),
@@ -17074,6 +17395,11 @@ async def royale(bot):
                             ('royale', config.get_setting('br_file')),
                             ('summary', config.get_setting('br_summary_file')),
                         ),
+                    )
+                    archive_season_snapshots(
+                        config.get_setting('br_file'),
+                        config.get_setting('br_summary_file'),
+                        'BR',
                     )
 
                     # Handle active_event_ids
@@ -17147,6 +17473,8 @@ async def royale(bot):
 
                     race_counts = {row[1]: 0 for row in brdata}
                     append_csv_rows_safely(config.get_setting('allraces_file'), brdata)
+                    if royale_snapshot:
+                        config.set_setting('last_royale_snapshot_id', royale_snapshot, persistent=True)
 
                     if not br_cache_loaded or t_count <= 1:
                         br_user_totals = load_br_user_totals_from_allraces()
