@@ -1800,6 +1800,39 @@ def _resolve_team_bonus_percent(bonus_payload, default_percent=0):
         return max(0, int(default_percent or 0))
 
 
+def _get_current_team_bonus(team, now=None):
+    """Return the current team bonus and clear stale active state when expired."""
+    if not isinstance(team, dict):
+        return None, False
+    if now is None:
+        now = datetime.now(timezone.utc)
+
+    active = team.get('active_bonus')
+    if not isinstance(active, dict):
+        stale_label = bool(team.get('active_bonus_label'))
+        if stale_label:
+            team['active_bonus_label'] = None
+        return None, stale_label
+
+    changed = False
+    if 'bonus_percent' not in active:
+        active['bonus_percent'] = _resolve_team_bonus_percent(active, 0)
+        changed = True
+
+    end_at = _parse_allraces_timestamp(active.get('end_at'))
+    if not end_at or end_at < now:
+        team['active_bonus'] = None
+        team['active_bonus_label'] = None
+        return None, True
+
+    resolved_percent = _resolve_team_bonus_percent(active, 0)
+    expected_label = f"⚡+{resolved_percent}%"
+    if team.get('active_bonus_label') != expected_label:
+        team['active_bonus_label'] = expected_label
+        changed = True
+    return active, changed
+
+
 def _team_has_recent_bits_bonus(team, now, cooldown_minutes=60):
     try:
         cooldown = max(0, int(cooldown_minutes))
@@ -1954,6 +1987,14 @@ def _record_live_team_points_rows(channel_name, rows):
                     tep_per_race = max(0, int(config.get_setting('teams_tep_per_race') or 1))
                 except ValueError:
                     tep_per_race = 1
+                tep_bonus_enabled = parse_boolean_token(
+                    config.get_setting('teams_tep_bonus_enabled'),
+                    default=True,
+                )
+                try:
+                    tep_bonus_percent = max(0, int(config.get_setting('teams_tep_bonus_percent') or 15))
+                except ValueError:
+                    tep_bonus_percent = 15
                 try:
                     tep_bonus_minutes = max(1, int(config.get_setting('teams_tep_bonus_duration_minutes') or 15))
                 except ValueError:
@@ -2003,14 +2044,14 @@ def _record_live_team_points_rows(channel_name, rows):
                         active_now = None
                         team_data_changed = True
 
-                while int(team.get('effort_bank', 0)) >= tep_threshold:
+                while tep_bonus_enabled and tep_bonus_percent > 0 and int(team.get('effort_bank', 0)) >= tep_threshold:
                     if active_now is not None:
                         break
                     if _team_has_recent_bits_bonus(team, now, tep_bits_cooldown_minutes):
                         break
                     team['effort_bank'] = int(team.get('effort_bank', 0)) - tep_threshold
                     tep_bonus = {
-                        'bonus_percent': 15,
+                        'bonus_percent': tep_bonus_percent,
                         'source': 'tep',
                         'start_at': now.isoformat(),
                         'end_at': (now + timedelta(minutes=tep_bonus_minutes)).isoformat(),
@@ -2018,7 +2059,7 @@ def _record_live_team_points_rows(channel_name, rows):
                     team['active_bonus'] = tep_bonus
                     team['active_bonus_label'] = f"⚡+{tep_bonus['bonus_percent']}%"
                     team.setdefault('bonus_windows', []).append({
-                        'bonus_percent': 15,
+                        'bonus_percent': tep_bonus_percent,
                         'source': 'tep',
                         'start_at': now.isoformat(),
                         'end_at': (now + timedelta(minutes=tep_bonus_minutes)).isoformat(),
@@ -2026,7 +2067,10 @@ def _record_live_team_points_rows(channel_name, rows):
                     })
                     active_now = tep_bonus
                     team_data_changed = True
-                    enqueue_overlay_event('team_effort_bonus', f"🏁 Team Effort Bonus: {team_name} earned +15% for {tep_bonus_minutes}m")
+                    enqueue_overlay_event(
+                        'team_effort_bonus',
+                        f"🏁 Team Effort Bonus: {team_name} earned +{tep_bonus_percent}% for {tep_bonus_minutes}m",
+                    )
 
             _save_team_points_cache(cache_payload)
         if team_data_changed:
@@ -2641,6 +2685,15 @@ def _build_team_leaderboard_rows(*, window='season', limit=10):
     with TEAM_DATA_LOCK:
         data = _load_team_data()
         channel_state = _get_channel_team_state(data, channel_name)
+        team_state_changed = False
+        now = datetime.now(timezone.utc)
+        for team in channel_state.get('teams', {}).values():
+            if isinstance(team, dict):
+                _, changed = _get_current_team_bonus(team, now)
+                team_state_changed = team_state_changed or changed
+        if team_state_changed:
+            _save_team_data(data)
+
         teams_snapshot = {
             team_name: {
                 'captain': team.get('captain'),
@@ -8268,29 +8321,44 @@ def open_settings_window():
     teams_max_size_entry.grid(row=1, column=1, sticky="w", pady=(0, 6), padx=(8, 0))
     teams_max_size_entry.insert(0, config.get_setting("teams_max_size") or "25")
 
-    ttk.Label(tep_settings_frame, text="TEP Threshold").grid(row=2, column=0, sticky="w", pady=(0, 6))
+    teams_tep_bonus_enabled_var = tk.BooleanVar(
+        value=parse_boolean_token(config.get_setting("teams_tep_bonus_enabled"), default=True)
+    )
+    ttk.Checkbutton(
+        tep_settings_frame,
+        text="Enable TEP Bonus",
+        variable=teams_tep_bonus_enabled_var,
+    ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(0, 6))
+
+    ttk.Label(tep_settings_frame, text="TEP Threshold").grid(row=3, column=0, sticky="w", pady=(0, 6))
     teams_tep_threshold_entry = ttk.Entry(tep_settings_frame, width=12, justify='center')
-    teams_tep_threshold_entry.grid(row=2, column=1, sticky="w", pady=(0, 6), padx=(8, 0))
+    teams_tep_threshold_entry.grid(row=3, column=1, sticky="w", pady=(0, 6), padx=(8, 0))
     teams_tep_threshold_entry.insert(0, config.get_setting("teams_tep_threshold") or "40")
 
-    ttk.Label(tep_settings_frame, text="TEP per Race").grid(row=3, column=0, sticky="w", pady=(0, 6))
+    ttk.Label(tep_settings_frame, text="TEP per Race").grid(row=4, column=0, sticky="w", pady=(0, 6))
     teams_tep_per_race_entry = ttk.Entry(tep_settings_frame, width=12, justify='center')
-    teams_tep_per_race_entry.grid(row=3, column=1, sticky="w", pady=(0, 6), padx=(8, 0))
+    teams_tep_per_race_entry.grid(row=4, column=1, sticky="w", pady=(0, 6), padx=(8, 0))
     teams_tep_per_race_entry.insert(0, config.get_setting("teams_tep_per_race") or "1")
 
-    ttk.Label(tep_settings_frame, text="TEP Bonus %/Cooldown (min)").grid(row=4, column=0, sticky="w", pady=(0, 6))
+    ttk.Label(tep_settings_frame, text="TEP Bonus % / Duration (min)").grid(row=5, column=0, sticky="w", pady=(0, 6))
     tep_bonus_frame = ttk.Frame(tep_settings_frame, style="App.TFrame")
-    tep_bonus_frame.grid(row=4, column=1, sticky="w", pady=(0, 6), padx=(8, 0))
+    tep_bonus_frame.grid(row=5, column=1, sticky="w", pady=(0, 6), padx=(8, 0))
+    teams_tep_bonus_percent_entry = ttk.Entry(tep_bonus_frame, width=5, justify='center')
+    teams_tep_bonus_percent_entry.pack(side="left")
+    teams_tep_bonus_percent_entry.insert(0, config.get_setting("teams_tep_bonus_percent") or "15")
+    ttk.Label(tep_bonus_frame, text="/").pack(side="left", padx=2)
     teams_tep_bonus_duration_entry = ttk.Entry(tep_bonus_frame, width=5, justify='center')
     teams_tep_bonus_duration_entry.pack(side="left")
     teams_tep_bonus_duration_entry.insert(0, config.get_setting("teams_tep_bonus_duration_minutes") or "15")
-    ttk.Label(tep_bonus_frame, text="/").pack(side="left", padx=2)
-    teams_tep_bits_cooldown_entry = ttk.Entry(tep_bonus_frame, width=5, justify='center')
-    teams_tep_bits_cooldown_entry.pack(side="left")
+
+    ttk.Label(tep_settings_frame, text="Bits Cooldown (min)").grid(row=6, column=0, sticky="w", pady=(0, 6))
+    teams_tep_bits_cooldown_entry = ttk.Entry(tep_settings_frame, width=12, justify='center')
+    teams_tep_bits_cooldown_entry.grid(row=6, column=1, sticky="w", pady=(0, 6), padx=(8, 0))
     teams_tep_bits_cooldown_entry.insert(0, config.get_setting("teams_tep_bits_cooldown_minutes") or "60")
-    ttk.Label(tep_settings_frame, text="TEP Cap Member/Team (daily)").grid(row=5, column=0, sticky="w", pady=(0, 6))
+
+    ttk.Label(tep_settings_frame, text="TEP Cap Member/Team (daily)").grid(row=7, column=0, sticky="w", pady=(0, 6))
     tep_caps_frame = ttk.Frame(tep_settings_frame, style="App.TFrame")
-    tep_caps_frame.grid(row=5, column=1, sticky="w", pady=(0, 6), padx=(8, 0))
+    tep_caps_frame.grid(row=7, column=1, sticky="w", pady=(0, 6), padx=(8, 0))
     teams_tep_member_daily_cap_entry = ttk.Entry(tep_caps_frame, width=5, justify='center')
     teams_tep_member_daily_cap_entry.pack(side="left")
     teams_tep_member_daily_cap_entry.insert(0, config.get_setting("teams_tep_member_daily_cap") or "10")
@@ -8298,19 +8366,33 @@ def open_settings_window():
     teams_tep_team_daily_cap_entry = ttk.Entry(tep_caps_frame, width=5, justify='center')
     teams_tep_team_daily_cap_entry.pack(side="left")
     teams_tep_team_daily_cap_entry.insert(0, config.get_setting("teams_tep_team_daily_cap") or "100")
-    ttk.Label(bonus_settings_frame, text="Bonus Bits Threshold").grid(row=0, column=0, sticky="w", pady=(0, 6))
+    teams_bits_bonus_enabled_var = tk.BooleanVar(
+        value=parse_boolean_token(config.get_setting("teams_bits_bonus_enabled"), default=True)
+    )
+    ttk.Checkbutton(
+        bonus_settings_frame,
+        text="Enable Bits Bonus",
+        variable=teams_bits_bonus_enabled_var,
+    ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 6))
+
+    ttk.Label(bonus_settings_frame, text="Bonus Bits Threshold").grid(row=1, column=0, sticky="w", pady=(0, 6))
     teams_bonus_bits_threshold_entry = ttk.Entry(bonus_settings_frame, width=10, justify='center')
-    teams_bonus_bits_threshold_entry.grid(row=0, column=1, sticky="w", pady=(0, 6), padx=(8, 0))
+    teams_bonus_bits_threshold_entry.grid(row=1, column=1, sticky="w", pady=(0, 6), padx=(8, 0))
     teams_bonus_bits_threshold_entry.insert(0, config.get_setting("teams_bonus_bits_threshold") or "1000")
 
-    ttk.Label(bonus_settings_frame, text="Bonus Duration (min)").grid(row=1, column=0, sticky="w", pady=(0, 6))
+    ttk.Label(bonus_settings_frame, text="Bits Bonus % (0=random)").grid(row=2, column=0, sticky="w", pady=(0, 6))
+    teams_bits_bonus_percent_entry = ttk.Entry(bonus_settings_frame, width=10, justify='center')
+    teams_bits_bonus_percent_entry.grid(row=2, column=1, sticky="w", pady=(0, 6), padx=(8, 0))
+    teams_bits_bonus_percent_entry.insert(0, config.get_setting("teams_bits_bonus_percent") or "0")
+
+    ttk.Label(bonus_settings_frame, text="Bonus Duration (min)").grid(row=3, column=0, sticky="w", pady=(0, 6))
     teams_bonus_duration_entry = ttk.Entry(bonus_settings_frame, width=10, justify='center')
-    teams_bonus_duration_entry.grid(row=1, column=1, sticky="w", pady=(0, 6), padx=(8, 0))
+    teams_bonus_duration_entry.grid(row=3, column=1, sticky="w", pady=(0, 6), padx=(8, 0))
     teams_bonus_duration_entry.insert(0, config.get_setting("teams_bonus_duration_minutes") or "20")
 
-    ttk.Label(bonus_settings_frame, text="Bonus Weights 15%/25%/35%/67%").grid(row=2, column=0, sticky="nw", pady=(0, 6))
+    ttk.Label(bonus_settings_frame, text="Random Weights 15%/25%/35%/67%").grid(row=4, column=0, sticky="nw", pady=(0, 6))
     bonus_weights_frame = ttk.Frame(bonus_settings_frame, style="App.TFrame")
-    bonus_weights_frame.grid(row=2, column=1, sticky="w", pady=(0, 6), padx=(8, 0))
+    bonus_weights_frame.grid(row=4, column=1, sticky="w", pady=(0, 6), padx=(8, 0))
     ttk.Label(bonus_weights_frame, text="15%", width=4, anchor="w").grid(row=0, column=0, sticky="w")
     teams_bonus_weight_15_entry = ttk.Entry(bonus_weights_frame, width=4, justify='center')
     teams_bonus_weight_15_entry.grid(row=0, column=1, sticky="w", pady=(0, 2))
@@ -8336,7 +8418,8 @@ def open_settings_window():
             "TEP (Team Effort Points) is earned from team races and runs alongside bits bonus progress.\n"
             "• TEP Threshold: total TEP needed before the automatic TEP bonus triggers.\n"
             "• TEP per Race: TEP added per qualifying team race (before caps).\n"
-            "• TEP Bonus %/Cooldown (min): the automatic TEP bonus percent and the minutes it is blocked after bits bonus activity.\n"
+            "• TEP Bonus % / Duration (min): controls the automatic TEP boost and exactly how long it remains active.\n"
+            "• Bits Cooldown (min): blocks a TEP bonus for this many minutes after a bits bonus ends.\n"
             "• TEP Cap Member/Team (daily): maximum TEP gain per member and per team each day to avoid runaway loops.\n"
             "• Points Counting Mode affects team scoreboards only and does not change TEP gain.\n"
             "• Max Team Size controls how many members can contribute to TEP and points."
@@ -8376,6 +8459,10 @@ def open_settings_window():
                 channel_state['settings']['max_team_size'] = max(2, int(teams_max_size_entry.get() or 25))
             except ValueError:
                 channel_state['settings']['max_team_size'] = 25
+            now = datetime.now(timezone.utc)
+            for team in channel_state.get('teams', {}).values():
+                if isinstance(team, dict):
+                    _get_current_team_bonus(team, now)
             _save_team_data(data)
 
         for team_name, team in sorted(channel_state.get('teams', {}).items()):
@@ -8925,8 +9012,12 @@ def open_settings_window():
         config.set_setting("teams_enabled", str(teams_enabled_var.get()), persistent=True)
         config.set_setting("teams_points_mode", teams_points_mode_var.get(), persistent=True)
         config.set_setting("teams_max_size", teams_max_size_entry.get(), persistent=True)
+        config.set_setting("teams_bits_bonus_enabled", str(teams_bits_bonus_enabled_var.get()), persistent=True)
+        config.set_setting("teams_bits_bonus_percent", teams_bits_bonus_percent_entry.get(), persistent=True)
         config.set_setting("teams_bonus_bits_threshold", teams_bonus_bits_threshold_entry.get(), persistent=True)
         config.set_setting("teams_bonus_duration_minutes", teams_bonus_duration_entry.get(), persistent=True)
+        config.set_setting("teams_tep_bonus_enabled", str(teams_tep_bonus_enabled_var.get()), persistent=True)
+        config.set_setting("teams_tep_bonus_percent", teams_tep_bonus_percent_entry.get(), persistent=True)
         config.set_setting("teams_tep_threshold", teams_tep_threshold_entry.get(), persistent=True)
         config.set_setting("teams_tep_per_race", teams_tep_per_race_entry.get(), persistent=True)
         config.set_setting("teams_tep_bonus_duration_minutes", teams_tep_bonus_duration_entry.get(), persistent=True)
@@ -10020,7 +10111,9 @@ class ConfigManager:
                                 'mycycle_min_place', 'mycycle_max_place', 'mycycle_primary_session_id',
                                 'mycycle_cyclestats_rotation_index',
                                 'teams_enabled', 'teams_points_mode', 'teams_max_size',
+                                'teams_bits_bonus_enabled', 'teams_bits_bonus_percent',
                                 'teams_bonus_bits_threshold', 'teams_bonus_duration_minutes',
+                                'teams_tep_bonus_enabled', 'teams_tep_bonus_percent',
                                 'teams_tep_threshold', 'teams_tep_per_race', 'teams_tep_bonus_duration_minutes', 'teams_tep_bits_cooldown_minutes',
                                 'teams_tep_member_daily_cap', 'teams_tep_team_daily_cap',
                                 'teams_bonus_weight_15', 'teams_bonus_weight_25', 'teams_bonus_weight_35', 'teams_bonus_weight_67',
@@ -10104,8 +10197,12 @@ class ConfigManager:
             'teams_enabled': 'True',
             'teams_points_mode': 'active',
             'teams_max_size': '25',
+            'teams_bits_bonus_enabled': 'True',
+            'teams_bits_bonus_percent': '0',
             'teams_bonus_bits_threshold': '1000',
             'teams_bonus_duration_minutes': '20',
+            'teams_tep_bonus_enabled': 'True',
+            'teams_tep_bonus_percent': '15',
             'teams_tep_threshold': '40',
             'teams_tep_per_race': '1',
             'teams_tep_bonus_duration_minutes': '15',
@@ -12538,17 +12635,7 @@ class Bot(commands.Bot):
         }
 
     def _current_team_bonus(self, team):
-        now = datetime.now(timezone.utc)
-        active = team.get('active_bonus')
-        if not isinstance(active, dict):
-            return None
-        if 'bonus_percent' not in active:
-            active['bonus_percent'] = _resolve_team_bonus_percent(active, 0)
-        end_at = _parse_allraces_timestamp(active.get('end_at'))
-        if not end_at or end_at < now:
-            team['active_bonus'] = None
-            team['active_bonus_label'] = None
-            return None
+        active, _ = _get_current_team_bonus(team)
         return active
 
     def _choose_bonus_percent(self):
@@ -12577,6 +12664,8 @@ class Bot(commands.Bot):
     async def _process_team_bits_bonus(self, message):
         if not self._teams_feature_enabled() or self._teams_phase() != 'local':
             return
+        if not parse_boolean_token(config.get_setting('teams_bits_bonus_enabled'), default=True):
+            return
         bits = _extract_message_bits(message)
         if bits <= 0:
             return
@@ -12600,6 +12689,10 @@ class Bot(commands.Bot):
             duration_minutes = max(1, int(config.get_setting('teams_bonus_duration_minutes') or 20))
         except ValueError:
             duration_minutes = 20
+        try:
+            configured_bonus_percent = max(0, int(config.get_setting('teams_bits_bonus_percent') or 0))
+        except ValueError:
+            configured_bonus_percent = 0
 
         bits_bank = int(team.get('bits_bank', 0)) + bits
         team['bits_bank'] = bits_bank
@@ -12614,33 +12707,27 @@ class Bot(commands.Bot):
         activated_messages = []
         now = datetime.now(timezone.utc)
         active_bonus = self._current_team_bonus(team)
-        while team.get('bits_bank', 0) >= threshold:
-            if active_bonus and str(active_bonus.get('source') or 'bits').lower() != 'bits':
-                break
+
+        # A bonus now has a fixed lifetime. Extra completed bits thresholds remain
+        # banked instead of extending an already-active window.
+        if active_bonus is None and team.get('bits_bank', 0) >= threshold:
             team['bits_bank'] -= threshold
-            bonus_percent = self._choose_bonus_percent()
-            if active_bonus:
-                end_at = _parse_allraces_timestamp(active_bonus.get('end_at')) or now
-                new_end = end_at + timedelta(minutes=duration_minutes)
-                active_bonus['end_at'] = new_end.isoformat()
-                active_bonus['bonus_percent'] = max(_resolve_team_bonus_percent(active_bonus, 0), bonus_percent)
-                active_bonus['source'] = 'bits'
-            else:
-                end_at = now + timedelta(minutes=duration_minutes)
-                active_bonus = {
-                    'bonus_percent': bonus_percent,
-                    'source': 'bits',
-                    'start_at': now.isoformat(),
-                    'end_at': end_at.isoformat(),
-                }
-                team['active_bonus'] = active_bonus
-                team.setdefault('bonus_windows', []).append({
-                    'bonus_percent': bonus_percent,
-                    'source': 'bits',
-                    'start_at': now.isoformat(),
-                    'end_at': end_at.isoformat(),
-                    'trigger_bits': threshold,
-                })
+            bonus_percent = configured_bonus_percent or self._choose_bonus_percent()
+            end_at = now + timedelta(minutes=duration_minutes)
+            active_bonus = {
+                'bonus_percent': bonus_percent,
+                'source': 'bits',
+                'start_at': now.isoformat(),
+                'end_at': end_at.isoformat(),
+            }
+            team['active_bonus'] = active_bonus
+            team.setdefault('bonus_windows', []).append({
+                'bonus_percent': bonus_percent,
+                'source': 'bits',
+                'start_at': now.isoformat(),
+                'end_at': end_at.isoformat(),
+                'trigger_bits': threshold,
+            })
 
             resolved_bonus_percent = _resolve_team_bonus_percent(active_bonus, bonus_percent)
             team['active_bonus_label'] = f"⚡+{resolved_bonus_percent}%"
@@ -13023,7 +13110,11 @@ class Bot(commands.Bot):
         else:
             tep_state = "TEP: charging"
 
-        bits_state = "Bits: ready" if bits_bank >= bits_threshold else "Bits: charging"
+        bits_enabled = parse_boolean_token(config.get_setting('teams_bits_bonus_enabled'), default=True)
+        tep_enabled = parse_boolean_token(config.get_setting('teams_tep_bonus_enabled'), default=True)
+        bits_state = "Bits: disabled" if not bits_enabled else ("Bits: ready" if bits_bank >= bits_threshold else "Bits: charging")
+        if not tep_enabled:
+            tep_state = "TEP: bonus disabled"
         msg = (
             f"{team_name} bonus progress | "
             f"Bits {bits_bank:,}/{bits_threshold:,} ({bits_pct}%) | "
