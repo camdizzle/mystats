@@ -1815,6 +1815,16 @@ def _get_current_team_bonus(team, now=None):
         return None, stale_label
 
     changed = False
+    source = str(active.get('source') or 'bits').lower()
+    if source == 'bits' and not parse_boolean_token(config.get_setting('teams_bits_bonus_enabled'), default=True):
+        team['active_bonus'] = None
+        team['active_bonus_label'] = None
+        return None, True
+    if source == 'tep' and not parse_boolean_token(config.get_setting('teams_tep_bonus_enabled'), default=True):
+        team['active_bonus'] = None
+        team['active_bonus_label'] = None
+        return None, True
+
     if 'bonus_percent' not in active:
         active['bonus_percent'] = _resolve_team_bonus_percent(active, 0)
         changed = True
@@ -1958,9 +1968,15 @@ def _record_live_team_points_rows(channel_name, rows):
                 active_bonus = team.get('active_bonus') if isinstance(team.get('active_bonus'), dict) else None
                 bonus_percent = 0
                 if active_bonus:
+                    bonus_source = str(active_bonus.get('source') or 'bits').lower()
+                    source_enabled = True
+                    if bonus_source == 'bits':
+                        source_enabled = parse_boolean_token(config.get_setting('teams_bits_bonus_enabled'), default=True)
+                    elif bonus_source == 'tep':
+                        source_enabled = parse_boolean_token(config.get_setting('teams_tep_bonus_enabled'), default=True)
                     start_at = _parse_iso_datetime(active_bonus.get('start_at'))
                     end_at = _parse_iso_datetime(active_bonus.get('end_at'))
-                    if start_at and end_at and start_at <= ts <= end_at:
+                    if source_enabled and start_at and end_at and start_at <= ts <= end_at:
                         bonus_percent = _resolve_team_bonus_percent(active_bonus, 0)
 
                 sub_bonus = int(round(base_points * 0.10)) if bool(user_meta.get('is_subscriber')) else 0
