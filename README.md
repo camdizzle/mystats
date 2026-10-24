@@ -12,6 +12,18 @@ This README is the single quick-reference guide for using **MyStats** in its cur
 - Event Management
 - Overlays
 - Dashboards
+- Desktop Tools: chat pause/preview, searchable history, records/goals, support reports, and settings backup
+
+### Desktop Tools
+Open **Tools & History** in the sidebar or Edit menu.
+
+- **Chat:** pause outgoing messages for 5/15/30/60 minutes or until resumed. Preview-only mode suppresses sends while displaying attempted messages. Session controls reset on restart; resume also respects saved master/category switches. The newest 200 delivery attempts stay in memory. Attempts blocked before the common sender, including some disabled commands, will not appear. Select an attempt to inspect its message/reason, or preview a sample without sending it. Blocked messages are not queued for later replay.
+- **History:** refresh current-season Race/BR/Tilt results, filter by player, type, and inclusive date range, then export all matching rows. The desktop table shows the newest 1,000 matches. Tilt exports contain dates but no event timestamps. Searches run in the background. Blank player/date fields include all matching history.
+- **Records & Goals:** view each player's strictly improving single-event score records, optionally filtered by exact login/display name. Track up to 50 goals using player login, event type, and target score. Goals use the current season's highest single-event score, not cumulative points. Refresh History to update records/progress. The newest 500 records are displayed; equal scores are not new records. Tilt records within a day follow export row order. Goals are saved locally in `desktop_goals.json`.
+- **Support:** refresh/copy/save a troubleshooting report with diagnostic status, runtime information, and up to 100 warning/error contexts from this session. Error contexts contain time, severity, function and exception type; raw messages, tracebacks, credentials and chat contents are omitted. Local paths are included. Reports can also be saved from Settings → Diagnostics.
+- **Settings Backup:** export applied portable preferences to JSON. Restore validates the file, shows every change for review, and saves atomically after confirmation. Close Settings before restoring and restart afterward. Credentials, channel identity, data paths, audio devices/files, teams, history, goals and progress are excluded. Unsupported themes or invalid values prevent restoration.
+
+Desktop notifications reuse one persistent MyStats tray icon. If tray notifications are unavailable, MyStats displays an in-app alert. Update-download progress remains in its progress window rather than generating repeated tray alerts.
 
 ---
 

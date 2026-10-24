@@ -67,31 +67,7 @@ try:
 except ImportError:
     pystray = None
 
-try:
-    with warnings.catch_warnings():
-        warnings.filterwarnings(
-            "ignore",
-            message=r"pkg_resources is deprecated as an API.*",
-            category=UserWarning,
-        )
-        from win10toast import ToastNotifier
-except ImportError:
-    ToastNotifier = None
 
-def create_windows_toaster():
-    if ToastNotifier is None:
-        return None
-
-    class CompatibleToastNotifier(ToastNotifier):
-        def on_destroy(self, hwnd, msg, wparam, lparam):
-            # win10toast returns None here; a Windows WNDPROC must return an integer.
-            try:
-                super().on_destroy(hwnd, msg, wparam, lparam)
-            except Exception:
-                logging.getLogger('mystats').warning('Windows toast cleanup failed', exc_info=True)
-            return 0
-
-    return CompatibleToastNotifier()
 
 
 # Optional file notifications stay embedded for single-file builds.
@@ -276,7 +252,6 @@ tray_icon = None
 tray_thread = None
 tray_queue = queue.Queue()
 is_forced_exit = False
-win_toaster = create_windows_toaster()
 is_hiding_to_tray = False
 tray_hint_toast_shown = False
 channel_prompted_this_session = False
@@ -451,6 +426,30 @@ _log_file_handler.setFormatter(
 )
 logger.addHandler(_log_file_handler)
 logger.setLevel(logging.INFO)
+
+
+class SupportErrorHistory(logging.Handler):
+    """Keep error context without log messages, arguments, tokens or chat text."""
+    def __init__(self):
+        super().__init__(logging.WARNING)
+        self.entries = []
+
+    def emit(self, record):
+        exception = record.exc_info[0].__name__ if record.exc_info and record.exc_info[0] else 'No exception details'
+        self.entries.append(f'{datetime.fromtimestamp(record.created):%Y-%m-%d %H:%M:%S} '
+                            f'{record.levelname} · {record.funcName} · {exception}')
+        del self.entries[:-100]
+
+    def snapshot(self):
+        self.acquire()
+        try:
+            return list(self.entries)
+        finally:
+            self.release()
+
+
+support_errors = SupportErrorHistory()
+logger.addHandler(support_errors)
 
 _RAW_CSV_READER = csv.reader
 
@@ -1172,7 +1171,9 @@ def _drain_tray_queue():
         except queue.Empty:
             break
 
-        if command == "show":
+        if isinstance(command, tuple) and command[0] == 'notify':
+            deliver_windows_notification(*command[1:])
+        elif command == "show":
             restore_from_tray()
         elif command == "dashboard":
             open_dashboard()
@@ -5020,21 +5021,46 @@ def open_mycycle_leaderboard_window(parent_window, initial_session_id=None):
 
 CHAT_DELIVERY_LOCK = threading.Lock()
 CHAT_DELIVERY = {'sent': 0, 'blocked': 0, 'failed': 0, 'last': 'No messages attempted'}
+CHAT_SESSION = {'pause_until': 0.0, 'preview_only': False, 'history': []}
 
 
-def record_chat_delivery(status, category):
+def record_chat_delivery(status, category, message='', reason=''):
     with CHAT_DELIVERY_LOCK:
         CHAT_DELIVERY[status] += 1
         CHAT_DELIVERY['last'] = f"{datetime.now().strftime('%H:%M:%S')} - {category or 'uncategorized'}: {status}"
+        CHAT_SESSION['history'].append((datetime.now().strftime('%H:%M:%S'), category or 'Other',
+                                        status, reason, str(message)))
+        del CHAT_SESSION['history'][:-200]
 
 
-def chat_delivery_allowed(category=None, feature_setting=None):
+def chat_session_status():
+    with CHAT_DELIVERY_LOCK:
+        remaining = CHAT_SESSION['pause_until'] - time.monotonic()
+        if remaining > 0:
+            return 'Paused until resumed' if math.isinf(remaining) else f'Paused · {math.ceil(remaining / 60)} min remaining'
+        return 'Preview only' if CHAT_SESSION['preview_only'] else 'Enabled'
+
+
+def chat_block_reason(category=None, feature_setting=None):
+    with CHAT_DELIVERY_LOCK:
+        if CHAT_SESSION['pause_until'] > time.monotonic():
+            return 'Temporary chat pause'
+        if CHAT_SESSION['preview_only']:
+            return 'Preview only · message was not sent'
+    if not is_chat_response_enabled('chat_messages_enabled'):
+        return 'Master outgoing-chat switch is off'
     category_map = {'race': 'chat_race_results', 'br': 'chat_br_results',
                     'tilt': 'chat_tilt_results', 'mystats': 'chat_all_commands',
                     'team': 'chat_team_announcements'}
-    return (is_chat_response_enabled('chat_messages_enabled')
-            and (category not in category_map or is_chat_response_enabled(category_map[category]))
-            and (not feature_setting or is_chat_response_enabled(feature_setting)))
+    if category in category_map and not is_chat_response_enabled(category_map[category]):
+        return f'{category.title()} messages are disabled'
+    if feature_setting and not is_chat_response_enabled(feature_setting):
+        return f'{feature_setting.replace("_", " ")} is disabled'
+    return ''
+
+
+def chat_delivery_allowed(category=None, feature_setting=None):
+    return not chat_block_reason(category, feature_setting)
 
 
 def build_diagnostics_report():
@@ -5053,7 +5079,7 @@ def build_diagnostics_report():
     with CHAT_DELIVERY_LOCK:
         delivery = dict(CHAT_DELIVERY)
     lines = [f'MyStats {version} - Diagnostics ({now})', '',
-             f'Twitch: {getattr(bot, "_diagnostic_connection", "Not connected")}',
+             f'Twitch: {getattr(globals().get("bot"), "_diagnostic_connection", "Not connected")}',
              f'File monitoring: {monitor}',
              f'Monitor error: {file_changes._last_error or "None"}',
              f'Dashboard: http://127.0.0.1:{_load_overlay_server_port()}/dashboard',
@@ -5084,8 +5110,9 @@ def build_diagnostics_report():
 
 
 async def send_chat_message(channel, message, category=None, apply_delay=False, feature_setting=None):
-    if not chat_delivery_allowed(category, feature_setting):
-        record_chat_delivery('blocked', category)
+    reason = chat_block_reason(category, feature_setting)
+    if reason:
+        record_chat_delivery('blocked', category, translate_chat_message(message), reason)
         return False
     if apply_delay and config.get_setting('announcedelay') == 'True':
         try:
@@ -5093,16 +5120,18 @@ async def send_chat_message(channel, message, category=None, apply_delay=False, 
         except ValueError:
             await asyncio.sleep(0)
     # Settings may change while a message is waiting.
-    if not chat_delivery_allowed(category, feature_setting):
-        record_chat_delivery('blocked', category)
+    reason = chat_block_reason(category, feature_setting)
+    if reason:
+        record_chat_delivery('blocked', category, translate_chat_message(message), reason)
         return False
     try:
-        await channel.send(translate_chat_message(message))
-        record_chat_delivery('sent', category)
+        rendered = translate_chat_message(message)
+        await channel.send(rendered)
+        record_chat_delivery('sent', category, rendered)
         logger.info("Chat message sent (category=%s)", category)
         return True
     except Exception as e:
-        record_chat_delivery('failed', category)
+        record_chat_delivery('failed', category, message, type(e).__name__)
         logger.exception(f"Failed to send chat message ({category}): {e}")
         return False
 
@@ -7397,6 +7426,612 @@ def settings_validation_errors(values):
     return errors
 
 
+def atomic_desktop_json(path, payload):
+    """Commit user data without leaving a partially written destination."""
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=os.path.dirname(os.path.abspath(path)),
+                                         prefix='.mystats-', suffix='.tmp', delete=False) as stream:
+            temporary = stream.name
+            json.dump(payload, stream, ensure_ascii=False, indent=2)
+            stream.write('\n')
+        os.replace(temporary, path)
+    finally:
+        if temporary and os.path.exists(temporary):
+            os.remove(temporary)
+
+
+def portable_preference_keys():
+    excluded = {'tilt_lifetime_base_xp', 'tilt_season_best_level', 'tilt_personal_best_level'}
+    keys = set(SETTINGS_NUMBER_BOUNDS) - excluded
+    keys.update({'UI_THEME', 'minimize_to_tray', 'windows_tray_notifications', 'chunk_alert', 'reset_audio',
+                 'announcedelay', 'teams_enabled', 'teams_points_mode', 'teams_bits_bonus_enabled',
+                 'teams_tep_bonus_enabled', 'season_quests_enabled', 'rivals_enabled', 'mycycle_enabled',
+                 'mycycle_announcements_enabled', 'mycycle_include_br', 'tiltdeath_min_levels', 'tilt_overlay_theme'})
+    for key in config.defaults:
+        if key.startswith(('chat_', 'narrative_alert_', 'race_narrative_', 'overlay_')) and key != 'overlay_active_mode':
+            keys.add(key)
+    return keys & config.persistent_keys
+
+
+def create_preferences_backup():
+    with config._settings_lock:
+        preferences = {key: config.get_setting(key) for key in sorted(portable_preference_keys())
+                       if config.get_setting(key) is not None}
+    return {'format': 'mystats-preferences', 'schema': 1, 'version': version,
+            'created_at': datetime.now().isoformat(timespec='seconds'), 'preferences': preferences}
+
+
+def prepare_preferences_restore(payload):
+    if not isinstance(payload, dict) or payload.get('format') != 'mystats-preferences' or payload.get('schema') != 1:
+        raise ValueError('Choose a MyStats preferences backup with a supported format.')
+    preferences = payload.get('preferences')
+    if not isinstance(preferences, dict) or not preferences:
+        raise ValueError('The backup has no preferences.')
+    if set(preferences) - portable_preference_keys():
+        raise ValueError('The backup contains unsupported settings. Credentials, paths and progress cannot be restored here.')
+    values = {}
+    for key, value in preferences.items():
+        if not isinstance(value, (str, int, bool)) or len(str(value)) > 512 or '\n' in str(value) or '\r' in str(value):
+            raise ValueError(f'Invalid value for {key}.')
+        value = str(value).strip()
+        default = str(config.defaults.get(key, ''))
+        if default in ('True', 'False'):
+            if value.lower() not in ('true', 'false'):
+                raise ValueError(f'{key} must be enabled or disabled.')
+            value = str(value.lower() == 'true')
+        if key == 'UI_THEME' and value not in app_style.theme_names():
+            raise ValueError(f'The theme {value} is unavailable on this installation.')
+        values[key] = value
+    errors = settings_validation_errors(values)
+    if errors:
+        raise ValueError('\n'.join(f'{key}: {error}' for key, error in errors.items()))
+    return values
+
+
+def build_support_report():
+    errors = support_errors.snapshot()
+    return (build_diagnostics_report() + f'\n\nRuntime: Python {sys.version.split()[0]} · {sys.platform}'
+            f'\nPackaged executable: {bool(getattr(sys, "frozen", False))}'
+            f'\nTheme: {config.get_setting("UI_THEME") or "Default"}'
+            f'\nSession chat: {chat_session_status()}'
+            '\n\nRecent warning/error contexts (this session; newest last):\n' +
+            ('\n'.join(errors) if errors else 'None recorded this session.') +
+            '\n\nError messages, tracebacks, credentials and chat contents are deliberately omitted.\n')
+
+
+def save_support_report(parent=None):
+    path = filedialog.asksaveasfilename(parent=parent or root, title='Save troubleshooting report',
+                                      defaultextension='.txt', initialfile='MyStats-support.txt',
+                                      filetypes=[('Text report', '*.txt')])
+    if not path:
+        return
+    try:
+        Path(path).write_text(build_support_report(), encoding='utf-8')
+    except OSError as exc:
+        messagebox.showerror('Report not saved', str(exc), parent=parent or root)
+
+
+def read_desktop_history(directory):
+    """Read current-season player results. Tilt exports have day precision only."""
+    history = []
+    skipped = 0
+    if not directory or not os.path.isdir(directory):
+        return history, skipped
+    for pattern in ('allraces_*.csv', 'tilts_*.csv'):
+        for path in sorted(glob.glob(os.path.join(directory, pattern))):
+            day_match = re.search(r'(\d{4}-\d{2}-\d{2})', os.path.basename(path))
+            day = day_match.group(1) if day_match else ''
+            try:
+                # Existing encoding detection supports older Windows CSV exports.
+                rows = list(_load_csv_rows_with_detection(path))
+            except (OSError, UnicodeError, csv.Error):
+                skipped += 1
+                continue
+            for row in rows:
+                try:
+                    if pattern.startswith('allraces'):
+                        if len(row) < 6 or row[4].strip().upper() not in ('RACE', 'BR'):
+                            continue
+                        kind = 'Race' if row[4].strip().upper() == 'RACE' else 'BR'
+                        points = int(float(row[3]))
+                        position = str(row[0]).strip()
+                        stamp = str(row[5]).strip()
+                        player, display = str(row[1]).strip(), str(row[2]).strip()
+                        level = ''
+                    else:
+                        parsed = parse_tilt_result_row(row)
+                        if not parsed or not day:
+                            continue
+                        player, points, run_id = parsed
+                        display = str(row[3]).strip()
+                        kind, position, stamp, level = 'Tilt', '', day, str(row[1]).strip()
+                    if not player:
+                        continue
+                    parsed_date = _parse_allraces_timestamp(stamp)
+                    if parsed_date is None:
+                        skipped += 1
+                        continue
+                    history.append({'timestamp': stamp, 'day': parsed_date.strftime('%Y-%m-%d'),
+                                    'player': player, 'display': display or player, 'kind': kind,
+                                    'points': points, 'position': position, 'level': level})
+                except (ValueError, TypeError, IndexError, OverflowError):
+                    skipped += 1
+    history.sort(key=lambda row: (row['day'], row['timestamp']))
+    return history, skipped
+
+
+def filter_desktop_history(history, player='', kind='All', start='', end=''):
+    for value in (start, end):
+        if value and (not re.fullmatch(r'\d{4}-\d{2}-\d{2}', value) or datetime.strptime(value, '%Y-%m-%d').strftime('%Y-%m-%d') != value):
+            raise ValueError('Dates must use YYYY-MM-DD.')
+    if start and end and start > end:
+        raise ValueError('The start date must be on or before the end date.')
+    needle = player.strip().casefold()
+    return [row for row in history if (not needle or needle in row['player'].casefold() or needle in row['display'].casefold())
+            and (kind == 'All' or row['kind'] == kind)
+            and (not start or row['day'] >= start) and (not end or row['day'] <= end)]
+
+
+def desktop_record_progress(history, player=''):
+    """Emit only strict improvements, grouping every player's score by event type."""
+    best = {}
+    records = []
+    for row in sorted(history, key=lambda item: (item['day'], item['timestamp'])):
+        if player and player.casefold() not in (row['player'].casefold(), row['display'].casefold()):
+            continue
+        key = (row['player'].casefold(), row['kind'])
+        previous_best = best.get(key, 0)
+        if row['points'] > previous_best:
+            best[key] = row['points']
+            records.append(dict(row, improvement=row['points'] - previous_best))
+    return records
+
+
+def load_desktop_goals():
+    path = appdata_path('desktop_goals.json')
+    if not os.path.exists(path):
+        return []
+    payload = json.loads(Path(path).read_text(encoding='utf-8'))
+    goals = payload.get('goals') if isinstance(payload, dict) and payload.get('schema') == 1 else None
+    if not isinstance(goals, list) or len(goals) > 50:
+        raise ValueError('The goals file is invalid. Your existing file has been preserved.')
+    for goal in goals:
+        if (not isinstance(goal, dict) or not isinstance(goal.get('player'), str) or not goal['player'].strip()
+                or goal.get('kind') not in ('Race', 'BR', 'Tilt') or type(goal.get('target')) is not int
+                or not 1 <= goal['target'] <= 1000000000):
+            raise ValueError('The goals file contains an invalid goal. Your existing file has been preserved.')
+    return goals
+
+
+def goal_progress(goal, history):
+    best = max((row['points'] for row in history if row['kind'] == goal['kind']
+                and row['player'].casefold() == goal['player'].casefold()), default=0)
+    return best, min(100.0, best * 100.0 / goal['target'])
+
+
+def spreadsheet_safe_cell(value):
+    text = str(value)
+    return "'" + text if text.lstrip().startswith(('=', '+', '-', '@')) else text
+
+
+def export_desktop_history(path, rows):
+    with open(path, 'w', newline='', encoding='utf-8-sig') as stream:
+        writer = csv.writer(stream)
+        writer.writerow(('Timestamp', 'Player', 'Display name', 'Event', 'Points', 'Position', 'Tilt level'))
+        for row in rows:
+            writer.writerow([spreadsheet_safe_cell(row[key]) for key in
+                             ('timestamp', 'player', 'display', 'kind', 'points', 'position', 'level')])
+
+
+def open_desktop_tools(initial_tab='Chat'):
+    existing = getattr(root, '_desktop_tools', None)
+    if existing is not None and existing.winfo_exists():
+        existing._tools_notebook.select(existing._tools_pages[initial_tab])
+        existing.lift()
+        return
+    window = tk.Toplevel(root)
+    root._desktop_tools = window
+    window.title('MyStats · Tools')
+    window.transient(root)
+    width, height = min(1120, window.winfo_screenwidth() - 60), min(760, window.winfo_screenheight() - 100)
+    center_toplevel(window, width, height)
+    window.minsize(min(900, width), min(620, height))
+    window.grid_rowconfigure(0, weight=1)
+    window.grid_columnconfigure(0, weight=1)
+    notebook = ttk.Notebook(window, style='Main.TNotebook')
+    notebook.grid(row=0, column=0, sticky='nsew', padx=12, pady=12)
+    pages = {}
+    for title in ('Chat', 'History', 'Records & Goals', 'Support', 'Settings Backup'):
+        page = ttk.Frame(notebook, style='App.TFrame', padding=12)
+        notebook.add(page, text=title)
+        page.grid_columnconfigure(0, weight=1)
+        pages[title] = page
+    window._tools_notebook, window._tools_pages = notebook, pages
+    notebook.select(pages[initial_tab])
+    timer_ids = {}
+
+    def close_tools():
+        for identifier in timer_ids.values():
+            window.after_cancel(identifier)
+        root._desktop_tools = None
+        window.destroy()
+
+    window.protocol('WM_DELETE_WINDOW', close_tools)
+
+    def table(parent, row, columns, headings, height=8):
+        frame = ttk.Frame(parent)
+        frame.grid(row=row, column=0, sticky='nsew', pady=6)
+        frame.grid_columnconfigure(0, weight=1)
+        frame.grid_rowconfigure(0, weight=1)
+        tree = ttk.Treeview(frame, columns=columns, show='headings', height=height, style='Activity.Treeview')
+        for key, title in zip(columns, headings):
+            tree.heading(key, text=title)
+            tree.column(key, width=100, minwidth=50, stretch=True)
+        tree.grid(row=0, column=0, sticky='nsew')
+        scroll = ttk.Scrollbar(frame, orient='vertical', command=tree.yview)
+        scroll.grid(row=0, column=1, sticky='ns')
+        tree.configure(yscrollcommand=scroll.set)
+        return tree
+
+    chat = pages['Chat']
+    chat.grid_rowconfigure(3, weight=1)
+    chat_status = tk.StringVar()
+    ttk.Label(chat, textvariable=chat_status, style='Heading.TLabel').grid(row=0, column=0, sticky='w')
+    controls = ttk.Frame(chat)
+    controls.grid(row=1, column=0, sticky='ew', pady=8)
+    pause_duration = tk.StringVar(value='15 minutes')
+    ttk.Combobox(controls, textvariable=pause_duration, values=('5 minutes', '15 minutes', '30 minutes', '60 minutes', 'Until resumed'),
+                 state='readonly', width=15).pack(side='left', padx=(0, 8))
+
+    def pause_chat():
+        with CHAT_DELIVERY_LOCK:
+            CHAT_SESSION['pause_until'] = (float('inf') if pause_duration.get() == 'Until resumed'
+                                           else time.monotonic() + int(pause_duration.get().split()[0]) * 60)
+
+    def resume_chat():
+        with CHAT_DELIVERY_LOCK:
+            CHAT_SESSION['pause_until'] = 0.0
+
+    ttk.Button(controls, text='Pause chat', command=pause_chat).pack(side='left', padx=(0, 8))
+    ttk.Button(controls, text='Resume', command=resume_chat).pack(side='left', padx=(0, 12))
+    with CHAT_DELIVERY_LOCK:
+        preview_mode = tk.BooleanVar(value=CHAT_SESSION['preview_only'])
+
+    def set_preview():
+        with CHAT_DELIVERY_LOCK:
+            CHAT_SESSION['preview_only'] = preview_mode.get()
+
+    ttk.Checkbutton(controls, text='Preview only · send nothing', variable=preview_mode, command=set_preview).pack(side='left')
+    ttk.Label(chat, text='Session controls take effect immediately and reset on restart. Blocked messages are never replayed.\n'
+              'Delivery history shows attempts reaching the common send helper; some disabled commands are filtered earlier.',
+              wraplength=820, style='Small.TLabel').grid(row=2, column=0, sticky='w', pady=6)
+    deliveries = table(chat, 3, ('time', 'category', 'outcome', 'reason'), ('Time', 'Category', 'Outcome', 'Reason'), 6)
+    deliveries.column('reason', width=400)
+    preview_text = tk.Text(chat, height=4, wrap='word')
+    preview_text.grid(row=4, column=0, sticky='ew', pady=8)
+    preview_text.insert('1.0', 'Select a delivery attempt to see its message, or type a sample below.')
+    preview_text.configure(state='disabled')
+    sample = ttk.Frame(chat)
+    sample.grid(row=5, column=0, sticky='ew')
+    sample.grid_columnconfigure(0, weight=1)
+    sample_text = tk.StringVar(value='✅ End of Tilt Level 8 | Points Earned: 100')
+    ttk.Entry(sample, textvariable=sample_text).grid(row=0, column=0, sticky='ew', padx=(0, 8))
+
+    def show_preview(text):
+        preview_text.configure(state='normal')
+        preview_text.delete('1.0', 'end')
+        preview_text.insert('1.0', text)
+        preview_text.configure(state='disabled')
+
+    ttk.Button(sample, text='Preview text', command=lambda: show_preview(translate_chat_message(sample_text.get()))).grid(row=0, column=1)
+    chat_rows = []
+    previous_chat_rows = []
+
+    def selected_delivery(event=None):
+        selected = deliveries.selection()
+        if selected:
+            index = int(selected[0])
+            entry = chat_rows[index]
+            show_preview(f'{entry[2].title()} · {entry[3] or "Delivered"}\n\n{entry[4]}')
+
+    deliveries.bind('<<TreeviewSelect>>', selected_delivery)
+
+    def refresh_chat():
+        if not window.winfo_exists():
+            return
+        saved = 'Master switch off' if not is_chat_response_enabled('chat_messages_enabled') else chat_session_status()
+        chat_status.set(f'Outgoing chat · {saved}')
+        with CHAT_DELIVERY_LOCK:
+            current = list(reversed(CHAT_SESSION['history']))
+        if current != previous_chat_rows:
+            selected = deliveries.selection()
+            selected_row = chat_rows[int(selected[0])] if selected and int(selected[0]) < len(chat_rows) else None
+            deliveries.delete(*deliveries.get_children())
+            chat_rows[:] = current
+            previous_chat_rows[:] = current
+            for index, entry in enumerate(current):
+                deliveries.insert('', 'end', iid=str(index), values=entry[:4])
+            if selected_row in current:
+                deliveries.selection_set(str(current.index(selected_row)))
+        timer_ids['chat'] = window.after(500, refresh_chat)
+
+    refresh_chat()
+
+    history_page = pages['History']
+    history_page.grid_rowconfigure(3, weight=1)
+    ttk.Label(history_page, text='Search season results', style='Heading.TLabel').grid(row=0, column=0, sticky='w')
+    filters = ttk.Frame(history_page)
+    filters.grid(row=1, column=0, sticky='ew', pady=10)
+    player_filter, kind_filter, start_filter, end_filter = (tk.StringVar(value=value) for value in ('', 'All', '', ''))
+    for column, (title, variable, size) in enumerate((('Player contains', player_filter, 20), ('Event', kind_filter, 8),
+                                                    ('From YYYY-MM-DD', start_filter, 12), ('To YYYY-MM-DD', end_filter, 12))):
+        ttk.Label(filters, text=title).grid(row=0, column=column, sticky='w', padx=(0, 10))
+        widget = (ttk.Combobox(filters, textvariable=variable, values=('All', 'Race', 'BR', 'Tilt'), state='readonly', width=size)
+                  if variable is kind_filter else ttk.Entry(filters, textvariable=variable, width=size))
+        widget.grid(row=1, column=column, sticky='ew', padx=(0, 10))
+        filters.grid_columnconfigure(column, weight=1)
+    history_actions = ttk.Frame(history_page)
+    history_actions.grid(row=2, column=0, sticky='ew')
+    results_tree = table(history_page, 3, ('time', 'player', 'kind', 'points', 'place', 'level'),
+                         ('Timestamp', 'Player', 'Event', 'Points', 'Place', 'Tilt level'))
+    results_tree.column('time', width=180)
+    history_status = tk.StringVar(value='Refresh to load current-season history.')
+    ttk.Label(history_page, textvariable=history_status, wraplength=820, style='Small.TLabel').grid(row=4, column=0, sticky='w')
+    ttk.Label(history_page, text='Tilt timestamps show the export day only. The table displays the newest 1,000 matches; CSV includes all matches.',
+              wraplength=820, style='Small.TLabel').grid(row=5, column=0, sticky='w', pady=(6, 0))
+    history_state = {'rows': [], 'filtered': [], 'busy': False}
+    jobs = queue.Queue()
+
+    def export_history():
+        if history_state['busy']:
+            return
+        path = filedialog.asksaveasfilename(parent=window, title='Export matching results', initialfile='MyStats-history.csv',
+                                          defaultextension='.csv', filetypes=[('CSV', '*.csv')])
+        if path:
+            try:
+                export_desktop_history(path, history_state['filtered'])
+                history_status.set(f'Exported {len(history_state["filtered"]):,} matching results.')
+            except OSError as exc:
+                messagebox.showerror('Export failed', str(exc), parent=window)
+
+    def search_history(reload=False):
+        if history_state['busy']:
+            return
+        query = (player_filter.get().strip(), kind_filter.get(), start_filter.get().strip(), end_filter.get().strip())
+        try:
+            filter_desktop_history([], *query)
+        except ValueError as exc:
+            messagebox.showerror('Check dates', str(exc), parent=window)
+            return
+        directory = config.get_setting('directory') or ''
+        history_state['busy'] = True
+        for button in history_buttons:
+            button.state(['disabled'])
+        history_status.set('Reading season history…')
+
+        def work():
+            try:
+                rows, skipped = read_desktop_history(directory) if reload else (history_state['rows'], 0)
+                filtered = filter_desktop_history(rows, *query)
+                records = desktop_record_progress(rows)
+                jobs.put(('history', (rows, filtered, records, skipped, query)))
+            except Exception as exc:
+                logger.warning('History search failed', exc_info=True)
+                jobs.put(('error', type(exc).__name__))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    history_buttons = [ttk.Button(history_actions, text='Refresh history', command=lambda: search_history(True)),
+                       ttk.Button(history_actions, text='Apply filters', command=search_history),
+                       ttk.Button(history_actions, text='Export matches', command=export_history)]
+    for button in history_buttons:
+        button.pack(side='left', padx=(0, 8))
+
+    records_page = pages['Records & Goals']
+    records_page.grid_rowconfigure(2, weight=1)
+    records_page.grid_rowconfigure(6, weight=1)
+    ttk.Label(records_page, text='Personal records & goals', style='Heading.TLabel').grid(row=0, column=0, sticky='w')
+    record_actions = ttk.Frame(records_page)
+    record_actions.grid(row=1, column=0, sticky='ew', pady=6)
+    record_player = tk.StringVar()
+    ttk.Label(record_actions, text='Exact player (blank = all): ').pack(side='left')
+    ttk.Entry(record_actions, textvariable=record_player, width=20).pack(side='left', padx=(0, 8))
+    record_tree = table(records_page, 2, ('date', 'player', 'kind', 'best', 'gain'), ('Date', 'Player', 'Event', 'New best', 'Improvement'), 4)
+    records_status = tk.StringVar(value='Refresh history to load records and goal progress.')
+    ttk.Label(records_page, textvariable=records_status, style='Small.TLabel', wraplength=820).grid(row=3, column=0, sticky='w')
+    goal_controls = ttk.Frame(records_page)
+    goal_controls.grid(row=4, column=0, sticky='ew', pady=(10, 6))
+    goal_player, goal_kind, goal_target = tk.StringVar(), tk.StringVar(value='Race'), tk.StringVar(value='1000')
+    for index, (label, variable, size) in enumerate((('Player login', goal_player, 18), ('Score type', goal_kind, 8), ('Target points', goal_target, 12))):
+        ttk.Label(goal_controls, text=label).grid(row=0, column=index, sticky='w', padx=(0, 8))
+        widget = (ttk.Combobox(goal_controls, textvariable=variable, values=('Race', 'BR', 'Tilt'), state='readonly', width=size)
+                  if variable is goal_kind else ttk.Entry(goal_controls, textvariable=variable, width=size))
+        widget.grid(row=1, column=index, sticky='w', padx=(0, 8))
+    ttk.Label(records_page, text='Goals track a player’s highest single-event score in the current season, not cumulative points.\n'
+              'Equal scores are not new records. Tilt records on the same day follow export row order.',
+              style='Small.TLabel', wraplength=820).grid(row=5, column=0, sticky='w')
+    goal_tree = table(records_page, 6, ('player', 'kind', 'target', 'best', 'progress'),
+                      ('Player', 'Score type', 'Target', 'Current best', 'Progress'), 3)
+    cached_records = []
+
+    def render_records():
+        needle = record_player.get().strip().casefold()
+        records = [row for row in cached_records if not needle or needle in (row['player'].casefold(), row['display'].casefold())]
+        record_tree.delete(*record_tree.get_children())
+        for row in reversed(records[-500:]):
+            record_tree.insert('', 'end', values=(row['timestamp'], row['display'], row['kind'], f'{row["points"]:,}', f'+{row["improvement"]:,}'))
+        records_status.set(f'{len(records):,} score records in current-season history. Showing newest 500. Refresh History for new results.')
+        goal_tree.delete(*goal_tree.get_children())
+        try:
+            for index, goal in enumerate(load_desktop_goals()):
+                best, progress = goal_progress(goal, history_state['rows'])
+                goal_tree.insert('', 'end', iid=str(index), values=(goal['player'], goal['kind'], f'{goal["target"]:,}',
+                                  f'{best:,}', 'Achieved' if progress >= 100 else f'{progress:.1f}%'))
+        except (OSError, ValueError, TypeError) as exc:
+            records_status.set(str(exc))
+
+    def save_goal(remove=False):
+        try:
+            goals = load_desktop_goals()
+            if remove:
+                selected = goal_tree.selection()
+                if not selected:
+                    return
+                goals.pop(int(selected[0]))
+            else:
+                player = goal_player.get().strip().lower().lstrip('@')
+                if not re.fullmatch(r'[a-z0-9_]{1,25}', player):
+                    raise ValueError('Enter the player’s Twitch login (letters, numbers, underscores).')
+                raw_target = goal_target.get().strip()
+                if not re.fullmatch(r'[0-9]+', raw_target) or not 1 <= int(raw_target) <= 1000000000:
+                    raise ValueError('Target points must be from 1 to 1,000,000,000.')
+                if len(goals) >= 50:
+                    raise ValueError('You can track up to 50 goals.')
+                goals.append({'player': player, 'kind': goal_kind.get(), 'target': int(raw_target)})
+            atomic_desktop_json(appdata_path('desktop_goals.json'), {'schema': 1, 'goals': goals})
+            render_records()
+        except (OSError, ValueError, TypeError, IndexError) as exc:
+            messagebox.showerror('Goal not saved', str(exc), parent=window)
+
+    ttk.Button(record_actions, text='Show records', command=render_records).pack(side='left')
+    ttk.Button(goal_controls, text='Add goal', command=save_goal).grid(row=1, column=3, padx=8)
+    ttk.Button(goal_controls, text='Remove selected', command=lambda: save_goal(True)).grid(row=1, column=4)
+
+    support = pages['Support']
+    support.grid_rowconfigure(2, weight=1)
+    ttk.Label(support, text='Troubleshooting report', style='Heading.TLabel').grid(row=0, column=0, sticky='w')
+    support_actions = ttk.Frame(support)
+    support_actions.grid(row=1, column=0, sticky='w', pady=8)
+    report = tk.Text(support, wrap='word', height=12)
+    report.grid(row=2, column=0, sticky='nsew')
+    report_scroll = ttk.Scrollbar(support, orient='vertical', command=report.yview)
+    report_scroll.grid(row=2, column=1, sticky='ns')
+    report.configure(yscrollcommand=report_scroll.set)
+
+    def refresh_support():
+        report.configure(state='normal')
+        report.delete('1.0', 'end')
+        report.insert('1.0', build_support_report())
+        report.configure(state='disabled')
+
+    def copy_support():
+        refresh_support()
+        window.clipboard_clear()
+        window.clipboard_append(report.get('1.0', 'end-1c'))
+
+    ttk.Button(support_actions, text='Refresh', command=refresh_support).pack(side='left', padx=(0, 8))
+    ttk.Button(support_actions, text='Copy report', command=copy_support).pack(side='left', padx=(0, 8))
+    ttk.Button(support_actions, text='Save report…', command=lambda: save_support_report(window)).pack(side='left')
+    ttk.Label(support, text='Includes local paths and recent error contexts. Credentials, chat contents and raw log messages are excluded.',
+              style='Small.TLabel', wraplength=820).grid(row=3, column=0, sticky='w', pady=8)
+
+    backup = pages['Settings Backup']
+    ttk.Label(backup, text='Take your preferences with you', style='Heading.TLabel').grid(row=0, column=0, sticky='w')
+    ttk.Label(backup, text='Back up applied chat, overlay, theme and feature preferences.\n'
+              'Credentials, channel identity, file paths, audio devices, teams, history, goals and progress are excluded.\n'
+              'Restore shows the changes before saving them. Close Settings first so drafts cannot overwrite a restore.',
+              style='Small.TLabel', wraplength=800).grid(row=1, column=0, sticky='w', pady=12)
+    backup_status = tk.StringVar()
+
+    def backup_preferences():
+        path = filedialog.asksaveasfilename(parent=window, title='Back up preferences', initialfile='MyStats-preferences.json',
+                                          defaultextension='.json', filetypes=[('Preferences backup', '*.json')])
+        if path:
+            try:
+                atomic_desktop_json(path, create_preferences_backup())
+                backup_status.set('Applied preferences backed up successfully.')
+            except (OSError, ValueError) as exc:
+                messagebox.showerror('Backup failed', str(exc), parent=window)
+
+    def restore_preferences():
+        settings = getattr(root, '_settings_window', None)
+        if settings is not None and settings.winfo_exists():
+            messagebox.showinfo('Close Settings first', 'Save or discard your Settings drafts, then close Settings before restoring.', parent=window)
+            return
+        path = filedialog.askopenfilename(parent=window, title='Choose preferences backup', filetypes=[('Preferences backup', '*.json')])
+        if not path:
+            return
+        try:
+            if os.path.getsize(path) > 1024 * 1024:
+                raise ValueError('The preferences backup is unexpectedly large.')
+            values = prepare_preferences_restore(json.loads(Path(path).read_text(encoding='utf-8-sig')))
+            changed = {key: value for key, value in values.items() if str(config.get_setting(key)) != value}
+            if not changed:
+                backup_status.set('These preferences already match your settings.')
+                return
+            review = tk.Toplevel(window)
+            review.title('Review preferences restore')
+            review.transient(window)
+            center_toplevel(review, min(800, width), min(520, height))
+            review.grid_rowconfigure(1, weight=1)
+            review.grid_columnconfigure(0, weight=1)
+            ttk.Label(review, text=f'{len(changed)} preferences will change. Restart MyStats after restoring.', padding=12).grid(row=0, column=0, sticky='w')
+            changes = tk.Text(review, wrap='word', height=15)
+            changes.grid(row=1, column=0, sticky='nsew', padx=12)
+            changes.insert('1.0', '\n'.join(f'{key}: {config.get_setting(key)} → {value}' for key, value in sorted(changed.items())))
+            changes.configure(state='disabled')
+            scrollbar = ttk.Scrollbar(review, orient='vertical', command=changes.yview)
+            scrollbar.grid(row=1, column=1, sticky='ns')
+            changes.configure(yscrollcommand=scrollbar.set)
+            buttons = ttk.Frame(review, padding=12)
+            buttons.grid(row=2, column=0, sticky='e')
+
+            def apply_restore():
+                try:
+                    config.set_settings_batch(changed)
+                except (OSError, ValueError) as exc:
+                    messagebox.showerror('Restore failed', str(exc), parent=review)
+                    return
+                if 'UI_THEME' in changed:
+                    apply_theme(changed['UI_THEME'])
+                backup_status.set('Preferences restored. Restart MyStats to apply all changes.')
+                review.destroy()
+
+            ttk.Button(buttons, text='Cancel', command=review.destroy).pack(side='left', padx=8)
+            ttk.Button(buttons, text='Restore preferences', command=apply_restore).pack(side='left')
+            review.grab_set()
+        except (OSError, ValueError, TypeError) as exc:
+            messagebox.showerror('Cannot restore backup', str(exc), parent=window)
+
+    backup_actions = ttk.Frame(backup)
+    backup_actions.grid(row=2, column=0, sticky='w')
+    ttk.Button(backup_actions, text='Back up preferences…', command=backup_preferences).pack(side='left', padx=(0, 8))
+    ttk.Button(backup_actions, text='Restore preferences…', command=restore_preferences).pack(side='left')
+    ttk.Label(backup, textvariable=backup_status, wraplength=800).grid(row=3, column=0, sticky='w', pady=12)
+
+    def poll_jobs():
+        if not window.winfo_exists():
+            return
+        try:
+            kind, payload = jobs.get_nowait()
+        except queue.Empty:
+            pass
+        else:
+            history_state['busy'] = False
+            for button in history_buttons:
+                button.state(['!disabled'])
+            if kind == 'error':
+                history_status.set(f'History could not be loaded ({payload}). Previous results are kept.')
+            else:
+                rows, filtered, records, skipped, query = payload
+                history_state.update(rows=rows, filtered=filtered)
+                cached_records[:] = records
+                results_tree.delete(*results_tree.get_children())
+                for row in reversed(filtered[-1000:]):
+                    results_tree.insert('', 'end', values=(row['timestamp'], row['display'], row['kind'], f'{row["points"]:,}', row['position'], row['level']))
+                history_status.set(f'{len(filtered):,} matches · player: {query[0] or "all"} · {query[1]} · '
+                                   f'{query[2] or "start"} to {query[3] or "latest"} · {skipped} unreadable files/rows skipped.')
+                render_records()
+        timer_ids['jobs'] = window.after(150, poll_jobs)
+
+    poll_jobs()
+    refresh_support()
+    render_records()
+    search_history(True)
+
+
 def open_settings_window():
     existing = getattr(root, '_settings_window', None)
     if existing is not None and existing.winfo_exists():
@@ -7520,7 +8155,8 @@ def open_settings_window():
         diagnostics_tab.clipboard_append(diagnostic_text.get('1.0', 'end-1c'))
 
     ttk.Button(diagnostic_actions, text="Refresh status", command=refresh_diagnostics).pack(side="left", padx=(0, 8))
-    ttk.Button(diagnostic_actions, text="Copy report", command=copy_diagnostics).pack(side="left")
+    ttk.Button(diagnostic_actions, text="Copy report", command=copy_diagnostics).pack(side="left", padx=(0, 8))
+    ttk.Button(diagnostic_actions, text="Save support report…", command=lambda: save_support_report(settings_window)).pack(side="left")
     diagnostics_sections.bind('<<NotebookTabChanged>>', lambda event: refresh_diagnostics() if diagnostics_sections.select() == str(diagnostics_tab) else None, add='+')
     refresh_diagnostics()
 
@@ -9252,7 +9888,7 @@ def get_overview_statistics(period):
 
 def get_overview_status():
     connection = getattr(globals().get('bot'), '_diagnostic_connection', 'Not connected')
-    chat = 'Enabled' if is_chat_response_enabled('chat_messages_enabled') else 'Paused in Settings'
+    chat = chat_session_status() if is_chat_response_enabled('chat_messages_enabled') else 'Paused in Settings'
     observer = file_changes._observer
     watching = observer is not None and observer.is_alive()
     if watching and not file_changes._last_error:
@@ -9435,6 +10071,8 @@ def build_stats_sidebar(parent):
         style="Primary.TButton"
     )
     dashboards_button.grid(row=1, column=0, columnspan=2, padx=5, pady=(0, 5), sticky='ew')
+    ttk.Button(button_frame, text='Tools & History', command=open_desktop_tools,
+               style='Primary.TButton').grid(row=2, column=0, columnspan=2, padx=5, pady=5, sticky='ew')
 
     events_button = ttk.Button(
         button_frame,
@@ -10271,6 +10909,7 @@ edit_menu = Menu(menu_bar, tearoff=0)
 edit_menu.add_command(label="Settings", command=open_settings)
 edit_menu.add_command(label="Events", command=open_events_window)
 edit_menu.add_command(label="Dashboards", command=open_dashboard)
+edit_menu.add_command(label="Tools & History", command=open_desktop_tools)
 menu_bar.add_cascade(label="Edit", menu=edit_menu)
 
 # Create the Help menu
@@ -11190,105 +11829,10 @@ def open_url(url):
     webbrowser.open_new(url)
 
 
-def _launch_hidden_powershell(script_text):
-    encoded = base64.b64encode(script_text.encode('utf-16-le')).decode('ascii')
-    startup_info = None
-    creation_flags = 0
-
-    if hasattr(subprocess, "STARTUPINFO"):
-        startup_info = subprocess.STARTUPINFO()
-        startup_info.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-
-    if hasattr(subprocess, "CREATE_NO_WINDOW"):
-        creation_flags = subprocess.CREATE_NO_WINDOW
-
-    process = subprocess.Popen(
-        [
-            "powershell",
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-EncodedCommand",
-            encoded,
-        ],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        startupinfo=startup_info,
-        creationflags=creation_flags,
-    )
-
-    return process
 
 
-def _show_windows_native_toast(title, message):
-    if sys.platform != "win32":
-        return False
-
-    title_xml = html.escape(str(title), quote=False)
-    message_xml = html.escape(str(message), quote=False)
-
-    script = f"""
-$ErrorActionPreference = 'Stop'
-[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
-[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null
-$xmlTemplate = @"
-<toast>
-  <visual>
-    <binding template='ToastGeneric'>
-      <text>{title_xml}</text>
-      <text>{message_xml}</text>
-    </binding>
-  </visual>
-</toast>
-"@
-$xmlDoc = New-Object Windows.Data.Xml.Dom.XmlDocument
-$xmlDoc.LoadXml($xmlTemplate)
-$toast = [Windows.UI.Notifications.ToastNotification]::new($xmlDoc)
-$notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('MyStats')
-$notifier.Show($toast)
-"""
-
-    try:
-        process = _launch_hidden_powershell(script)
-        exit_code = process.wait(timeout=4)
-
-        if exit_code != 0:
-            logger.warning(f"Toast notification failed via native WinRT toast: PowerShell exited with code {exit_code}")
-            return False
-
-        return True
-    except Exception as exc:
-        logger.warning(f"Toast notification failed via native WinRT toast: {exc}")
-        return False
 
 
-def _show_windows_balloon_tip(title, message, duration=6):
-    if sys.platform != "win32":
-        return False
-
-    script = f"""
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Drawing
-$notify = New-Object System.Windows.Forms.NotifyIcon
-$notify.Icon = [System.Drawing.SystemIcons]::Information
-$notify.BalloonTipTitle = @"
-{title}
-"@
-$notify.BalloonTipText = @"
-{message}
-"@
-$notify.Visible = $true
-$notify.ShowBalloonTip({max(1, int(duration)) * 1000})
-Start-Sleep -Milliseconds {max(1, int(duration)) * 1000 + 600}
-$notify.Dispose()
-"""
-
-    try:
-        _launch_hidden_powershell(script)
-        return True
-    except Exception as exc:
-        logger.warning(f"Toast notification failed via PowerShell balloon tip: {exc}")
-        return False
 
 
 
@@ -11300,6 +11844,8 @@ def _show_in_app_toast(title, message, duration=6):
     def _render_toast():
         try:
             toast = tk.Toplevel(root)
+            toast.withdraw()
+            toast.transient(root)
             toast.overrideredirect(True)
             toast.attributes('-topmost', True)
             toast.configure(bg='#1e1e1e')
@@ -11339,6 +11885,7 @@ def _show_in_app_toast(title, message, duration=6):
             x = screen_w - width - 20
             y = screen_h - height - 60
             toast.geometry(f"{width}x{height}+{x}+{y}")
+            toast.deiconify()
 
             toast.after(max(2000, int(duration) * 1000), toast.destroy)
         except Exception as exc:
@@ -11352,34 +11899,25 @@ def _show_in_app_toast(title, message, duration=6):
         return False
 
 def show_windows_toast(title, message, duration=6):
+    # Dispatch on Tk's thread; use one persistent icon rather than per-alert helpers.
+    tray_queue.put(('notify', str(title), str(message), duration))
+
+
+def deliver_windows_notification(title, message, duration=6, _attempt=0):
     if is_minimized_to_tray() and not is_windows_tray_notifications_enabled():
         return
-
-    is_frozen_build = bool(getattr(sys, "frozen", False))
-
-    if win_toaster is not None:
-        try:
-            win_toaster.show_toast(title, message, duration=duration, threaded=True)
-            if not is_frozen_build:
-                return
-        except Exception as exc:
-            logger.warning(f"Toast notification failed via win10toast: {exc}")
-
-    if is_frozen_build:
-        # In PyInstaller builds, WinRT toast APIs can report success without displaying
-        # anything if the app identity/shortcut registration is missing. Prefer a
-        # balloon tip first because it works for unpackaged desktop executables.
-        if _show_windows_balloon_tip(title, message, duration=duration):
-            return
-
-    if _show_windows_native_toast(title, message):
-        return
-
-    if _show_windows_balloon_tip(title, message, duration=duration):
-        return
-
+    try:
+        start_system_tray_icon()
+    except Exception:
+        logger.warning('Notification tray unavailable', exc_info=True)
     if tray_icon is not None:
         try:
+            if not tray_icon.visible:
+                if _attempt < 5:
+                    root.after(200, lambda: deliver_windows_notification(title, message, duration, _attempt + 1))
+                else:
+                    _show_in_app_toast(title, message, duration=duration)
+                return
             tray_icon.notify(message, title)
             return
         except Exception as exc:
@@ -11902,11 +12440,9 @@ def download_and_install_update(download_url, version_label, silent_mode=True):
         return
 
     logger.info("Starting update download from %s", download_url)
-    toast_on_progress = is_minimized_to_tray()
     show_windows_toast("MyStats Update", f"Downloading MyStats {version_label} update...")
 
     progress_window, progress_var, percent_var, status_var = _create_update_progress_dialog(version_label)
-    last_toast_bucket = {'value': -1}
 
     def update_progress(downloaded, total_bytes):
         if total_bytes <= 0:
@@ -11917,12 +12453,6 @@ def download_and_install_update(download_url, version_label, silent_mode=True):
         progress_var.set(percent)
         percent_var.set(f"{percent}%")
         status_var.set(f"{downloaded / (1024 * 1024):.2f} MB / {total_bytes / (1024 * 1024):.2f} MB")
-
-        if toast_on_progress:
-            bucket = percent // 25
-            if bucket > last_toast_bucket['value'] and percent not in (0, 100):
-                last_toast_bucket['value'] = bucket
-                show_windows_toast("MyStats Update", f"Download progress: {percent}%")
 
     def worker():
         installer_path = None
