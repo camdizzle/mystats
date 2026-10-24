@@ -1,6 +1,6 @@
 # Private-build default bot credential
 
-The temporary default `mystats_results` bot credential is read from `DEFAULT_BOT_TOKEN` in `mystats.py`, never from ConfigManager/settings. The public repository deliberately leaves that value empty. Populate it only in the private build source. The real credential must not enter Git history, PRs, release guides, logs or standalone settings files.
+The temporary default `mystats_results` bot credential is read from `DEFAULT_BOT_TOKEN` in `mystats.py`, never from ConfigManager/settings. The public repository deliberately leaves that value empty. The user keeps the value in a local mystats-default-bot-token.txt file outside Git. Paste it into the private build source immediately before compiling, then clear the constant afterward. Both installer wildcard entries and Git exclude that text file. The real credential must not enter Git history, PRs, release guides, logs or standalone settings files.
 
 This is a temporary packaging change, not secure secret distribution: the credential remains extractable from source or a packaged executable, and therefore from an installer containing that executable. The planned hosted bot service is the long-term solution. Existing distributed installers and backups are not rewritten by this change.
 
@@ -18,7 +18,7 @@ At settings load, the application atomically removes obsolete `TWITCH_TOKEN` lin
 
 ## Private folder migration performed
 
-The user-supplied private build folder contained version 6.3.2 source. Its default token was copied into its private Python constant and verified before its settings entry was removed. Its eight installer scripts now use a token-free template and exclude raw settings/source from wildcard inputs. Only the token-related behavior was changed there; that private source was not upgraded to the newer 7.0 implementation. The 7.0 Discord guide must be used with a current build, not that older source.
+The user-supplied private build folder contained version 6.3.2 source. Its default token was initially copied into its private Python constant and verified before its settings entry was removed. At the user’s request it now resides in a verified local mystats-default-bot-token.txt file beside that source; the private Python constant has been cleared again for the manual pre-compilation workflow. Its eight installer scripts now use a token-free template and exclude raw settings/source from wildcard inputs. Only the token-related behavior was changed there; that private source was not upgraded to the newer 7.0 implementation. The 7.0 Discord guide must be used with a current build, not that older source.
 
 ## Release-guide use
 

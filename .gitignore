@@ -17,3 +17,6 @@ __pycache__/
 
 # Legacy OAuth credentials must never enter source control or build assets.
 token_data.json
+
+# Local default-bot build credential.
+mystats-default-bot-token.txt
