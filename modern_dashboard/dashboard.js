@@ -1132,9 +1132,50 @@ function buildAnalyticsGroupsMarkup(data) {
 
 
 
+const trendChartInstances = [];
+const pendingTrendCharts = [];
+
+function mountTrendCharts() {
+  pendingTrendCharts.forEach(({ id, title, rows, valueKey, labelKey, formatter }) => {
+    const canvas = document.getElementById(id);
+    if (!canvas || typeof Chart === 'undefined') return;
+    trendChartInstances.push(new Chart(canvas, {
+      type: 'line',
+      data: {
+        labels: rows.map(row => String(row?.[labelKey] || '—')),
+        datasets: [{ label: title, data: rows.map(row => {
+          const value = Number(row?.[valueKey] || 0);
+          return Number.isFinite(value) ? value : null;
+        }), borderColor: '#58d8e8', backgroundColor: 'rgba(88,216,232,0.12)',
+        fill: true, pointRadius: 3, tension: 0.15 }],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: { legend: { display: false }, tooltip: {
+          callbacks: { label: context => formatter(context.parsed.y) },
+        } },
+        scales: {
+          x: { ticks: { color: '#b8c5d8', maxTicksLimit: 7 }, grid: { color: 'rgba(180,200,220,0.08)' } },
+          y: { beginAtZero: true, ticks: { color: '#b8c5d8' }, grid: { color: 'rgba(180,200,220,0.08)' } },
+        },
+      },
+    }));
+  });
+}
+
 function renderSimpleLineChart(title, rows, valueKey, labelKey, formatter = (v) => fmt(v)) {
   if (!Array.isArray(rows) || !rows.length) {
     return `<section class="analytics-group"><h3 class="analytics-group__title">${escapeHtml(title)}</h3><div class="empty">No trend data yet.</div></section>`;
+  }
+
+  if (typeof Chart !== 'undefined') {
+    const id = `trend-chart-${pendingTrendCharts.length}`;
+    pendingTrendCharts.push({ id, title, rows, valueKey, labelKey, formatter });
+    const summary = rows.map(row => `${escapeHtml(String(row?.[labelKey] || '—'))}: <strong>${escapeHtml(String(formatter(Number(row?.[valueKey] || 0))))}</strong>`).join(' · ');
+    return `<section class="analytics-group trend-chart-card"><h3 class="analytics-group__title">${escapeHtml(title)}</h3>
+      <div style="position:relative;height:240px"><canvas id="${id}" role="img" aria-label="${escapeHtml(title)}"></canvas></div>
+      <div class="trend-line-summary">${summary}</div></section>`;
   }
 
   const chartWidth = 560;
@@ -1211,6 +1252,7 @@ function renderRaceTrends(data) {
   const latestDays = dailyRows.slice(-21);
   const analyticsSection = buildAnalyticsGroupsMarkup(data);
 
+  pendingTrendCharts.length = 0;
   const charts = [
     analyticsSection.markup,
     renderSimpleLineChart('Unique Racers per Season', seasonSeries, 'unique_racers', 'season_label'),
@@ -1222,7 +1264,9 @@ function renderRaceTrends(data) {
   ];
 
   chartHost.classList.add('trend-grid');
+  trendChartInstances.splice(0).forEach(chart => chart.destroy());
   chartHost.innerHTML = charts.join('');
+  mountTrendCharts();
   const trendLabel = trends.has_prior_seasons
     ? `Season + historical trends • ${seasonSeries.length} seasons`
     : 'Current season trends only';

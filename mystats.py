@@ -1,4 +1,5 @@
 import time
+from file_changes import file_changes
 import tkinter as tk
 from tkinter import ttk
 from tkinter import Menu
@@ -15817,11 +15818,11 @@ async def tilted(bot):
     current_tilt_points_leader = None
 
     while not bot.stop_event.is_set():
+        await file_changes.wait(config.get_setting('tilt_level_file'), timeout=7)
         try:
             tilt_level_file = config.get_setting('tilt_level_file')
             current_modified_tilt = os.path.getmtime(tilt_level_file)
         except FileNotFoundError:
-            await asyncio.sleep(10)
             continue
         except asyncio.CancelledError:
             print("Tilted task was cancelled.")
@@ -15838,7 +15839,6 @@ async def tilted(bot):
             continue
 
         if current_modified_tilt == last_modified_tilt:
-            await asyncio.sleep(10)
             continue
 
         now_monotonic = time.monotonic()
@@ -16292,7 +16292,6 @@ async def tilted(bot):
             last_modified_tilt = current_modified_tilt
             last_tilt_processed_at = time.monotonic()
 
-        await asyncio.sleep(7)
 
 
 async def checkpoints(bot):
@@ -16550,6 +16549,7 @@ async def race(bot):
         'RecordStreamer': None,
     }
     while True:
+        await file_changes.wait(config.get_setting('race_file'), timeout=7)
         try:
             current_modified_race = await asyncio.to_thread(os.path.getmtime, config.get_setting('race_file'))
         except FileNotFoundError:
@@ -17265,8 +17265,6 @@ async def race(bot):
             
             write_overlays()
 
-        else:
-            await asyncio.sleep(7)
 
 
 async def royale(bot):
@@ -17422,6 +17420,7 @@ async def royale(bot):
         text_area.see(tk.END)
 
     while True:
+        await file_changes.wait(config.get_setting('br_file'), timeout=7)
         try:
             current_modified_royale = await asyncio.to_thread(os.path.getmtime, config.get_setting('br_file'))
         except FileNotFoundError:
@@ -17704,8 +17703,6 @@ async def royale(bot):
                                                      winnertotalpoints, namecolor)
                 else:
                     print("No valid winner found after processing the data.")
-        else:
-            await asyncio.sleep(7)
 
 
 if __name__ == "__main__":
