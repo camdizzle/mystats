@@ -16387,6 +16387,32 @@ async def competitive_raid_monitor(bot):
     print("Competitive raid monitor task has exited.")
 
 
+async def read_confirmed_tilt_level(path, stop_event):
+    """Require a failed result to remain unchanged for five seconds before committing it."""
+    previous_snapshot = None
+    while not stop_event.is_set():
+        try:
+            before = os.stat(path)
+            rows = safe_read_csv_rows(path)
+            after = os.stat(path)
+        except OSError:
+            # A replacement or locked export is not confirmation of a run ending.
+            return None
+        signature = (after.st_mtime_ns, after.st_size)
+        if (before.st_mtime_ns, before.st_size) != signature:
+            return None
+        state = parse_tilt_level_state(rows)
+        if state is None:
+            return None
+        snapshot = (signature, rows)
+        if state['level_passed'] or snapshot == previous_snapshot:
+            return state, after.st_mtime
+        logger.info("Tilt level %s reports run ended; waiting five seconds for a corrected export.", state['current_level'])
+        previous_snapshot = snapshot
+        await asyncio.sleep(5)
+    return None
+
+
 async def tilted(bot):
     last_modified_tilt = None
     run_id = str(config.get_setting('tilt_current_run_id') or '').strip() or None
@@ -16423,7 +16449,7 @@ async def tilted(bot):
 
         now_monotonic = time.monotonic()
         if (now_monotonic - last_tilt_processed_at) < tilt_process_cooldown_seconds:
-            last_modified_tilt = current_modified_tilt
+            # Leave this write pending; the game may be correcting an earlier export.
             await asyncio.sleep(1)
             continue
 
@@ -16431,13 +16457,13 @@ async def tilted(bot):
         set_overlay_mode('tilt')
 
         try:
-            level_rows = safe_read_csv_rows(tilt_level_file)
-            level_state = parse_tilt_level_state(level_rows)
-            if level_state is None:
+            confirmed_level = await read_confirmed_tilt_level(tilt_level_file, bot.stop_event)
+            if confirmed_level is None:
                 print("Tilt level data incomplete; waiting for next write.")
-                last_modified_tilt = current_modified_tilt
                 await asyncio.sleep(1)
                 continue
+
+            level_state, current_modified_tilt = confirmed_level
 
             current_level = level_state['current_level']
             elapsed_time = level_state['elapsed_time']
