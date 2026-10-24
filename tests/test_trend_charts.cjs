@@ -1,7 +1,8 @@
 const fs = require('fs');
+const path = require('path');
 const vm = require('vm');
 const assert = require('assert');
-const source = fs.readFileSync(`${__dirname}/modern_dashboard/dashboard.js`, 'utf8');
+const source = fs.readFileSync(path.join(__dirname, '..', 'modern_dashboard', 'dashboard.js'), 'utf8');
 let created = 0, destroyed = 0;
 let configs = [];
 const host = { innerHTML: '', classList: { add() {} } };

@@ -2,6 +2,8 @@
 
 Install the optional filesystem notification dependency in the Python environment used to run or build MyStats:
 
+Run the commands below from the repository root.
+
     python -m pip install -r requirements-enhancements.txt
 
 Race, BR, and Tilt monitors use filesystem notifications when available, with seven-second reconciliation checks if events are missed or Watchdog is unavailable. Existing modification-time checks and file-settling delays still apply.
@@ -10,7 +12,7 @@ The six trend charts use a local copy of Chart.js 4.4.8, including its MIT licen
 
 Checks:
 
-    node test_trend_charts.cjs
+    node tests/test_trend_charts.cjs
     python -m py_compile mystats.py
     node --check modern_dashboard/dashboard.js
 

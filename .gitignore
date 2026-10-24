@@ -1,0 +1,16 @@
+# Generated Python/build files.
+__pycache__/
+*.py[cod]
+/Output/
+/build/
+/dist/
+/.venv/
+/_internal/
+/*.exe
+
+# Local application data and game exports are not repository assets.
+/*.csv
+/*.log
+/settings.txt
+/desktop_goals.json
+/Results/
