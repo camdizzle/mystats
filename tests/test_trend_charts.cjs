@@ -26,14 +26,14 @@ const data = { race_trends: {
   daily_current_season: [{ date: '2026-10-23', total_races: 5, unique_racers: 3, ppr: 2.4, br_count: 1 }],
 } };
 context.renderRaceTrends(data);
-assert.strictEqual(created, 6);
+assert.strictEqual(created, 2);
 assert(host.innerHTML.includes('<canvas'));
 context.renderRaceTrends(data);
-assert.strictEqual(created, 12);
-assert.strictEqual(destroyed, 6);
+assert.strictEqual(created, 4);
+assert.strictEqual(destroyed, 2);
 context.Chart = undefined;
 context.renderRaceTrends(data);
-assert.strictEqual(destroyed, 12);
+assert.strictEqual(destroyed, 4);
 assert(host.innerHTML.includes('<svg'));
 context.renderRaceTrends({});
 assert(host.innerHTML.includes('No trend data yet.'));
@@ -91,4 +91,14 @@ assert(clicked && revoked);
 assert(csvContent.includes('"previous","2026-10-14"'));
 assert(csvContent.includes('"current","2026-10-21"'));
 console.log('Filters: calendar ranges, invalid dates, weekly weighted PPR, winner averages, comparison datasets, SVG comparison, CSV dates, and refresh persistence passed.');
-console.log('Charts: six series, refresh cleanup, SVG fallback, and empty data passed.');
+console.log('Charts: two default series, refresh cleanup, SVG fallback, and empty data passed.');
+
+// Participants come from all saved results and remain independent of winner counts.
+vm.runInContext("trendControls.metric = 'unique_participants'; trendControls.compare = false;", context);
+context.Chart = undefined;
+context.renderRaceTrends({race_trends:{daily_current_season:[{date:'2026-10-23',unique_participants:25,unique_racers:2,total_races:3}]}});
+assert(host.innerHTML.includes('Daily Unique Participants'));
+assert(host.innerHTML.includes('25'));
+const participantWeeks = context.groupTrendRows([{date:'2026-10-20',unique_participants:20},{date:'2026-10-21',unique_participants:30}], 'weekly');
+assert.equal(participantWeeks[0].unique_participants,25);
+console.log('Participant metric and explicitly daily-average weekly aggregation passed.');
