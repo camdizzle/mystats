@@ -4,6 +4,8 @@ This folder holds developer notes, audits, and field references. Both Inno Setup
 
 ## References
 
+- [Windows token storage](WINDOWS_TOKEN_STORAGE.md): credential migration, recovery, security scope and validation.
+
 - [Dashboard product improvements](DASHBOARD_PRODUCT_IMPROVEMENTS.md): features, data limits and validation.
 
 - [Game CSV fields](CSV_FIELD_REFERENCE.md): the exact headers/order and field meanings for the seven removed sample game exports. No player rows are retained here.

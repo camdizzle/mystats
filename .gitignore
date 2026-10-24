@@ -14,3 +14,6 @@ __pycache__/
 /settings.txt
 /desktop_goals.json
 /Results/
+
+# Legacy OAuth credentials must never enter source control or build assets.
+token_data.json

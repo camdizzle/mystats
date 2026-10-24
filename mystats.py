@@ -6938,27 +6938,182 @@ def dashboard_main_stream():
     return _make_sse_response(lambda: _build_dashboard_main_payload_for_args(args_snapshot))
 
 
-# Path to the token file
+# Legacy path is read only for migration; OAuth secrets are stored by Windows.
 TOKEN_FILE_PATH = appdata_path('token_data.json')
+TWITCH_CREDENTIAL_TARGET = 'MyStats/TwitchOAuth'
+TOKEN_STORAGE_LOCK = threading.RLock()
+_TOKEN_STORAGE_NOTICES = set()
 DEFAULT_BOT_USERNAME = 'mystats_results'
 TOKEN_REFRESH_EARLY_SECONDS = 300
 TOKEN_VALIDATION_CONSOLE_LOGGED = False
 TOKEN_VALIDATION_LOG_LOCK = threading.Lock()
 
 
-def clear_invalid_token_data(reason):
-    """Remove unusable OAuth token data and log user-facing recovery guidance."""
-    try:
-        if os.path.exists(TOKEN_FILE_PATH):
-            os.remove(TOKEN_FILE_PATH)
-            print(f"Removed invalid token file ({TOKEN_FILE_PATH}): {reason}")
-    except OSError as exc:
-        print(f"Could not remove invalid token file: {exc}")
+class TokenStorageError(RuntimeError):
+    """A credential-store failure whose message never includes token contents."""
 
-    print(
-        "Twitch custom bot token failed. Falling back to the default MyStats bot account "
-        f"({DEFAULT_BOT_USERNAME}). Click 'Custom Bot Login' to reauthenticate your account."
-    )
+
+def _windows_credential_api():
+    if sys.platform != 'win32':
+        raise TokenStorageError('Secure token storage requires Windows Credential Manager.')
+    from ctypes import wintypes
+
+    class Credential(ctypes.Structure):
+        _fields_ = [('Flags', wintypes.DWORD), ('Type', wintypes.DWORD),
+                    ('TargetName', wintypes.LPWSTR), ('Comment', wintypes.LPWSTR),
+                    ('LastWritten', wintypes.FILETIME), ('CredentialBlobSize', wintypes.DWORD),
+                    ('CredentialBlob', ctypes.POINTER(ctypes.c_ubyte)), ('Persist', wintypes.DWORD),
+                    ('AttributeCount', wintypes.DWORD), ('Attributes', ctypes.c_void_p),
+                    ('TargetAlias', wintypes.LPWSTR), ('UserName', wintypes.LPWSTR)]
+    api = ctypes.WinDLL('Advapi32.dll', use_last_error=True)
+    api.CredReadW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.POINTER(ctypes.POINTER(Credential))]
+    api.CredReadW.restype = wintypes.BOOL
+    api.CredWriteW.argtypes = [ctypes.POINTER(Credential), wintypes.DWORD]
+    api.CredWriteW.restype = wintypes.BOOL
+    api.CredDeleteW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD]
+    api.CredDeleteW.restype = wintypes.BOOL
+    api.CredFree.argtypes = [ctypes.c_void_p]
+    api.CredFree.restype = None
+    return api, Credential
+
+
+def _read_windows_credential(target):
+    api, credential_type = _windows_credential_api()
+    pointer = ctypes.POINTER(credential_type)()
+    if not api.CredReadW(target, 1, 0, ctypes.byref(pointer)):
+        error = ctypes.get_last_error()
+        if error == 1168:  # ERROR_NOT_FOUND is distinct from denied/unavailable storage.
+            return None
+        raise TokenStorageError(f'Windows could not read the saved credential (error {error}).')
+    try:
+        size = pointer.contents.CredentialBlobSize
+        if size > 2560:
+            raise TokenStorageError('The saved credential has an invalid size.')
+        return ctypes.string_at(pointer.contents.CredentialBlob, size)
+    finally:
+        api.CredFree(pointer)
+
+
+def _write_windows_credential(target, payload):
+    if len(payload) > 2560:
+        raise TokenStorageError('The OAuth credential exceeds the Windows storage size limit.')
+    api, credential_type = _windows_credential_api()
+    buffer = ctypes.create_string_buffer(payload)
+    credential = credential_type()
+    credential.Type = 1  # CRED_TYPE_GENERIC
+    credential.TargetName = target
+    credential.UserName = 'MyStats Twitch OAuth'
+    credential.CredentialBlobSize = len(payload)
+    credential.CredentialBlob = ctypes.cast(buffer, ctypes.POINTER(ctypes.c_ubyte))
+    credential.Persist = 2  # CRED_PERSIST_LOCAL_MACHINE: current Windows user, this PC.
+    try:
+        if not api.CredWriteW(ctypes.byref(credential), 0):
+            raise TokenStorageError(f'Windows could not save the credential (error {ctypes.get_last_error()}).')
+    finally:
+        ctypes.memset(buffer, 0, ctypes.sizeof(buffer))
+
+
+def _delete_windows_credential(target):
+    api, _ = _windows_credential_api()
+    if not api.CredDeleteW(target, 1, 0) and ctypes.get_last_error() != 1168:
+        raise TokenStorageError(f'Windows could not remove the credential (error {ctypes.get_last_error()}).')
+
+
+def _token_storage_notice(key, message):
+    if key not in _TOKEN_STORAGE_NOTICES:
+        _TOKEN_STORAGE_NOTICES.add(key)
+        logger.warning(message)
+        print(message)
+
+
+def _validated_token_payload(value):
+    if not isinstance(value, dict) or not isinstance(value.get('access_token'), str) or not value['access_token'].strip():
+        raise TokenStorageError('Stored OAuth data is invalid. Please use Custom Bot Login again.')
+    if 'refresh_token' in value and not isinstance(value['refresh_token'], str):
+        raise TokenStorageError('Stored refresh data is invalid. Please use Custom Bot Login again.')
+    clean = {key: value[key] for key in ('access_token', 'refresh_token', 'expires_at', 'expires_in', 'scope', 'token_type') if key in value}
+    try:
+        for key in ('expires_at', 'expires_in'):
+            if key in clean and (not math.isfinite(float(clean[key])) or float(clean[key]) < 0):
+                raise ValueError()
+        json.dumps(clean, allow_nan=False)
+    except (ValueError, TypeError, OverflowError):
+        raise TokenStorageError('Stored OAuth metadata is invalid. Please use Custom Bot Login again.') from None
+    return clean
+
+
+def _store_verified_token_payload(value):
+    raw = json.dumps({'schema': 1, 'token': value}, ensure_ascii=False, separators=(',', ':'), allow_nan=False).encode('utf-8')
+    _write_windows_credential(TWITCH_CREDENTIAL_TARGET, raw)
+    if _read_windows_credential(TWITCH_CREDENTIAL_TARGET) != raw:
+        raise TokenStorageError('Windows credential verification failed. Existing legacy files were preserved.')
+
+
+def _legacy_token_paths():
+    launch_dir = launch_target_dir()
+    local = os.getenv('LOCALAPPDATA')
+    candidates = [Path(TOKEN_FILE_PATH), Path.cwd() / 'token_data.json', Path(__file__).resolve().parent / 'token_data.json']
+    if launch_dir:
+        candidates.append(Path(launch_dir) / 'token_data.json')
+    if local:
+        candidates.extend([Path(local) / 'MyStats' / 'token_data.json', Path(local) / 'MyStats' / 'data' / 'token_data.json'])
+        for name in LEGACY_APPDATA_DIR_NAMES:
+            candidates.extend([Path(local) / name / 'token_data.json', Path(local) / name / 'data' / 'token_data.json'])
+    unique = {}
+    for path in candidates:
+        unique.setdefault(os.path.normcase(os.path.abspath(path)), path)
+    return list(unique.values())
+
+
+def _legacy_token_snapshots():
+    snapshots = []
+    for path in _legacy_token_paths():
+        try:
+            raw = path.read_bytes()
+            value = _validated_token_payload(json.loads(raw.decode('utf-8-sig')))
+            snapshots.append((path, raw, value))
+        except FileNotFoundError:
+            continue
+        except (OSError, UnicodeError, ValueError, TokenStorageError):
+            _token_storage_notice('legacy-read', 'A legacy token file could not be migrated. It was preserved; use Custom Bot Login if needed.')
+    return snapshots
+
+
+def _remove_migrated_token_files(snapshots, token):
+    for path, raw, value in snapshots:
+        matches = value.get('access_token') == token.get('access_token') or (
+            bool(value.get('refresh_token')) and value.get('refresh_token') == token.get('refresh_token'))
+        if not matches:
+            _token_storage_notice('legacy-different', 'A different legacy login was preserved. Review older MyStats installations for remaining token files.')
+            continue
+        try:
+            if path.read_bytes() == raw:  # Never delete a file changed since it was inspected.
+                path.unlink()
+            else:
+                _token_storage_notice('legacy-changed', 'A legacy token file changed during migration and was preserved.')
+        except FileNotFoundError:
+            pass
+        except OSError:
+            _token_storage_notice('legacy-delete', 'Login is secured in Windows, but an old token file could not be removed. Close older MyStats copies and check its file permissions.')
+
+
+def clear_invalid_token_data(reason):
+    """Invalidate securely, preventing any leftover JSON from reviving the login."""
+    with TOKEN_STORAGE_LOCK:
+        try:
+            # Keep a non-secret signed-out marker so leftover/read-only JSON is never reimported.
+            _store_verified_token_payload(None)
+            for path, raw, _ in _legacy_token_snapshots():
+                try:
+                    if path.read_bytes() == raw:
+                        path.unlink()
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    _token_storage_notice('legacy-delete', 'An old token file could not be removed; Windows has blocked its automatic reuse.')
+        except TokenStorageError:
+            _token_storage_notice('invalidate', 'Windows could not invalidate the saved login. Use Custom Bot Login to replace it when Windows credential storage is available.')
+    print("Twitch custom bot login needs renewal. Click 'Custom Bot Login' to authenticate again.")
 
 
 def _sync_chatbot_identity_from_token(access_token):
@@ -6977,18 +7132,20 @@ def _sync_chatbot_identity_from_token(access_token):
         logger.warning("Token update succeeded but username lookup failed; preserving current chatbot label")
 
 
-# Save token data to a file and optionally reconnect the bot with the new token asynchronously
 def save_token_data(token_info, reconnect_bot=False):
-    token_info['expires_at'] = time.time() + token_info.get('expires_in', 0)
-    with open(TOKEN_FILE_PATH, 'w') as f:
-        json.dump(token_info, f)
-
-    _sync_chatbot_identity_from_token(token_info.get('access_token'))
+    """Persist and verify OAuth secrets in Windows before activating the new login."""
+    value = _validated_token_payload(token_info)
+    value['expires_at'] = time.time() + float(value.get('expires_in', 0))
+    with TOKEN_STORAGE_LOCK:
+        snapshots = _legacy_token_snapshots()
+        _store_verified_token_payload(value)
+        # A refresh rotates secrets; remove the prior canonical login only after verification.
+        for path, raw, old_value in snapshots:
+            _remove_migrated_token_files([(path, raw, old_value)], old_value)
+    _sync_chatbot_identity_from_token(value['access_token'])
     if reconnect_bot:
-        print("Token data saved successfully. Restarting bot...")
-
-        # Reconnect the bot asynchronously with the new token
-        restart_bot(token_info['access_token'])
+        print('Token secured in Windows Credential Manager. Restarting bot...')
+        restart_bot(value['access_token'])
 
 
 def restart_bot(new_token):
@@ -6998,43 +7155,38 @@ def restart_bot(new_token):
         asyncio.run_coroutine_threadsafe(bot.reconnect_with_new_token(new_token), bot.loop)
 
 
-# Function to load token data from a file
 def load_token_data():
-    if not os.path.exists(TOKEN_FILE_PATH):
-        launch_dir = launch_target_dir()
-        legacy_token_candidates = [
-            Path.cwd() / 'token_data.json',
-            Path(__file__).resolve().parent / 'token_data.json',
-            Path(launch_dir) / 'token_data.json' if launch_dir else None,
-        ]
-
-        local_app_data = os.getenv('LOCALAPPDATA')
-        if local_app_data:
-            local_app_data_path = Path(local_app_data)
-            legacy_token_candidates.extend([
-                local_app_data_path / 'MyStats' / 'token_data.json',
-                local_app_data_path / 'MyStats' / 'data' / 'token_data.json',
-            ])
-
-        for candidate in legacy_token_candidates:
-            if candidate is None:
-                continue
-            if not candidate.exists() or str(candidate) == TOKEN_FILE_PATH:
-                continue
-
-            try:
-                Path(TOKEN_FILE_PATH).parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(candidate, TOKEN_FILE_PATH)
-                print(f"Migrated token file from legacy location: {candidate}")
-                break
-            except OSError:
-                logger.exception("Failed migrating token file from %s", candidate)
-
     try:
-        with open(TOKEN_FILE_PATH, 'r') as f:
-            return json.load(f)
-    except FileNotFoundError:
+        return _load_token_data_locked()
+    except TokenStorageError:
+        _token_storage_notice('load', 'Windows could not load the custom login securely. Legacy files were preserved; check Credential Manager or use Custom Bot Login again.')
         return None
+
+
+def _load_token_data_locked():
+    """Read Windows first, importing JSON only when no credential/marker exists."""
+    with TOKEN_STORAGE_LOCK:
+        raw = _read_windows_credential(TWITCH_CREDENTIAL_TARGET)
+        if raw is not None:
+            try:
+                envelope = json.loads(raw.decode('utf-8'))
+                if not isinstance(envelope, dict) or envelope.get('schema') != 1 or 'token' not in envelope:
+                    raise ValueError()
+                if envelope['token'] is None:
+                    return None
+                value = _validated_token_payload(envelope['token'])
+            except (ValueError, UnicodeError, TokenStorageError):
+                raise TokenStorageError('Saved Windows login is invalid. Please use Custom Bot Login again.') from None
+            _remove_migrated_token_files(_legacy_token_snapshots(), value)
+            return value
+        snapshots = _legacy_token_snapshots()
+        if not snapshots:
+            return None
+        value = snapshots[0][2]
+        _store_verified_token_payload(value)
+        _remove_migrated_token_files(snapshots, value)
+        print('Existing Twitch login migrated to Windows Credential Manager.')
+        return value
 
 # Function to check if the token is expired
 def is_token_expired(token_data):
@@ -7047,6 +7199,11 @@ def is_token_expired(token_data):
 
 # Function to refresh access token using refresh token
 def refresh_access_token():
+    with TOKEN_STORAGE_LOCK:
+        return _refresh_access_token_locked()
+
+
+def _refresh_access_token_locked():
     token_data = load_token_data()
 
     if not token_data or 'refresh_token' not in token_data:
@@ -7066,19 +7223,26 @@ def refresh_access_token():
     }
 
     logger.info("API call: Twitch token refresh")
-    response = requests.post(token_url, data=token_data)
+    try:
+        response = requests.post(token_url, data=token_data, timeout=20)
+    except requests.RequestException:
+        print('Twitch token refresh could not connect; saved login retained.')
+        return None
 
     if response.status_code == 200:
         print("Token refreshed successfully!")
-        new_token_info = response.json()
+        try:
+            new_token_info = response.json()
+        except ValueError:
+            print('Twitch returned an invalid token response; saved login retained.')
+            return None
         save_token_data(new_token_info)  # Save the new token info
         return new_token_info['access_token']
     else:
-        print(f"Failed to refresh token: {response.text}")
-        clear_invalid_token_data("refresh token rejected by Twitch")
+        print(f"Twitch token refresh failed (HTTP {response.status_code}); saved login retained. Use Custom Bot Login if this persists.")
         return None
 
-# Function to get the OAuth token (file or ConfigManager)
+# Function to get the custom OAuth token from Windows Credential Manager
 def get_oauth_token():
     token_data = load_token_data()
 
@@ -7092,7 +7256,7 @@ def get_oauth_token():
     elif token_data and is_token_expired(token_data):
         return refresh_access_token()  # Refresh the token if expired
 
-    # Only prompt for authentication if no token file exists
+    # Only prompt for authentication if no stored custom login exists
     print("No valid token found. Please authenticate.")
     return None
 
@@ -7168,7 +7332,7 @@ def set_login_button_text():
     token_data = load_token_data()
 
     if token_data and 'access_token' in token_data:
-        # Use the token from the JSON file to fetch the username
+        # Use the token from Windows Credential Manager to fetch the username
         oauth_token = token_data['access_token']
         username = fetch_twitch_username(oauth_token)
 
@@ -7199,21 +7363,32 @@ def callback():
         'redirect_uri': redirect_uri
     }
 
-    response = requests.post(token_url, data=token_data)
+    try:
+        response = requests.post(token_url, data=token_data, timeout=20)
+    except requests.RequestException:
+        return 'Twitch authorization could not connect. Please try again.', 503
 
     if response.status_code != 200:
-        return f"Failed to obtain access token: {response.text}", 400
+        return "Twitch authorization failed. Please try Custom Bot Login again.", 400
 
-    token_info = response.json()
-    oauth_token = token_info.get('access_token')
+    try:
+        token_info = response.json()
+        access_token = _validated_token_payload(token_info)['access_token']
+    except (ValueError, TokenStorageError):
+        return 'Twitch returned an invalid authorization response. Please try again.', 502
 
     # Verify the token before proceeding
-    if oauth_token and verify_token(oauth_token):
-        username = fetch_twitch_username(oauth_token)
+    if verify_token(access_token):
+        username = fetch_twitch_username(access_token)
         if username:
+            try:
+                save_token_data(token_info, reconnect_bot=True)
+            except TokenStorageError:
+                return 'Windows could not securely save this login. Existing token files were preserved. Check Windows Credential Manager and try again.', 503
             update_login_button_text(username)
-            save_token_data(token_info, reconnect_bot=True)  # Save token info and restart bot
-        return "Authentication successful!", 200
+            oauth_token = access_token
+            return 'Authentication successful! Token secured in Windows Credential Manager.', 200
+        return 'Could not identify the authorized Twitch account. Please try again.', 503
     else:
         return "Failed to retrieve or validate access token.", 400
 
@@ -7233,7 +7408,7 @@ def verify_token(token, emit_console=True):
         return True
     else:
         if emit_console:
-            print(f"Token validation failed: {response.text}")
+            print(f"Token validation failed (HTTP {response.status_code}).")
         return False
 
 
@@ -13449,7 +13624,7 @@ class Bot(commands.Bot):
     def get_valid_token(self):
         emit_validation_console = not self._initial_token_validation_logged
 
-        # Load token from the token file if it exists, otherwise fallback to config token
+        # Load the custom Windows credential, otherwise use the configured default bot token
         token_data = load_token_data()
 
         if token_data:
@@ -13465,11 +13640,11 @@ class Bot(commands.Bot):
                 self._initial_token_validation_logged = True
                 return new_token  # Return the refreshed token
 
-            clear_invalid_token_data("custom token expired/invalid and refresh failed")
+            # Preserve the saved login across transient network/server/storage failures.
             set_default_bot_login_button("Custom token could not be used")
 
         else:
-            print("No token file found, falling back to ConfigManager token...")
+            print("No custom Windows credential found, falling back to ConfigManager token...")
 
         config_token = config.get_setting('TWITCH_TOKEN')
         if config_token:
@@ -16529,34 +16704,8 @@ class Bot(commands.Bot):
         return expires_at < time.time()
 
     def refresh_access_token(self):
-        token_data = load_token_data()
-        if not token_data or 'refresh_token' not in token_data:
-            return None
+        return refresh_access_token()
 
-        token_url = "https://id.twitch.tv/oauth2/token"
-        refresh_token = token_data['refresh_token']
-
-        refresh_data = {
-            'client_id': CLIENT_ID,
-            'client_secret': CLIENT_SECRET,
-            'grant_type': 'refresh_token',
-            'refresh_token': refresh_token
-        }
-
-        response = requests.post(token_url, data=refresh_data)
-        if response.status_code == 200:
-            new_token_info = response.json()
-            save_token_data(new_token_info)
-
-
-            if verify_token(new_token_info['access_token']):
-                return new_token_info['access_token']
-            else:
-                print("Refreshed token is invalid.")
-                return None
-        else:
-            print(f"Failed to refresh token: {response.text}")
-            return None
 
 
 def log_message(message):
