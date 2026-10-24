@@ -1132,6 +1132,83 @@ function buildAnalyticsGroupsMarkup(data) {
 
 
 
+const trendControls = { range: '21', from: '', to: '', grouping: 'daily', metric: 'all', compare: false };
+let latestTrendPayload = null;
+let trendExportRows = [];
+const TREND_DAY_MS = 86400000;
+
+function trendDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value || ''))) return null;
+  const stamp = Date.parse(`${value}T00:00:00Z`);
+  return Number.isFinite(stamp) && new Date(stamp).toISOString().slice(0, 10) === value ? stamp : null;
+}
+
+function groupTrendRows(rows, grouping, shiftDays = 0) {
+  const groups = new Map();
+  rows.forEach(row => {
+    const stamp = trendDate(row.date);
+    if (stamp === null) return;
+    const date = new Date(stamp + shiftDays * TREND_DAY_MS);
+    if (grouping === 'weekly') date.setUTCDate(date.getUTCDate() - (date.getUTCDay() + 6) % 7);
+    const key = date.toISOString().slice(0, 10);
+    if (!groups.has(key)) groups.set(key, { date: key, days: 0, unique_racers: 0, total_races: 0, race_count: 0, br_count: 0, total_points: 0 });
+    const bucket = groups.get(key);
+    bucket.days++;
+    ['unique_racers', 'total_races', 'race_count', 'br_count'].forEach(field => bucket[field] += Number(row[field]) || 0);
+    bucket.total_points += Number.isFinite(Number(row.total_points)) && row.total_points != null
+      ? Number(row.total_points) : (Number(row.ppr) || 0) * (Number(row.total_races) || 0);
+  });
+  return [...groups.values()].sort((a, b) => a.date.localeCompare(b.date)).map(row => ({ ...row,
+    unique_racers: row.unique_racers / row.days,
+    ppr: row.total_races ? row.total_points / row.total_races : 0,
+  }));
+}
+
+function selectTrendWindow(rows, controls = trendControls) {
+  const sorted = rows.filter(row => trendDate(row.date) !== null).slice().sort((a, b) => a.date.localeCompare(b.date));
+  if (!sorted.length) return { rows: [], previous: [], label: 'No trend data yet.' };
+  const latest = trendDate(sorted[sorted.length - 1].date);
+  const earliest = trendDate(sorted[0].date);
+  let start = earliest, end = latest;
+  if (controls.range === 'custom') {
+    start = controls.from ? trendDate(controls.from) : earliest;
+    end = controls.to ? trendDate(controls.to) : latest;
+    if (start === null || end === null || start > end) return { rows: [], previous: [], label: 'Choose a valid start and end date.' };
+  } else if (controls.range !== 'all') {
+    start = latest - (Number(controls.range) - 1) * TREND_DAY_MS;
+  }
+  const days = Math.round((end - start) / TREND_DAY_MS) + 1;
+  const current = sorted.filter(row => trendDate(row.date) >= start && trendDate(row.date) <= end);
+  const previous = controls.compare ? sorted.filter(row => trendDate(row.date) >= start - days * TREND_DAY_MS && trendDate(row.date) < start) : [];
+  return {
+    rows: groupTrendRows(current, controls.grouping),
+    previous: groupTrendRows(previous, controls.grouping, days),
+    previousOriginal: groupTrendRows(previous, controls.grouping),
+    label: `${new Date(start).toISOString().slice(0, 10)} through ${new Date(end).toISOString().slice(0, 10)}${controls.compare ? ' · Previous period aligned to current dates' : ''}`,
+  };
+}
+
+function exportTrendCsv() {
+  if (!trendExportRows.length) return;
+  const fields = ['period', 'date', 'unique_racers', 'race_count', 'br_count', 'total_races', 'total_points', 'ppr'];
+  const lines = [fields.join(','), ...trendExportRows.map(row => fields.map(field => JSON.stringify(row[field] ?? '')).join(','))];
+  const url = URL.createObjectURL(new Blob([lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }));
+  const link = document.createElement('a'); link.href = url; link.download = 'mystats-trends.csv'; link.click();
+  URL.revokeObjectURL(url);
+}
+
+function wireTrendControls() {
+  ['range', 'from', 'to', 'grouping', 'metric', 'compare'].forEach(key => {
+    const input = el(`trend-${key}`);
+    input.addEventListener('change', () => {
+      trendControls[key] = key === 'compare' ? input.checked : input.value;
+      el('trend-custom-dates').hidden = trendControls.range !== 'custom';
+      if (latestTrendPayload) renderRaceTrends(latestTrendPayload);
+    });
+  });
+  el('trend-export').addEventListener('click', exportTrendCsv);
+}
+
 const trendChartInstances = [];
 const pendingTrendCharts = [];
 
@@ -1145,15 +1222,18 @@ function mountTrendCharts() {
         labels: rows.map(row => String(row?.[labelKey] || '—')),
         datasets: [{ label: title, data: rows.map(row => {
           const value = Number(row?.[valueKey] || 0);
-          return Number.isFinite(value) ? value : null;
+          return !row.currentMissing && Number.isFinite(value) ? value : null;
         }), borderColor: '#58d8e8', backgroundColor: 'rgba(88,216,232,0.12)',
-        fill: true, pointRadius: 3, tension: 0.15 }],
+        fill: true, pointRadius: 3, tension: 0.15 }, ...(rows.some(row => row.comparisonValue != null) ? [{
+          label: 'Previous period (aligned)', data: rows.map(row => row.comparisonValue ?? null),
+          borderColor: '#ffbf69', borderDash: [6, 4], pointRadius: 2, fill: false,
+        }] : [])],
       },
       options: {
         responsive: true, maintainAspectRatio: false, animation: false,
         interaction: { mode: 'index', intersect: false },
-        plugins: { legend: { display: false }, tooltip: {
-          callbacks: { label: context => formatter(context.parsed.y) },
+        plugins: { legend: { display: rows.some(row => row.comparisonValue != null), labels: { color: '#b8c5d8' } }, tooltip: {
+          callbacks: { label: context => `${context.dataset.label}: ${formatter(context.parsed.y)}` },
         } },
         scales: {
           x: { ticks: { color: '#b8c5d8', maxTicksLimit: 7 }, grid: { color: 'rgba(180,200,220,0.08)' } },
@@ -1172,7 +1252,7 @@ function renderSimpleLineChart(title, rows, valueKey, labelKey, formatter = (v) 
   if (typeof Chart !== 'undefined') {
     const id = `trend-chart-${pendingTrendCharts.length}`;
     pendingTrendCharts.push({ id, title, rows, valueKey, labelKey, formatter });
-    const summary = rows.map(row => `${escapeHtml(String(row?.[labelKey] || '—'))}: <strong>${escapeHtml(String(formatter(Number(row?.[valueKey] || 0))))}</strong>`).join(' · ');
+    const summary = rows.map(row => `${escapeHtml(String(row?.[labelKey] || '—'))}: <strong>${row.currentMissing ? 'No record' : escapeHtml(String(formatter(Number(row?.[valueKey] || 0))))}</strong>${row.comparisonValue != null ? ` (previous: ${escapeHtml(String(formatter(row.comparisonValue)))})` : ''}`).join(' · ');
     return `<section class="analytics-group trend-chart-card"><h3 class="analytics-group__title">${escapeHtml(title)}</h3>
       <div style="position:relative;height:240px"><canvas id="${id}" role="img" aria-label="${escapeHtml(title)}"></canvas></div>
       <div class="trend-line-summary">${summary}</div></section>`;
@@ -1229,6 +1309,7 @@ function renderSimpleLineChart(title, rows, valueKey, labelKey, formatter = (v) 
 }
 
 function renderRaceTrends(data) {
+  latestTrendPayload = data;
   const trends = data?.race_trends || {};
   const summary = trends?.summary || {};
   const seasonSeries = Array.isArray(trends?.season_series) ? trends.season_series : [];
@@ -1249,19 +1330,44 @@ function renderRaceTrends(data) {
     { label: 'Days with Data', value: fmt(summary.days_with_data || 0) },
   ].map((kpi) => `<div class="kpi"><div class="kpi-label">${escapeHtml(kpi.label)}</div><div class="kpi-value">${escapeHtml(String(kpi.value))}</div></div>`).join('');
 
-  const latestDays = dailyRows.slice(-21);
+  const windowed = selectTrendWindow(dailyRows);
+  const latestDays = windowed.rows;
+  const previousByDate = new Map(windowed.previous.map(row => [row.date, row]));
+  trendExportRows = [...latestDays.map(row => ({ ...row, period: 'current' })),
+    ...(windowed.previousOriginal || []).map(row => ({ ...row, period: 'previous' }))];
+  const status = el('trend-status');
+  if (status) status.textContent = `${windowed.label}${trendControls.grouping === 'weekly' ? ' · Week labels are Mondays; partial weeks use selected days. Winners = average daily count on recorded days; PPR is weighted by event count.' : ''}${trendControls.compare && !windowed.previous.length ? ' · No data in previous period.' : ''}`;
+  const exportButton = el('trend-export');
+  if (exportButton) exportButton.disabled = !trendExportRows.length;
+  const chart = (title, rows, key, label, formatter = value => fmt(value), compare = false) => {
+    const annotated = compare ? rows.map(row => ({ ...row, comparisonValue: previousByDate.get(row.date)?.[key] ?? null })) : rows.slice();
+    if (compare && trendControls.compare && typeof Chart !== 'undefined') {
+      const currentDates = new Set(rows.map(row => row.date));
+      windowed.previous.forEach(row => {
+        if (!currentDates.has(row.date)) annotated.push({ date: row.date, currentMissing: true, comparisonValue: row[key] });
+      });
+      annotated.sort((a, b) => a.date.localeCompare(b.date));
+    }
+    let markup = renderSimpleLineChart(title, annotated, key, label, formatter);
+    if (compare && trendControls.compare && typeof Chart === 'undefined' && windowed.previous.length) {
+      markup += renderSimpleLineChart(`${title} — Previous period (aligned)`, windowed.previous, key, label, formatter);
+    }
+    return markup;
+  };
   const analyticsSection = buildAnalyticsGroupsMarkup(data);
 
   pendingTrendCharts.length = 0;
-  const charts = [
-    analyticsSection.markup,
-    renderSimpleLineChart('Unique Racers per Season', seasonSeries, 'unique_racers', 'season_label'),
-    renderSimpleLineChart('Total Races per Season', seasonSeries, 'total_races', 'season_label'),
-    renderSimpleLineChart('Current Season Daily Unique Racers', latestDays, 'unique_racers', 'date'),
-    renderSimpleLineChart('Current Season Daily Total Races', latestDays, 'total_races', 'date'),
-    renderSimpleLineChart('Current Season Daily PPR', latestDays, 'ppr', 'date', (v) => Number(v || 0).toFixed(2)),
-    renderSimpleLineChart('Current Season Daily BR Count', latestDays, 'br_count', 'date'),
-  ];
+  const metric = trendControls.metric;
+  const include = key => metric === 'all' || metric === key;
+  const charts = [analyticsSection.markup];
+  if (include('unique_racers')) charts.push(chart('Unique Winners per Season', seasonSeries, 'unique_racers', 'season_label'));
+  if (include('total_races')) charts.push(chart('Total Races per Season', seasonSeries, 'total_races', 'season_label'));
+  if (metric === 'ppr') charts.push(chart('Winning Points per Event per Season', seasonSeries, 'ppr', 'season_label', v => Number(v).toFixed(2)));
+  if (metric === 'br_count') charts.push(chart('BR per Season', seasonSeries, 'br_count', 'season_label'));
+  if (include('unique_racers')) charts.push(chart(trendControls.grouping === 'weekly' ? 'Weekly Average Daily Winners' : 'Daily Unique Winners', latestDays, 'unique_racers', 'date', v => Number(v).toLocaleString(undefined, { maximumFractionDigits: 1 }), true));
+  if (include('total_races')) charts.push(chart('Race + BR Events', latestDays, 'total_races', 'date', undefined, true));
+  if (include('ppr')) charts.push(chart('Winning Points per Race + BR Event', latestDays, 'ppr', 'date', v => Number(v).toFixed(2), true));
+  if (include('br_count')) charts.push(chart('BR Events', latestDays, 'br_count', 'date', undefined, true));
 
   chartHost.classList.add('trend-grid');
   trendChartInstances.splice(0).forEach(chart => chart.destroy());
@@ -1522,6 +1628,7 @@ if (requestedView) {
 refresh();
 wireViewTabs();
 wireRaceFilterButtons();
+wireTrendControls();
 wireTeamFilterButtons();
 wireTiltSortControls();
 wireSeasonControls();

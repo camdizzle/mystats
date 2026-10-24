@@ -200,6 +200,16 @@
           <h2>Race/BR Trend Charts</h2>
           <span id="trends-range-pill" class="range-pill">Trend analytics</span>
         </div>
+        <div class="trend-controls" role="group" aria-label="Trend filters">
+          <label>Range <select id="trend-range"><option value="7">Last 7 days</option><option value="21" selected>Last 21 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="all">All recorded days</option><option value="custom">Custom dates</option></select></label>
+          <span id="trend-custom-dates" hidden><label>From <input id="trend-from" type="date"></label> <label>To <input id="trend-to" type="date"></label></span>
+          <label>Group <select id="trend-grouping"><option value="daily">Daily</option><option value="weekly">Weekly (Monday)</option></select></label>
+          <label>Metric <select id="trend-metric"><option value="all">All metrics</option><option value="unique_racers">Winners</option><option value="total_races">Race + BR events</option><option value="ppr">Winning points per event</option><option value="br_count">BR events</option></select></label>
+          <label><input id="trend-compare" type="checkbox"> Compare previous period</label>
+          <button id="trend-export" type="button" class="mini-filter-btn">Export CSV</button>
+        </div>
+        <p class="meta">Filters apply to the current season's daily history. Preset ranges end on the latest recorded day. Season charts show all available seasons. Winner counts reflect first-place finishers in saved results.</p>
+        <p id="trend-status" class="meta" role="status" aria-live="polite"></p>
         <div id="trend-charts" class="analytics-groups"></div>
       </article>
     </section>
