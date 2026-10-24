@@ -2,7 +2,7 @@
 ; SEE THE DOCUMENTATION FOR DETAILS ON CREATING INNO SETUP SCRIPT FILES!
 
 #define MyAppName "MyStats"
-#define MyAppVersion "6.3.2"
+#define MyAppVersion "6.4.1"
 #define MyAppPublisher "CamWOW!!!"
 #define MyAppURL "https://discord.gg/camwow"
 #define MyAppExeName "mystats.exe"
