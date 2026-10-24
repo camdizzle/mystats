@@ -7833,16 +7833,77 @@ def play_audio_file(filename, device_name=None):
         logger.error("An error occurred while playing the audio file", exc_info=True)
 
 
+SETTINGS_NUMBER_BOUNDS = {
+    'chunk_alert_value': (0, 1000000000), 'announcedelayseconds': (0, 3600),
+    'narrative_alert_cooldown_races': (0, 10000), 'narrative_alert_min_lead_change_points': (0, 1000000000),
+    'narrative_alert_max_items': (1, 20), 'race_narrative_alert_cooldown_races': (0, 10000),
+    'race_narrative_alert_min_lead_change_points': (0, 1000000000), 'race_narrative_alert_max_items': (1, 20),
+    'tiltsurvivors_min_levels': (1, 1000000), 'rivals_min_races': (1, RIVALS_MAX_MIN_RACES),
+    'rivals_max_point_gap': (0, RIVALS_MAX_POINT_GAP), 'rivals_pair_count': (1, RIVALS_MAX_PAIRS),
+    'mycycle_min_place': (1, 1000000), 'mycycle_max_place': (1, 1000000),
+    'teams_max_size': (2, 10000), 'teams_bits_bonus_percent': (0, 10000),
+    'teams_bonus_bits_threshold': (1, 1000000000), 'teams_bonus_duration_minutes': (1, 10080),
+    'teams_tep_bonus_percent': (1, 10000), 'teams_tep_threshold': (1, 1000000000),
+    'teams_tep_per_race': (0, 1000000000), 'teams_tep_bonus_duration_minutes': (1, 10080),
+    'teams_tep_bits_cooldown_minutes': (0, 10080), 'teams_tep_member_daily_cap': (0, 1000000000),
+    'teams_tep_team_daily_cap': (0, 1000000000),
+    'teams_bonus_weight_15': (0, 1000000), 'teams_bonus_weight_25': (0, 1000000),
+    'teams_bonus_weight_35': (0, 1000000), 'teams_bonus_weight_67': (0, 1000000),
+    'chat_max_names': (1, 1000), 'overlay_rotation_seconds': (3, 120),
+    'overlay_refresh_seconds': (1, 60), 'overlay_server_port': (1, 65535),
+    'overlay_card_opacity': (65, 100), 'overlay_text_scale': (75, 175),
+    'tilt_lifetime_base_xp': (0, 1000000000000), 'tilt_season_best_level': (1, 1000000),
+    'tilt_personal_best_level': (1, 1000000), 'tilt_scroll_step_px': (1, 100),
+    'tilt_scroll_interval_ms': (10, 10000), 'tilt_scroll_pause_ms': (0, 60000),
+    'season_quest_target_races': (0, 10000000), 'season_quest_target_points': (0, 500000000),
+    'season_quest_target_race_hs': (0, 1000000), 'season_quest_target_br_hs': (0, 1000000),
+    'season_quest_target_tilt_levels': (0, 1000000), 'season_quest_target_tilt_tops': (0, 1000000),
+    'season_quest_target_tilt_points': (0, 500000000),
+}
+
+
+def settings_validation_errors(values):
+    errors = {}
+    for key, (lower, upper) in SETTINGS_NUMBER_BOUNDS.items():
+        if key not in values:
+            continue
+        raw = str(values[key]).strip()
+        if not re.fullmatch(r'[0-9]+', raw) or not lower <= int(raw) <= upper:
+            errors[key] = f'Enter a whole number from {lower:,} to {upper:,}.'
+    if 'CHANNEL' in values and not re.fullmatch(r'[a-zA-Z0-9_]{1,25}', str(values['CHANNEL']).strip()):
+        errors['CHANNEL'] = 'Enter a channel name using letters, numbers, or underscores (without @ or #).'
+    if 'teams_points_mode' in values and values['teams_points_mode'] not in ('active', 'season'):
+        errors['teams_points_mode'] = 'Choose active session or entire season.'
+    if not errors.get('mycycle_min_place') and not errors.get('mycycle_max_place'):
+        if all(key in values for key in ('mycycle_min_place', 'mycycle_max_place')) and int(values['mycycle_min_place']) > int(values['mycycle_max_place']):
+            errors['mycycle_max_place'] = 'Last placement must be at least the first placement.'
+    weight_keys = ['teams_bonus_weight_15', 'teams_bonus_weight_25', 'teams_bonus_weight_35', 'teams_bonus_weight_67']
+    if (str(values.get('teams_bits_bonus_enabled', 'False')).lower() == 'true'
+            and str(values.get('teams_bits_bonus_percent', '')).strip() == '0'
+            and all(key in values and key not in errors for key in weight_keys)
+            and not any(int(values[key]) for key in weight_keys)):
+        errors[weight_keys[0]] = 'Random bonuses need at least one nonzero weight.'
+    return errors
+
+
 def open_settings_window():
+    existing = getattr(root, '_settings_window', None)
+    if existing is not None and existing.winfo_exists():
+        existing.lift()
+        existing.focus_set()
+        return
     settings_window = tk.Toplevel(root)
+    root._settings_window = settings_window
     settings_window.title(tr("Settings"))
     settings_window.transient(root)
     settings_window.attributes('-topmost', False)
 
-    window_width = 820
-    window_height = 700
+    available_width = max(480, settings_window.winfo_screenwidth() - 60)
+    available_height = max(360, settings_window.winfo_screenheight() - 120)
+    window_width = min(820, available_width)
+    window_height = min(700, available_height)
     center_toplevel(settings_window, window_width, window_height)
-    settings_window.minsize(720, 640)
+    settings_window.minsize(min(720, available_width), min(640, available_height))
     settings_window.grid_rowconfigure(0, weight=1)
     settings_window.grid_columnconfigure(0, weight=1)
 
@@ -7852,69 +7913,82 @@ def open_settings_window():
     notebook = ttk.Notebook(content_frame)
     notebook.pack(fill="both", expand=True)
 
-    general_root_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
-    tilt_root_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
-    race_br_root_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
+    def create_settings_page(parent):
+        outer = ttk.Frame(parent, style="App.TFrame")
+        outer.grid_rowconfigure(0, weight=1)
+        outer.grid_columnconfigure(0, weight=1)
+        canvas = tk.Canvas(outer, highlightthickness=0, background=ttk.Style().lookup('TFrame', 'background') or '#202020')
+        canvas.grid(row=0, column=0, sticky='nsew')
+        canvas._settings_canvas = canvas
+        vertical = ttk.Scrollbar(outer, orient='vertical', command=canvas.yview)
+        vertical.grid(row=0, column=1, sticky='ns')
+        horizontal = ttk.Scrollbar(outer, orient='horizontal', command=canvas.xview)
+        horizontal.grid(row=1, column=0, sticky='ew')
+        canvas.configure(yscrollcommand=vertical.set, xscrollcommand=horizontal.set)
+        page = ttk.Frame(canvas, style='App.TFrame', padding=10)
+        window_id = canvas.create_window((0, 0), window=page, anchor='nw')
+        page.bind('<Configure>', lambda event: canvas.configure(scrollregion=canvas.bbox('all')))
+        canvas.bind('<Configure>', lambda event: canvas.itemconfigure(window_id, width=max(event.width, page.winfo_reqwidth())))
+        page._settings_outer = outer
+        page._settings_canvas = canvas
+        outer._settings_content = page
+        return page
 
-    notebook.add(general_root_tab, text=tr("General"))
-    notebook.add(tilt_root_tab, text=tr("Tilt"))
-    notebook.add(race_br_root_tab, text="Race/BR")
+    def add_settings_tab(parent, page, **options):
+        parent.add(getattr(page, '_settings_outer', page), **options)
 
-    general_root_tab.grid_columnconfigure(0, weight=1)
-    general_root_tab.grid_rowconfigure(0, weight=1)
-    tilt_root_tab.grid_columnconfigure(0, weight=1)
-    tilt_root_tab.grid_rowconfigure(0, weight=1)
-    race_br_root_tab.grid_columnconfigure(0, weight=1)
-    race_br_root_tab.grid_rowconfigure(0, weight=1)
+    main_pages = {}
+    for key, title in [('general', 'General'), ('chat', 'Chat'), ('overlays', 'Overlays'),
+                       ('features', 'Features'), ('teams', 'MyTeams'), ('diagnostics', 'Diagnostics')]:
+        page = ttk.Frame(notebook, style='App.TFrame', padding=10)
+        page.grid_columnconfigure(0, weight=1)
+        page.grid_rowconfigure(0, weight=1)
+        notebook.add(page, text=tr(title))
+        main_pages[key] = page
+    general_sections = ttk.Notebook(main_pages['general'])
+    chat_sections = ttk.Notebook(main_pages['chat'])
+    overlay_sections = ttk.Notebook(main_pages['overlays'])
+    feature_sections = ttk.Notebook(main_pages['features'])
+    diagnostics_sections = ttk.Notebook(main_pages['diagnostics'])
+    for section in (general_sections, chat_sections, overlay_sections, feature_sections, diagnostics_sections):
+        section.grid(row=0, column=0, sticky='nsew')
 
-    general_sections = ttk.Notebook(general_root_tab)
-    general_sections.grid(row=0, column=0, sticky="nsew")
+    general_tab = create_settings_page(general_sections)
+    audio_tab = create_settings_page(general_sections)
+    appearance_tab = create_settings_page(general_sections)
 
-    tilt_sections = ttk.Notebook(tilt_root_tab)
-    tilt_sections.grid(row=0, column=0, sticky="nsew")
+    tilt_chat_tab = create_settings_page(chat_sections)
+    tilt_overlay_tab = create_settings_page(overlay_sections)
+    tilt_horizontal_overlay_tab = create_settings_page(overlay_sections)
+    tilt_thresholds_tab = create_settings_page(feature_sections)
 
-    race_br_sections = ttk.Notebook(race_br_root_tab)
-    race_br_sections.grid(row=0, column=0, sticky="nsew")
+    race_chat_tab = create_settings_page(chat_sections)
+    race_alerts_tab = create_settings_page(chat_sections)
+    race_overlay_tab = create_settings_page(overlay_sections)
+    race_horizontal_overlay_tab = create_settings_page(overlay_sections)
+    mycycle_tab = create_settings_page(feature_sections)
+    rivals_tab = create_settings_page(feature_sections)
+    season_quests_tab = create_settings_page(feature_sections)
 
-    general_tab = ttk.Frame(general_sections, style="App.TFrame", padding=10)
-    audio_tab = ttk.Frame(general_sections, style="App.TFrame", padding=10)
-    appearance_tab = ttk.Frame(general_sections, style="App.TFrame", padding=10)
+    add_settings_tab(general_sections, general_tab, text=tr('General'))
+    add_settings_tab(general_sections, audio_tab, text=tr('Audio'))
+    add_settings_tab(general_sections, appearance_tab, text=tr('Appearance'))
+    add_settings_tab(chat_sections, race_chat_tab, text='Chat Controls')
+    add_settings_tab(chat_sections, race_alerts_tab, text='Race Alerts')
+    add_settings_tab(chat_sections, tilt_chat_tab, text='Tilt Alerts')
+    add_settings_tab(overlay_sections, race_overlay_tab, text='Race/BR')
+    add_settings_tab(overlay_sections, race_horizontal_overlay_tab, text='Race/BR Ticker')
+    add_settings_tab(overlay_sections, tilt_overlay_tab, text='Tilt')
+    add_settings_tab(overlay_sections, tilt_horizontal_overlay_tab, text='Tilt Ticker')
+    add_settings_tab(feature_sections, mycycle_tab, text='MyCycle')
+    add_settings_tab(feature_sections, rivals_tab, text='Rivals')
+    add_settings_tab(feature_sections, season_quests_tab, text='Season Quests')
+    add_settings_tab(feature_sections, tilt_thresholds_tab, text='Tilt Commands')
 
-    tilt_chat_tab = ttk.Frame(tilt_sections, style="App.TFrame", padding=10)
-    tilt_overlay_tab = ttk.Frame(tilt_sections, style="App.TFrame", padding=10)
-    tilt_horizontal_overlay_tab = ttk.Frame(tilt_sections, style="App.TFrame", padding=10)
-    tilt_thresholds_tab = ttk.Frame(tilt_sections, style="App.TFrame", padding=10)
-
-    race_chat_tab = ttk.Frame(race_br_sections, style="App.TFrame", padding=10)
-    race_alerts_tab = ttk.Frame(race_br_sections, style="App.TFrame", padding=10)
-    race_overlay_tab = ttk.Frame(race_br_sections, style="App.TFrame", padding=10)
-    race_horizontal_overlay_tab = ttk.Frame(race_br_sections, style="App.TFrame", padding=10)
-    mycycle_tab = ttk.Frame(race_br_sections, style="App.TFrame", padding=10)
-    rivals_tab = ttk.Frame(race_br_sections, style="App.TFrame", padding=10)
-    season_quests_tab = ttk.Frame(race_br_sections, style="App.TFrame", padding=10)
-
-    general_sections.add(audio_tab, text=tr("Audio"))
-    general_sections.add(appearance_tab, text=tr("Appearance"))
-    general_sections.add(general_tab, text=tr("General"))
-
-    tilt_sections.add(tilt_chat_tab, text="Tilt Chat")
-    tilt_sections.add(tilt_overlay_tab, text="Tilt Overlay")
-    tilt_sections.add(tilt_horizontal_overlay_tab, text="Tilt Horizontal Overlay")
-    tilt_sections.add(tilt_thresholds_tab, text="Tilt Command Thresholds")
-
-    race_br_sections.add(race_chat_tab, text=tr("Chat"))
-    race_br_sections.add(race_alerts_tab, text="Alerts")
-    race_br_sections.add(race_overlay_tab, text=tr("Overlay"))
-    race_br_sections.add(race_horizontal_overlay_tab, text="Horizontal Overlay")
-    race_br_sections.add(mycycle_tab, text=tr("MyCycle"))
-    race_br_sections.add(rivals_tab, text=tr("Rivals"))
-    race_br_sections.add(season_quests_tab, text=tr("Season Quests"))
-
-    teams_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
-    testing_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
-    notebook.add(teams_tab, text="MyTeams")
-    diagnostics_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
-    notebook.add(diagnostics_tab, text="Diagnostics")
+    teams_tab = main_pages["teams"]
+    testing_tab = create_settings_page(diagnostics_sections)
+    diagnostics_tab = ttk.Frame(diagnostics_sections, style="App.TFrame", padding=10)
+    diagnostics_sections.add(diagnostics_tab, text="Status")
     diagnostics_tab.grid_columnconfigure(0, weight=1)
     diagnostics_tab.grid_rowconfigure(1, weight=1)
     diagnostic_actions = ttk.Frame(diagnostics_tab)
@@ -7938,7 +8012,7 @@ def open_settings_window():
 
     ttk.Button(diagnostic_actions, text="Refresh status", command=refresh_diagnostics).pack(side="left", padx=(0, 8))
     ttk.Button(diagnostic_actions, text="Copy report", command=copy_diagnostics).pack(side="left")
-    notebook.bind('<<NotebookTabChanged>>', lambda event: refresh_diagnostics() if notebook.select() == str(diagnostics_tab) else None, add='+')
+    diagnostics_sections.bind('<<NotebookTabChanged>>', lambda event: refresh_diagnostics() if diagnostics_sections.select() == str(diagnostics_tab) else None, add='+')
     refresh_diagnostics()
 
 
@@ -7999,7 +8073,7 @@ def open_settings_window():
 
     # --- Testing tab ---
     testing_tab.grid_columnconfigure(0, weight=1)
-    ttk.Label(testing_tab, text="Send test chat messages for Race / BR / Tilt output triggers.", style="Small.TLabel").grid(
+    ttk.Label(testing_tab, text="These buttons send to your live Twitch chat immediately, using saved chat controls. They are not previews.", style="Small.TLabel").grid(
         row=0, column=0, sticky="w", pady=(0, 8)
     )
 
@@ -8091,16 +8165,30 @@ def open_settings_window():
     ttk.Button(tilt_test_frame, text="Send Tilt Test", command=send_tilt_test_message).grid(row=3, column=0, sticky="w", padx=10, pady=(6, 8))
 
     def refresh_testing_tab_visibility():
-        existing_tabs = notebook.tabs()
-        testing_tab_id = str(testing_tab)
+        testing_id = str(testing_tab._settings_outer)
         if testing_tab_enabled_var.get():
-            if testing_tab_id not in existing_tabs:
-                notebook.add(testing_tab, text="Testing")
-        elif testing_tab_id in existing_tabs:
-            notebook.forget(testing_tab)
+            if testing_id not in diagnostics_sections.tabs():
+                add_settings_tab(diagnostics_sections, testing_tab, text='Send Test Messages')
+        elif testing_id in diagnostics_sections.tabs():
+            diagnostics_sections.forget(testing_id)
 
-    testing_tab_enabled_var.trace_add("write", lambda *_: refresh_testing_tab_visibility())
+    testing_tab_enabled_var.trace_add('write', lambda *_: refresh_testing_tab_visibility())
     refresh_testing_tab_visibility()
+
+    chunk_sound_var = tk.StringVar(value=config.get_setting('chunk_alert_sound') or '')
+    reset_sound_var = tk.StringVar(value=config.get_setting('reset_audio_sound') or '')
+
+    def choose_sound(variable, label):
+        filename = filedialog.askopenfilename(parent=settings_window, initialdir=appdata_path('sound files'), title='Select sound file', filetypes=[('Audio files', '*.mp3;*.wav;*.ogg')])
+        if filename:
+            variable.set(filename)
+            label.configure(text=os.path.basename(filename))
+
+    def preview_sound(variable):
+        if variable.get() and os.path.isfile(variable.get()):
+            threading.Thread(target=play_audio_file, args=(variable.get(), selected_device.get()), daemon=True).start()
+        else:
+            messagebox.showwarning('Audio preview', 'Select an existing sound file first.', parent=settings_window)
 
     # --- Audio tab ---
     ttk.Label(audio_tab, text="Audio alerts and output device settings", style="Small.TLabel").grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 8))
@@ -8122,12 +8210,12 @@ def open_settings_window():
     file_button_frame = ttk.Frame(chunk_alert_frame, style="App.TFrame")
     file_button_frame.pack(anchor="w", padx=10, pady=(0, 8))
     ttk.Button(file_button_frame, text="📁", width=3,
-               command=lambda: select_chunk_alert_sound(chunk_alert_label, settings_window)).pack(side="left", padx=(0, 6))
-    ttk.Button(file_button_frame, text="🔊", width=3, command=test_chunkaudio_playback).pack(side="left")
+               command=lambda: choose_sound(chunk_sound_var, chunk_alert_label)).pack(side="left", padx=(0, 6))
+    ttk.Button(file_button_frame, text="🔊", width=3, command=lambda: preview_sound(chunk_sound_var)).pack(side="left")
 
     saved_chunk_alert_file_path = config.get_setting("chunk_alert_sound")
     if saved_chunk_alert_file_path:
-        update_chunk_alert_audio_label(chunk_alert_label, saved_chunk_alert_file_path)
+        chunk_alert_label.configure(text=os.path.basename(saved_chunk_alert_file_path))
 
     marbles_reset_frame = ttk.LabelFrame(audio_tab, text="Marbles Reset", style="Card.TLabelframe")
     marbles_reset_frame.grid(row=1, column=1, pady=6, sticky="nsew")
@@ -8141,12 +8229,12 @@ def open_settings_window():
     reset_button_frame = ttk.Frame(marbles_reset_frame, style="App.TFrame")
     reset_button_frame.pack(anchor="w", padx=10, pady=(0, 8))
     ttk.Button(reset_button_frame, text="📁", width=3,
-               command=lambda: select_reset_audio_sound(reset_audio_label, settings_window)).pack(side="left", padx=(0, 6))
-    ttk.Button(reset_button_frame, text="🔊", width=3, command=test_audio_playback).pack(side="left")
+               command=lambda: choose_sound(reset_sound_var, reset_audio_label)).pack(side="left", padx=(0, 6))
+    ttk.Button(reset_button_frame, text="🔊", width=3, command=lambda: preview_sound(reset_sound_var)).pack(side="left")
 
     saved_reset_file_path = config.get_setting("reset_audio_sound")
     if saved_reset_file_path:
-        update_reset_audio_label(reset_audio_label, saved_reset_file_path)
+        reset_audio_label.configure(text=os.path.basename(saved_reset_file_path))
 
     ttk.Label(audio_tab, text="Select Audio Output Device").grid(row=2, column=0, columnspan=3, sticky="w", pady=(8, 4))
     audio_devices = get_audio_devices()
@@ -8154,30 +8242,25 @@ def open_settings_window():
     current_device = config.get_setting('audio_device')
     if not current_device:
         current_device = "Primary Sound Driver"
-        config.set_setting('audio_device', current_device)
     selected_device.set(current_device)
 
     device_combobox = ttk.Combobox(audio_tab, textvariable=selected_device, values=audio_devices, width=62)
     device_combobox.grid(row=3, column=0, columnspan=3, sticky="w")
 
-    def on_device_change(event):
-        config.set_setting('audio_device', selected_device.get())
-
-    device_combobox.bind('<<ComboboxSelected>>', on_device_change)
 
     for idx in range(2):
         audio_tab.grid_columnconfigure(idx, weight=1)
 
     # --- Chat tab ---
-    ttk.Label(race_chat_tab, text="Control what MyStats announces in chat", style="Small.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 8))
+    ttk.Label(race_chat_tab, text="Chat Controls — changes take effect when you save", style="Small.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 8))
 
     chat_messages_enabled_var = tk.BooleanVar(value=is_chat_response_enabled('chat_messages_enabled'))
     chat_team_announcements_var = tk.BooleanVar(value=is_chat_response_enabled('chat_team_announcements'))
     chat_quest_announcements_var = tk.BooleanVar(value=is_chat_response_enabled('chat_quest_announcements'))
-    ttk.Checkbutton(race_chat_tab, text="Enable all outgoing chat (master switch)", variable=chat_messages_enabled_var).grid(row=6, column=0, sticky="w", pady=(12, 2))
+    ttk.Checkbutton(race_chat_tab, text="Enable all outgoing chat (master switch)", variable=chat_messages_enabled_var).grid(row=1, column=0, sticky="w", pady=(12, 2))
     ttk.Checkbutton(race_chat_tab, text="Team bonus announcements", variable=chat_team_announcements_var).grid(row=7, column=0, sticky="w", pady=2)
     ttk.Checkbutton(race_chat_tab, text="Season quest announcements", variable=chat_quest_announcements_var).grid(row=8, column=0, sticky="w", pady=2)
-    ttk.Label(race_chat_tab, text="Save to apply. The master switch mutes all chat. Race/BR/Tilt switches also control their related announcements.\nMyCycle announcements keep their own switch in MyCycle settings.", wraplength=560).grid(row=9, column=0, sticky="w", pady=8)
+    ttk.Label(race_chat_tab, text="Save to apply. The master switch mutes all chat. Race/BR/Tilt switches also control their related announcements.\nMyCycle announcements keep their own switch in MyCycle settings.", wraplength=560).grid(row=10, column=0, sticky="w", pady=8)
 
     chat_br_results_var = tk.BooleanVar(value=is_chat_response_enabled("chat_br_results"))
     chat_race_results_var = tk.BooleanVar(value=is_chat_response_enabled("chat_race_results"))
@@ -8185,11 +8268,11 @@ def open_settings_window():
     chat_leaderboard_show_medals_var = tk.BooleanVar(value=str(config.get_setting("chat_leaderboard_show_medals") or "True") == "True")
     competitive_raid_monitor_enabled_var = tk.BooleanVar(value=is_chat_response_enabled("competitive_raid_monitor_enabled"))
 
-    ttk.Checkbutton(race_chat_tab, text="BR Results", variable=chat_br_results_var).grid(row=1, column=0, sticky="w", pady=2)
+    ttk.Checkbutton(race_chat_tab, text="BR Results", variable=chat_br_results_var).grid(row=3, column=0, sticky="w", pady=2)
     ttk.Checkbutton(race_chat_tab, text="Race Results", variable=chat_race_results_var).grid(row=2, column=0, sticky="w", pady=2)
-    ttk.Checkbutton(race_chat_tab, text="All !commands", variable=chat_all_commands_var).grid(row=3, column=0, sticky="w", pady=2)
-    ttk.Checkbutton(race_chat_tab, text="Show top-3 medal emotes in leaderboard commands", variable=chat_leaderboard_show_medals_var).grid(row=4, column=0, sticky="w", pady=2)
-    ttk.Checkbutton(race_chat_tab, text="Competitive Raid Alerts (opt-in)", variable=competitive_raid_monitor_enabled_var).grid(row=5, column=0, sticky="w", pady=2)
+    ttk.Checkbutton(race_chat_tab, text="All !commands", variable=chat_all_commands_var).grid(row=5, column=0, sticky="w", pady=2)
+    ttk.Checkbutton(race_chat_tab, text="Show top-3 medal emotes in leaderboard commands", variable=chat_leaderboard_show_medals_var).grid(row=6, column=0, sticky="w", pady=2)
+    ttk.Checkbutton(race_chat_tab, text="Competitive Raid Alerts (opt-in)", variable=competitive_raid_monitor_enabled_var).grid(row=9, column=0, sticky="w", pady=2)
 
     race_narrative_alerts_var = tk.BooleanVar(value=is_chat_response_enabled("race_narrative_alerts_enabled"))
     race_narrative_grinder_var = tk.BooleanVar(value=is_chat_response_enabled("race_narrative_grinder_enabled"))
@@ -8233,6 +8316,8 @@ def open_settings_window():
 
     # --- Tilt tab ---
     ttk.Label(tilt_chat_tab, text="Configure tilt chat alerts", style="Small.TLabel").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
+
+    ttk.Label(race_alerts_tab, text='Player alert options also affect overlay events, even when outgoing chat is muted.', wraplength=600).grid(row=2, column=0, sticky='w', pady=8)
 
     chat_tilt_results_var = tk.BooleanVar(value=is_chat_response_enabled("chat_tilt_results"))
     chat_tilt_suppress_offline_var = tk.BooleanVar(value=is_chat_response_enabled("chat_tilt_suppress_offline"))
@@ -8330,6 +8415,8 @@ def open_settings_window():
     ttk.Label(season_quests_tab, text="Tip: Set any target to 0 to disable that specific quest.", style="Small.TLabel").grid(row=7, column=0, columnspan=2, sticky="w", pady=(8, 4))
 
     def reset_season_quest_progress():
+        if not messagebox.askyesno('Reset Quest Progress', 'Reset completion progress for the active season now? This is an immediate action and is not undone by Cancel.', parent=settings_window):
+            return
         for completion_key in ("season_quest_complete_races", "season_quest_complete_points", "season_quest_complete_race_hs", "season_quest_complete_br_hs", "season_quest_complete_tilt_levels", "season_quest_complete_tilt_tops", "season_quest_complete_tilt_points"):
             config.set_setting(completion_key, "False", persistent=True)
         completion_state = _load_season_quest_completion_state()
@@ -8338,7 +8425,7 @@ def open_settings_window():
         _invalidate_dashboard_cache()
         messagebox.showinfo("Season Quests", "Season quest completion flags have been reset for the active season.")
 
-    ttk.Button(season_quests_tab, text="Reset Quest Progress", command=reset_season_quest_progress).grid(row=8, column=0, sticky="w", pady=(8, 0))
+    ttk.Button(season_quests_tab, text="Reset Quest Progress Now", command=reset_season_quest_progress).grid(row=8, column=0, sticky="w", pady=(8, 0))
     ttk.Button(season_quests_tab, text="View Quest Completion", command=lambda: open_quest_completion_window(settings_window)).grid(row=8, column=1, sticky="w", pady=(8, 0))
 
     # --- Rivals tab ---
@@ -8434,8 +8521,9 @@ def open_settings_window():
         center_toplevel(manager, 760, 420)
 
         ttk.Label(manager, text="Manage active state, view leaderboard, or delete sessions.", style="Small.TLabel").pack(anchor="w", padx=12, pady=(10, 6))
-        rows_host = ttk.Frame(manager, style="App.TFrame")
-        rows_host.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+        rows_host = create_settings_page(manager)
+        rows_host._settings_outer.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+        manager.bind('<MouseWheel>', scroll_settings, add='+')
 
         def render_manager_rows():
             for child in rows_host.winfo_children():
@@ -8477,7 +8565,9 @@ def open_settings_window():
                 def open_session_leaderboard(sid=session.get('id')):
                     open_mycycle_leaderboard_window(settings_window, initial_session_id=sid)
 
-                def delete_session(sid=session.get('id')):
+                def delete_session(sid=session.get('id'), name=session.get('name', 'session')):
+                    if not messagebox.askyesno('Delete MyCycle session', f"Delete '{name}' and its cycle progress now? This cannot be undone by Cancel.", parent=manager):
+                        return
                     ok, msg = delete_mycycle_session(sid)
                     if not ok:
                         messagebox.showinfo("MyCycle", msg, parent=manager)
@@ -8485,7 +8575,7 @@ def open_settings_window():
                     render_manager_rows()
                     refresh_session_dropdown()
 
-                ttk.Button(row, text="X", width=3, command=delete_session, style="SessionDelete.TButton").pack(side="right", padx=(6, 0))
+                ttk.Button(row, text="Delete", command=delete_session, style="SessionDelete.TButton").pack(side="right", padx=(6, 0))
                 ttk.Button(
                     row,
                     text="Deactivate" if is_active else "Activate",
@@ -8496,7 +8586,7 @@ def open_settings_window():
 
         render_manager_rows()
 
-    ttk.Button(mycycle_tab, text="Manage Sessions", command=open_session_manager_window).grid(row=6, column=3, sticky="w", padx=(8, 0), pady=(10, 2))
+    ttk.Button(mycycle_tab, text="Manage Sessions (immediate)", command=open_session_manager_window).grid(row=6, column=3, sticky="w", padx=(8, 0), pady=(10, 2))
     ttk.Button(mycycle_tab, text="Create Session", command=create_cycle_session_prompt).grid(row=7, column=0, sticky="w", pady=(8, 0))
     ttk.Button(mycycle_tab, text="View Leaderboard", command=lambda: open_mycycle_leaderboard_window(settings_window)).grid(row=7, column=1, sticky="w", pady=(8, 0))
     ttk.Label(mycycle_tab, text="Tip: Primary session is shown first in leaderboard pagination across active sessions.", style="Small.TLabel").grid(row=8, column=0, columnspan=4, sticky="w", pady=(8, 0))
@@ -8507,10 +8597,10 @@ def open_settings_window():
     teams_tab.grid_columnconfigure(0, weight=1)
     teams_tab.grid_rowconfigure(0, weight=1)
 
-    teams_settings_tab = ttk.Frame(teams_sections, style="App.TFrame", padding=10)
-    teams_management_tab = ttk.Frame(teams_sections, style="App.TFrame", padding=10)
-    teams_sections.add(teams_settings_tab, text="Team Settings")
-    teams_sections.add(teams_management_tab, text="Team Management")
+    teams_settings_tab = create_settings_page(teams_sections)
+    teams_management_tab = create_settings_page(teams_sections)
+    add_settings_tab(teams_sections, teams_settings_tab, text="Team Settings")
+    add_settings_tab(teams_sections, teams_management_tab, text="Team Management")
 
     teams_settings_tab.grid_columnconfigure(0, weight=1)
     teams_enabled_var = tk.BooleanVar(value=parse_boolean_token(config.get_setting("teams_enabled"), default=True))
@@ -8527,7 +8617,7 @@ def open_settings_window():
     bonus_settings_frame = ttk.LabelFrame(settings_columns, text="Bonus Settings", padding=10)
     bonus_settings_frame.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
 
-    ttk.Label(tep_settings_frame, text="Points Counting Mode").grid(row=0, column=0, sticky="w", pady=(0, 6))
+    ttk.Label(tep_settings_frame, text="Count points from").grid(row=0, column=0, sticky="w", pady=(0, 6))
     teams_points_mode_var = tk.StringVar(value=config.get_setting("teams_points_mode") or "active")
     ttk.Combobox(
         tep_settings_frame,
@@ -8561,15 +8651,16 @@ def open_settings_window():
     teams_tep_per_race_entry.grid(row=4, column=1, sticky="w", pady=(0, 6), padx=(8, 0))
     teams_tep_per_race_entry.insert(0, config.get_setting("teams_tep_per_race") or "1")
 
-    ttk.Label(tep_settings_frame, text="TEP Bonus % / Duration (min)").grid(row=5, column=0, sticky="w", pady=(0, 6))
+    ttk.Label(tep_settings_frame, text="TEP Bonus").grid(row=5, column=0, sticky="w", pady=(0, 6))
     tep_bonus_frame = ttk.Frame(tep_settings_frame, style="App.TFrame")
     tep_bonus_frame.grid(row=5, column=1, sticky="w", pady=(0, 6), padx=(8, 0))
     teams_tep_bonus_percent_entry = ttk.Entry(tep_bonus_frame, width=5, justify='center')
     teams_tep_bonus_percent_entry.pack(side="left")
     teams_tep_bonus_percent_entry.insert(0, config.get_setting("teams_tep_bonus_percent") or "15")
-    ttk.Label(tep_bonus_frame, text="/").pack(side="left", padx=2)
+    ttk.Label(tep_bonus_frame, text="% for").pack(side="left", padx=2)
     teams_tep_bonus_duration_entry = ttk.Entry(tep_bonus_frame, width=5, justify='center')
     teams_tep_bonus_duration_entry.pack(side="left")
+    ttk.Label(tep_bonus_frame, text="minutes").pack(side="left", padx=3)
     teams_tep_bonus_duration_entry.insert(0, config.get_setting("teams_tep_bonus_duration_minutes") or "15")
 
     ttk.Label(tep_settings_frame, text="Bits Cooldown (min)").grid(row=6, column=0, sticky="w", pady=(0, 6))
@@ -8601,7 +8692,7 @@ def open_settings_window():
     teams_bonus_bits_threshold_entry.grid(row=1, column=1, sticky="w", pady=(0, 6), padx=(8, 0))
     teams_bonus_bits_threshold_entry.insert(0, config.get_setting("teams_bonus_bits_threshold") or "1000")
 
-    ttk.Label(bonus_settings_frame, text="Bits Bonus % (0=random)").grid(row=2, column=0, sticky="w", pady=(0, 6))
+    ttk.Label(bonus_settings_frame, text="Bits Bonus % (0 = random tiers)").grid(row=2, column=0, sticky="w", pady=(0, 6))
     teams_bits_bonus_percent_entry = ttk.Entry(bonus_settings_frame, width=10, justify='center')
     teams_bits_bonus_percent_entry.grid(row=2, column=1, sticky="w", pady=(0, 6), padx=(8, 0))
     teams_bits_bonus_percent_entry.insert(0, config.get_setting("teams_bits_bonus_percent") or "0")
@@ -8611,7 +8702,7 @@ def open_settings_window():
     teams_bonus_duration_entry.grid(row=3, column=1, sticky="w", pady=(0, 6), padx=(8, 0))
     teams_bonus_duration_entry.insert(0, config.get_setting("teams_bonus_duration_minutes") or "20")
 
-    ttk.Label(bonus_settings_frame, text="Random Weights 15%/25%/35%/67%").grid(row=4, column=0, sticky="nw", pady=(0, 6))
+    ttk.Label(bonus_settings_frame, text="Random tier weights (relative chances)").grid(row=4, column=0, sticky="nw", pady=(0, 6))
     bonus_weights_frame = ttk.Frame(bonus_settings_frame, style="App.TFrame")
     bonus_weights_frame.grid(row=4, column=1, sticky="w", pady=(0, 6), padx=(8, 0))
     ttk.Label(bonus_weights_frame, text="15%", width=4, anchor="w").grid(row=0, column=0, sticky="w")
@@ -8650,6 +8741,9 @@ def open_settings_window():
         wraplength=760
     ).grid(row=0, column=0, sticky="w")
 
+    ttk.Label(teams_settings_tab, text='Active = current session; Season = entire season. Changes apply when saved.', wraplength=680).grid(row=2, column=0, sticky='w', pady=8)
+    ttk.Label(teams_management_tab, text='Team management actions take effect immediately and are not undone by Cancel. The table uses saved settings.', wraplength=680).grid(row=2, column=0, sticky='w', pady=8)
+    teams_management_tab.grid_rowconfigure(0, weight=1)
     teams_tree = ttk.Treeview(teams_management_tab, columns=("team", "captain", "size", "recruiting", "bonus", "daily", "weekly", "season"), show='headings', height=10)
     for key, label, width in [
         ("team", "Team", 170),
@@ -8675,16 +8769,10 @@ def open_settings_window():
         with TEAM_DATA_LOCK:
             data = _load_team_data()
             channel_state = _get_channel_team_state(data, config.get_setting('CHANNEL'))
-            channel_state['settings']['points_mode'] = teams_points_mode_var.get() or 'active'
-            try:
-                channel_state['settings']['max_team_size'] = max(2, int(teams_max_size_entry.get() or 25))
-            except ValueError:
-                channel_state['settings']['max_team_size'] = 25
             now = datetime.now(timezone.utc)
             for team in channel_state.get('teams', {}).values():
                 if isinstance(team, dict):
                     _get_current_team_bonus(team, now)
-            _save_team_data(data)
 
         for team_name, team in sorted(channel_state.get('teams', {}).items()):
             size = 1 + len(team.get('co_captains', [])) + len(team.get('members', []))
@@ -8842,15 +8930,7 @@ def open_settings_window():
     theme_combobox = ttk.Combobox(appearance_tab, textvariable=selected_theme, values=available_themes, width=24, state="readonly")
     theme_combobox.grid(row=1, column=1, sticky="w", pady=(0, 4), padx=(8, 0))
 
-    def apply_selected_theme(event=None):
-        try:
-            apply_theme(selected_theme.get())
-            config.set_setting("UI_THEME", selected_theme.get(), persistent=True)
-        except Exception as e:
-            messagebox.showerror("Theme Error", f"Could not apply theme: {e}")
-
-    theme_combobox.bind('<<ComboboxSelected>>', apply_selected_theme)
-
+    ttk.Label(appearance_tab, text='The selected theme is applied when you save.', wraplength=580).grid(row=2, column=0, columnspan=2, sticky='w', pady=8)
 
     # --- Overlay tabs ---
     race_overlay_tab.grid_columnconfigure(0, weight=1)
@@ -9033,184 +9113,50 @@ def open_settings_window():
     ).grid(row=2, column=0, sticky="w", pady=(8, 0))
 
 
-    def reset_settings_defaults():
-        chunk_alert_var.set(True)
-        announce_delay_var.set(False)
-        reset_audio_var.set(False)
-        minimize_to_tray_var.set(False)
-        windows_tray_notifications_var.set(False)
-        testing_tab_enabled_var.set(False)
-        app_language_var.set(LANGUAGE_DISPLAY_NAMES['en'])
-        chat_messages_enabled_var.set(True)
-        chat_team_announcements_var.set(True)
-        chat_quest_announcements_var.set(True)
-        chat_br_results_var.set(True)
-        chat_race_results_var.set(True)
-        chat_tilt_results_var.set(True)
-        chat_all_commands_var.set(True)
-        chat_leaderboard_show_medals_var.set(True)
-        competitive_raid_monitor_enabled_var.set(False)
-        chat_narrative_alerts_var.set(True)
-        chat_tilt_suppress_offline_var.set(True)
-        chat_tilt_redact_survivor_names_var.set(False)
-        narrative_alert_grinder_var.set(True)
-        narrative_alert_winmilestone_var.set(True)
-        narrative_alert_leadchange_var.set(True)
-        narrative_alert_cooldown_entry.delete(0, tk.END)
-        narrative_alert_cooldown_entry.insert(0, "3")
-        narrative_alert_min_gap_entry.delete(0, tk.END)
-        narrative_alert_min_gap_entry.insert(0, "500")
-        narrative_alert_max_items_entry.delete(0, tk.END)
-        narrative_alert_max_items_entry.insert(0, "3")
-        race_narrative_alerts_var.set(True)
-        race_narrative_grinder_var.set(True)
-        race_narrative_winmilestone_var.set(True)
-        race_narrative_leadchange_var.set(True)
-        race_narrative_cooldown_entry.delete(0, tk.END)
-        race_narrative_cooldown_entry.insert(0, "3")
-        race_narrative_min_gap_entry.delete(0, tk.END)
-        race_narrative_min_gap_entry.insert(0, "500")
-        race_narrative_max_items_entry.delete(0, tk.END)
-        race_narrative_max_items_entry.insert(0, "3")
-        tiltsurvivors_min_levels_entry.delete(0, tk.END)
-        tiltsurvivors_min_levels_entry.insert(0, "20")
-        season_quests_enabled_var.set(True)
-        rivals_enabled_var.set(True)
-        selected_max_names.set("25")
-        rivals_min_races_entry.delete(0, tk.END)
-        rivals_min_races_entry.insert(0, "50")
-        rivals_max_gap_entry.delete(0, tk.END)
-        rivals_max_gap_entry.insert(0, "1500")
-        rivals_pair_count_entry.delete(0, tk.END)
-        rivals_pair_count_entry.insert(0, "25")
-        mycycle_enabled_var.set(True)
-        mycycle_announce_var.set(True)
-        mycycle_include_br_var.set(False)
-        mycycle_min_place_entry.delete(0, tk.END)
-        mycycle_min_place_entry.insert(0, "1")
-        mycycle_max_place_entry.delete(0, tk.END)
-        mycycle_max_place_entry.insert(0, "10")
-        season_quest_races_entry.delete(0, tk.END)
-        season_quest_races_entry.insert(0, "1000")
-        season_quest_points_entry.delete(0, tk.END)
-        season_quest_points_entry.insert(0, "500000")
-        season_quest_race_hs_entry.delete(0, tk.END)
-        season_quest_race_hs_entry.insert(0, "3000")
-        season_quest_br_hs_entry.delete(0, tk.END)
-        season_quest_br_hs_entry.insert(0, "3000")
-        season_quest_tilt_levels_entry.delete(0, tk.END)
-        season_quest_tilt_levels_entry.insert(0, "1000")
-        season_quest_tilt_tops_entry.delete(0, tk.END)
-        season_quest_tilt_tops_entry.insert(0, "100")
-        season_quest_tilt_points_entry.delete(0, tk.END)
-        season_quest_tilt_points_entry.insert(0, "500000")
-        chunk_alert_trigger_entry.delete(0, tk.END)
-        chunk_alert_trigger_entry.insert(0, "1000")
-        delay_seconds_entry.delete(0, tk.END)
-        delay_seconds_entry.insert(0, "0")
-        overlay_rotation_entry.delete(0, tk.END)
-        overlay_rotation_entry.insert(0, "10")
-        overlay_refresh_entry.delete(0, tk.END)
-        overlay_refresh_entry.insert(0, "3")
-        overlay_port_entry.delete(0, tk.END)
-        overlay_port_entry.insert(0, "5000")
-        overlay_theme_var.set("midnight")
-        overlay_opacity_entry.delete(0, tk.END)
-        overlay_opacity_entry.insert(0, "84")
-        overlay_text_scale_entry.delete(0, tk.END)
-        overlay_text_scale_entry.insert(0, "100")
-        overlay_show_medals_var.set(True)
-        overlay_compact_rows_var.set(False)
-        overlay_horizontal_layout_var.set(False)
-        overlay_horizontal_feed_season_var.set(True)
-        overlay_horizontal_feed_today_var.set(True)
-        overlay_horizontal_feed_races_season_var.set(True)
-        overlay_horizontal_feed_brs_season_var.set(True)
-        overlay_horizontal_feed_races_today_var.set(True)
-        overlay_horizontal_feed_brs_today_var.set(True)
-        overlay_horizontal_feed_myteams_var.set(True)
-        overlay_horizontal_feed_previous_race_var.set(True)
-        overlay_horizontal_feed_events_var.set(True)
-        overlay_horizontal_feed_tilt_current_var.set(True)
-        overlay_horizontal_feed_tilt_today_var.set(True)
-        overlay_horizontal_feed_tilt_season_var.set(True)
-        overlay_horizontal_feed_tilt_last_run_var.set(True)
-        tilt_lifetime_base_entry.delete(0, tk.END)
-        tilt_lifetime_base_entry.insert(0, "0")
-        tilt_season_best_entry.delete(0, tk.END)
-        tilt_season_best_entry.insert(0, "1")
-        tilt_personal_best_entry.delete(0, tk.END)
-        tilt_personal_best_entry.insert(0, "1")
-        tilt_overlay_theme_var.set("midnight")
-        tilt_scroll_step_entry.delete(0, tk.END)
-        tilt_scroll_step_entry.insert(0, "1")
-        tilt_scroll_interval_entry.delete(0, tk.END)
-        tilt_scroll_interval_entry.insert(0, "40")
-        tilt_scroll_pause_entry.delete(0, tk.END)
-        tilt_scroll_pause_entry.insert(0, "900")
-
-    footer = ttk.Frame(settings_window, style="App.TFrame")
-    footer.grid(row=1, column=0, sticky="ew", padx=20, pady=10)
-
-    ttk.Button(footer, text=tr("Reset Defaults"), command=reset_settings_defaults).pack(side="left")
-
-    def save_settings_and_close():
-        def _bounded_int(raw_value, default_value, min_value, max_value):
-            try:
-                parsed = int(str(raw_value).strip())
-            except (TypeError, ValueError):
-                parsed = default_value
-            return max(min_value, min(parsed, max_value))
-
-        config.set_setting("CHANNEL", channel_entry.get(), persistent=True)
+    def collect_settings_values():
+        pending = {}
+        def queue_setting(key, value, persistent=True):
+            pending[key] = str(value).strip().lower() if key == 'CHANNEL' else str(value).strip()
+        queue_setting("CHANNEL", channel_entry.get(), persistent=True)
         selected_language_name = app_language_var.get()
-        config.set_setting("app_language", app_language_name_to_code.get(selected_language_name, "en"), persistent=True)
-        config.set_setting("minimize_to_tray", str(minimize_to_tray_var.get()), persistent=True)
-        config.set_setting("windows_tray_notifications", str(windows_tray_notifications_var.get()), persistent=True)
-        config.set_setting("testing_tab_enabled", str(testing_tab_enabled_var.get()), persistent=True)
-        config.set_setting("chunk_alert", str(chunk_alert_var.get()), persistent=True)
-        config.set_setting("chunk_alert_value", chunk_alert_trigger_entry.get(), persistent=True)
-        config.set_setting("announcedelay", str(announce_delay_var.get()), persistent=True)
-        config.set_setting("announcedelayseconds", delay_seconds_entry.get(), persistent=True)
-        config.set_setting("reset_audio", str(reset_audio_var.get()), persistent=True)
-        config.set_setting("audio_device", selected_device.get(), persistent=True)
-        config.set_setting("UI_THEME", selected_theme.get(), persistent=True)
-        config.set_setting("chat_messages_enabled", str(chat_messages_enabled_var.get()), persistent=True)
-        config.set_setting("chat_team_announcements", str(chat_team_announcements_var.get()), persistent=True)
-        config.set_setting("chat_quest_announcements", str(chat_quest_announcements_var.get()), persistent=True)
-        config.set_setting("chat_br_results", str(chat_br_results_var.get()), persistent=True)
-        config.set_setting("chat_race_results", str(chat_race_results_var.get()), persistent=True)
-        config.set_setting("chat_leaderboard_show_medals", str(chat_leaderboard_show_medals_var.get()), persistent=True)
-        config.set_setting("chat_tilt_results", str(chat_tilt_results_var.get()), persistent=True)
-        config.set_setting("chat_tilt_suppress_offline", str(chat_tilt_suppress_offline_var.get()), persistent=True)
-        config.set_setting("chat_tilt_redact_survivor_names", str(chat_tilt_redact_survivor_names_var.get()), persistent=True)
-        config.set_setting("chat_all_commands", str(chat_all_commands_var.get()), persistent=True)
-        config.set_setting("competitive_raid_monitor_enabled", str(competitive_raid_monitor_enabled_var.get()), persistent=True)
-        config.set_setting("chat_narrative_alerts", str(chat_narrative_alerts_var.get()), persistent=True)
-        config.set_setting("narrative_alert_grinder_enabled", str(narrative_alert_grinder_var.get()), persistent=True)
-        config.set_setting("narrative_alert_winmilestone_enabled", str(narrative_alert_winmilestone_var.get()), persistent=True)
-        config.set_setting("narrative_alert_leadchange_enabled", str(narrative_alert_leadchange_var.get()), persistent=True)
-        config.set_setting("narrative_alert_cooldown_races", narrative_alert_cooldown_entry.get(), persistent=True)
-        config.set_setting("narrative_alert_min_lead_change_points", narrative_alert_min_gap_entry.get(), persistent=True)
-        config.set_setting("narrative_alert_max_items", narrative_alert_max_items_entry.get(), persistent=True)
-        config.set_setting("race_narrative_alerts_enabled", str(race_narrative_alerts_var.get()), persistent=True)
-        config.set_setting("race_narrative_grinder_enabled", str(race_narrative_grinder_var.get()), persistent=True)
-        config.set_setting("race_narrative_winmilestone_enabled", str(race_narrative_winmilestone_var.get()), persistent=True)
-        config.set_setting("race_narrative_leadchange_enabled", str(race_narrative_leadchange_var.get()), persistent=True)
-        config.set_setting("race_narrative_alert_cooldown_races", race_narrative_cooldown_entry.get(), persistent=True)
-        config.set_setting("race_narrative_alert_min_lead_change_points", race_narrative_min_gap_entry.get(), persistent=True)
-        config.set_setting("race_narrative_alert_max_items", race_narrative_max_items_entry.get(), persistent=True)
-        config.set_setting("tiltsurvivors_min_levels", tiltsurvivors_min_levels_entry.get(), persistent=True)
-        config.set_setting("season_quests_enabled", str(season_quests_enabled_var.get()), persistent=True)
-        season_target_bounds = {
-            "season_quest_target_races": (1000, 0, 10000000),
-            "season_quest_target_points": (500000, 0, 500000000),
-            "season_quest_target_race_hs": (3000, 0, 1000000),
-            "season_quest_target_br_hs": (3000, 0, 1000000),
-            "season_quest_target_tilt_levels": (1000, 0, 1000000),
-            "season_quest_target_tilt_tops": (100, 0, 1000000),
-            "season_quest_target_tilt_points": (500000, 0, 500000000),
-        }
+        queue_setting("app_language", app_language_name_to_code.get(selected_language_name, "en"), persistent=True)
+        queue_setting("minimize_to_tray", str(minimize_to_tray_var.get()), persistent=True)
+        queue_setting("windows_tray_notifications", str(windows_tray_notifications_var.get()), persistent=True)
+        queue_setting("testing_tab_enabled", str(testing_tab_enabled_var.get()), persistent=True)
+        queue_setting("chunk_alert", str(chunk_alert_var.get()), persistent=True)
+        queue_setting("chunk_alert_value", chunk_alert_trigger_entry.get(), persistent=True)
+        queue_setting("announcedelay", str(announce_delay_var.get()), persistent=True)
+        queue_setting("announcedelayseconds", delay_seconds_entry.get(), persistent=True)
+        queue_setting("reset_audio", str(reset_audio_var.get()), persistent=True)
+        queue_setting("audio_device", selected_device.get(), persistent=True)
+        queue_setting("UI_THEME", selected_theme.get(), persistent=True)
+        queue_setting("chat_messages_enabled", str(chat_messages_enabled_var.get()), persistent=True)
+        queue_setting("chat_team_announcements", str(chat_team_announcements_var.get()), persistent=True)
+        queue_setting("chat_quest_announcements", str(chat_quest_announcements_var.get()), persistent=True)
+        queue_setting("chat_br_results", str(chat_br_results_var.get()), persistent=True)
+        queue_setting("chat_race_results", str(chat_race_results_var.get()), persistent=True)
+        queue_setting("chat_leaderboard_show_medals", str(chat_leaderboard_show_medals_var.get()), persistent=True)
+        queue_setting("chat_tilt_results", str(chat_tilt_results_var.get()), persistent=True)
+        queue_setting("chat_tilt_suppress_offline", str(chat_tilt_suppress_offline_var.get()), persistent=True)
+        queue_setting("chat_tilt_redact_survivor_names", str(chat_tilt_redact_survivor_names_var.get()), persistent=True)
+        queue_setting("chat_all_commands", str(chat_all_commands_var.get()), persistent=True)
+        queue_setting("competitive_raid_monitor_enabled", str(competitive_raid_monitor_enabled_var.get()), persistent=True)
+        queue_setting("chat_narrative_alerts", str(chat_narrative_alerts_var.get()), persistent=True)
+        queue_setting("narrative_alert_grinder_enabled", str(narrative_alert_grinder_var.get()), persistent=True)
+        queue_setting("narrative_alert_winmilestone_enabled", str(narrative_alert_winmilestone_var.get()), persistent=True)
+        queue_setting("narrative_alert_leadchange_enabled", str(narrative_alert_leadchange_var.get()), persistent=True)
+        queue_setting("narrative_alert_cooldown_races", narrative_alert_cooldown_entry.get(), persistent=True)
+        queue_setting("narrative_alert_min_lead_change_points", narrative_alert_min_gap_entry.get(), persistent=True)
+        queue_setting("narrative_alert_max_items", narrative_alert_max_items_entry.get(), persistent=True)
+        queue_setting("race_narrative_alerts_enabled", str(race_narrative_alerts_var.get()), persistent=True)
+        queue_setting("race_narrative_grinder_enabled", str(race_narrative_grinder_var.get()), persistent=True)
+        queue_setting("race_narrative_winmilestone_enabled", str(race_narrative_winmilestone_var.get()), persistent=True)
+        queue_setting("race_narrative_leadchange_enabled", str(race_narrative_leadchange_var.get()), persistent=True)
+        queue_setting("race_narrative_alert_cooldown_races", race_narrative_cooldown_entry.get(), persistent=True)
+        queue_setting("race_narrative_alert_min_lead_change_points", race_narrative_min_gap_entry.get(), persistent=True)
+        queue_setting("race_narrative_alert_max_items", race_narrative_max_items_entry.get(), persistent=True)
+        queue_setting("tiltsurvivors_min_levels", tiltsurvivors_min_levels_entry.get(), persistent=True)
+        queue_setting("season_quests_enabled", str(season_quests_enabled_var.get()), persistent=True)
         season_target_entries = {
             "season_quest_target_races": season_quest_races_entry,
             "season_quest_target_points": season_quest_points_entry,
@@ -9221,76 +9167,452 @@ def open_settings_window():
             "season_quest_target_tilt_points": season_quest_tilt_points_entry,
         }
         for target_key, entry_widget in season_target_entries.items():
-            default_value, min_value, max_value = season_target_bounds[target_key]
-            target_value = _bounded_int(entry_widget.get(), default_value, min_value, max_value)
-            config.set_setting(target_key, str(target_value), persistent=True)
-        config.set_setting("rivals_enabled", str(rivals_enabled_var.get()), persistent=True)
-        rivals_min_races = _bounded_int(rivals_min_races_entry.get(), 50, 1, RIVALS_MAX_MIN_RACES)
-        rivals_max_gap = _bounded_int(rivals_max_gap_entry.get(), 1500, 0, RIVALS_MAX_POINT_GAP)
-        rivals_pair_count = _bounded_int(rivals_pair_count_entry.get(), 25, 1, RIVALS_MAX_PAIRS)
-        config.set_setting("rivals_min_races", str(rivals_min_races), persistent=True)
-        config.set_setting("rivals_max_point_gap", str(rivals_max_gap), persistent=True)
-        config.set_setting("rivals_pair_count", str(rivals_pair_count), persistent=True)
-        config.set_setting("mycycle_enabled", str(mycycle_enabled_var.get()), persistent=True)
-        config.set_setting("mycycle_announcements_enabled", str(mycycle_announce_var.get()), persistent=True)
-        config.set_setting("mycycle_include_br", str(mycycle_include_br_var.get()), persistent=True)
-        config.set_setting("mycycle_min_place", mycycle_min_place_entry.get(), persistent=True)
-        config.set_setting("mycycle_max_place", mycycle_max_place_entry.get(), persistent=True)
-        config.set_setting("teams_enabled", str(teams_enabled_var.get()), persistent=True)
-        config.set_setting("teams_points_mode", teams_points_mode_var.get(), persistent=True)
-        config.set_setting("teams_max_size", teams_max_size_entry.get(), persistent=True)
-        config.set_setting("teams_bits_bonus_enabled", str(teams_bits_bonus_enabled_var.get()), persistent=True)
-        config.set_setting("teams_bits_bonus_percent", teams_bits_bonus_percent_entry.get(), persistent=True)
-        config.set_setting("teams_bonus_bits_threshold", teams_bonus_bits_threshold_entry.get(), persistent=True)
-        config.set_setting("teams_bonus_duration_minutes", teams_bonus_duration_entry.get(), persistent=True)
-        config.set_setting("teams_tep_bonus_enabled", str(teams_tep_bonus_enabled_var.get()), persistent=True)
-        config.set_setting("teams_tep_bonus_percent", teams_tep_bonus_percent_entry.get(), persistent=True)
-        config.set_setting("teams_tep_threshold", teams_tep_threshold_entry.get(), persistent=True)
-        config.set_setting("teams_tep_per_race", teams_tep_per_race_entry.get(), persistent=True)
-        config.set_setting("teams_tep_bonus_duration_minutes", teams_tep_bonus_duration_entry.get(), persistent=True)
-        config.set_setting("teams_tep_bits_cooldown_minutes", teams_tep_bits_cooldown_entry.get(), persistent=True)
-        config.set_setting("teams_tep_member_daily_cap", teams_tep_member_daily_cap_entry.get(), persistent=True)
-        config.set_setting("teams_tep_team_daily_cap", teams_tep_team_daily_cap_entry.get(), persistent=True)
-        config.set_setting("teams_bonus_weight_15", teams_bonus_weight_15_entry.get(), persistent=True)
-        config.set_setting("teams_bonus_weight_25", teams_bonus_weight_25_entry.get(), persistent=True)
-        config.set_setting("teams_bonus_weight_35", teams_bonus_weight_35_entry.get(), persistent=True)
-        config.set_setting("teams_bonus_weight_67", teams_bonus_weight_67_entry.get(), persistent=True)
+            target_value = entry_widget.get()
+            queue_setting(target_key, str(target_value), persistent=True)
+        queue_setting("rivals_enabled", str(rivals_enabled_var.get()), persistent=True)
+        rivals_min_races = rivals_min_races_entry.get()
+        rivals_max_gap = rivals_max_gap_entry.get()
+        rivals_pair_count = rivals_pair_count_entry.get()
+        queue_setting("rivals_min_races", str(rivals_min_races), persistent=True)
+        queue_setting("rivals_max_point_gap", str(rivals_max_gap), persistent=True)
+        queue_setting("rivals_pair_count", str(rivals_pair_count), persistent=True)
+        queue_setting("mycycle_enabled", str(mycycle_enabled_var.get()), persistent=True)
+        queue_setting("mycycle_announcements_enabled", str(mycycle_announce_var.get()), persistent=True)
+        queue_setting("mycycle_include_br", str(mycycle_include_br_var.get()), persistent=True)
+        queue_setting("mycycle_min_place", mycycle_min_place_entry.get(), persistent=True)
+        queue_setting("mycycle_max_place", mycycle_max_place_entry.get(), persistent=True)
+        queue_setting("teams_enabled", str(teams_enabled_var.get()), persistent=True)
+        queue_setting("teams_points_mode", teams_points_mode_var.get(), persistent=True)
+        queue_setting("teams_max_size", teams_max_size_entry.get(), persistent=True)
+        queue_setting("teams_bits_bonus_enabled", str(teams_bits_bonus_enabled_var.get()), persistent=True)
+        queue_setting("teams_bits_bonus_percent", teams_bits_bonus_percent_entry.get(), persistent=True)
+        queue_setting("teams_bonus_bits_threshold", teams_bonus_bits_threshold_entry.get(), persistent=True)
+        queue_setting("teams_bonus_duration_minutes", teams_bonus_duration_entry.get(), persistent=True)
+        queue_setting("teams_tep_bonus_enabled", str(teams_tep_bonus_enabled_var.get()), persistent=True)
+        queue_setting("teams_tep_bonus_percent", teams_tep_bonus_percent_entry.get(), persistent=True)
+        queue_setting("teams_tep_threshold", teams_tep_threshold_entry.get(), persistent=True)
+        queue_setting("teams_tep_per_race", teams_tep_per_race_entry.get(), persistent=True)
+        queue_setting("teams_tep_bonus_duration_minutes", teams_tep_bonus_duration_entry.get(), persistent=True)
+        queue_setting("teams_tep_bits_cooldown_minutes", teams_tep_bits_cooldown_entry.get(), persistent=True)
+        queue_setting("teams_tep_member_daily_cap", teams_tep_member_daily_cap_entry.get(), persistent=True)
+        queue_setting("teams_tep_team_daily_cap", teams_tep_team_daily_cap_entry.get(), persistent=True)
+        queue_setting("teams_bonus_weight_15", teams_bonus_weight_15_entry.get(), persistent=True)
+        queue_setting("teams_bonus_weight_25", teams_bonus_weight_25_entry.get(), persistent=True)
+        queue_setting("teams_bonus_weight_35", teams_bonus_weight_35_entry.get(), persistent=True)
+        queue_setting("teams_bonus_weight_67", teams_bonus_weight_67_entry.get(), persistent=True)
         selected_session_id = session_names.get(selected_session_name.get())
         if selected_session_id:
-            config.set_setting("mycycle_primary_session_id", selected_session_id, persistent=True)
-        config.set_setting("chat_max_names", selected_max_names.get(), persistent=True)
-        config.set_setting("overlay_rotation_seconds", overlay_rotation_entry.get(), persistent=True)
-        config.set_setting("overlay_refresh_seconds", overlay_refresh_entry.get(), persistent=True)
-        config.set_setting("overlay_server_port", overlay_port_entry.get(), persistent=True)
-        config.set_setting("overlay_theme", overlay_theme_var.get(), persistent=True)
-        config.set_setting("overlay_card_opacity", overlay_opacity_entry.get(), persistent=True)
-        config.set_setting("overlay_text_scale", overlay_text_scale_entry.get(), persistent=True)
-        config.set_setting("overlay_show_medals", str(overlay_show_medals_var.get()), persistent=True)
-        config.set_setting("overlay_compact_rows", str(overlay_compact_rows_var.get()), persistent=True)
-        config.set_setting("overlay_horizontal_layout", str(overlay_horizontal_layout_var.get()), persistent=True)
-        config.set_setting("overlay_horizontal_feed_season", str(overlay_horizontal_feed_season_var.get()), persistent=True)
-        config.set_setting("overlay_horizontal_feed_today", str(overlay_horizontal_feed_today_var.get()), persistent=True)
-        config.set_setting("overlay_horizontal_feed_races_season", str(overlay_horizontal_feed_races_season_var.get()), persistent=True)
-        config.set_setting("overlay_horizontal_feed_brs_season", str(overlay_horizontal_feed_brs_season_var.get()), persistent=True)
-        config.set_setting("overlay_horizontal_feed_races_today", str(overlay_horizontal_feed_races_today_var.get()), persistent=True)
-        config.set_setting("overlay_horizontal_feed_brs_today", str(overlay_horizontal_feed_brs_today_var.get()), persistent=True)
-        config.set_setting("overlay_horizontal_feed_myteams", str(overlay_horizontal_feed_myteams_var.get()), persistent=True)
-        config.set_setting("overlay_horizontal_feed_previous_race", str(overlay_horizontal_feed_previous_race_var.get()), persistent=True)
-        config.set_setting("overlay_horizontal_feed_events", str(overlay_horizontal_feed_events_var.get()), persistent=True)
-        config.set_setting("overlay_horizontal_feed_tilt_current", str(overlay_horizontal_feed_tilt_current_var.get()), persistent=True)
-        config.set_setting("overlay_horizontal_feed_tilt_today", str(overlay_horizontal_feed_tilt_today_var.get()), persistent=True)
-        config.set_setting("overlay_horizontal_feed_tilt_season", str(overlay_horizontal_feed_tilt_season_var.get()), persistent=True)
-        config.set_setting("overlay_horizontal_feed_tilt_last_run", str(overlay_horizontal_feed_tilt_last_run_var.get()), persistent=True)
-        config.set_setting("tilt_lifetime_base_xp", tilt_lifetime_base_entry.get(), persistent=True)
-        config.set_setting("tilt_season_best_level", tilt_season_best_entry.get(), persistent=True)
-        config.set_setting("tilt_personal_best_level", tilt_personal_best_entry.get(), persistent=True)
-        config.set_setting("tilt_overlay_theme", tilt_overlay_theme_var.get(), persistent=True)
-        config.set_setting("tilt_scroll_step_px", tilt_scroll_step_entry.get(), persistent=True)
-        config.set_setting("tilt_scroll_interval_ms", tilt_scroll_interval_entry.get(), persistent=True)
-        config.set_setting("tilt_scroll_pause_ms", tilt_scroll_pause_entry.get(), persistent=True)
+            queue_setting("mycycle_primary_session_id", selected_session_id, persistent=True)
+        queue_setting("chat_max_names", selected_max_names.get(), persistent=True)
+        queue_setting("overlay_rotation_seconds", overlay_rotation_entry.get(), persistent=True)
+        queue_setting("overlay_refresh_seconds", overlay_refresh_entry.get(), persistent=True)
+        queue_setting("overlay_server_port", overlay_port_entry.get(), persistent=True)
+        queue_setting("overlay_theme", overlay_theme_var.get(), persistent=True)
+        queue_setting("overlay_card_opacity", overlay_opacity_entry.get(), persistent=True)
+        queue_setting("overlay_text_scale", overlay_text_scale_entry.get(), persistent=True)
+        queue_setting("overlay_show_medals", str(overlay_show_medals_var.get()), persistent=True)
+        queue_setting("overlay_compact_rows", str(overlay_compact_rows_var.get()), persistent=True)
+        queue_setting("overlay_horizontal_layout", str(overlay_horizontal_layout_var.get()), persistent=True)
+        queue_setting("overlay_horizontal_feed_season", str(overlay_horizontal_feed_season_var.get()), persistent=True)
+        queue_setting("overlay_horizontal_feed_today", str(overlay_horizontal_feed_today_var.get()), persistent=True)
+        queue_setting("overlay_horizontal_feed_races_season", str(overlay_horizontal_feed_races_season_var.get()), persistent=True)
+        queue_setting("overlay_horizontal_feed_brs_season", str(overlay_horizontal_feed_brs_season_var.get()), persistent=True)
+        queue_setting("overlay_horizontal_feed_races_today", str(overlay_horizontal_feed_races_today_var.get()), persistent=True)
+        queue_setting("overlay_horizontal_feed_brs_today", str(overlay_horizontal_feed_brs_today_var.get()), persistent=True)
+        queue_setting("overlay_horizontal_feed_myteams", str(overlay_horizontal_feed_myteams_var.get()), persistent=True)
+        queue_setting("overlay_horizontal_feed_previous_race", str(overlay_horizontal_feed_previous_race_var.get()), persistent=True)
+        queue_setting("overlay_horizontal_feed_events", str(overlay_horizontal_feed_events_var.get()), persistent=True)
+        queue_setting("overlay_horizontal_feed_tilt_current", str(overlay_horizontal_feed_tilt_current_var.get()), persistent=True)
+        queue_setting("overlay_horizontal_feed_tilt_today", str(overlay_horizontal_feed_tilt_today_var.get()), persistent=True)
+        queue_setting("overlay_horizontal_feed_tilt_season", str(overlay_horizontal_feed_tilt_season_var.get()), persistent=True)
+        queue_setting("overlay_horizontal_feed_tilt_last_run", str(overlay_horizontal_feed_tilt_last_run_var.get()), persistent=True)
+        queue_setting("tilt_lifetime_base_xp", tilt_lifetime_base_entry.get(), persistent=True)
+        queue_setting("tilt_season_best_level", tilt_season_best_entry.get(), persistent=True)
+        queue_setting("tilt_personal_best_level", tilt_personal_best_entry.get(), persistent=True)
+        queue_setting("tilt_overlay_theme", tilt_overlay_theme_var.get(), persistent=True)
+        queue_setting("tilt_scroll_step_px", tilt_scroll_step_entry.get(), persistent=True)
+        queue_setting("tilt_scroll_interval_ms", tilt_scroll_interval_entry.get(), persistent=True)
+        queue_setting("tilt_scroll_pause_ms", tilt_scroll_pause_entry.get(), persistent=True)
+        queue_setting('chunk_alert_sound', chunk_sound_var.get())
+        queue_setting('reset_audio_sound', reset_sound_var.get())
+        return pending
+
+    settings_controls = {
+        'CHANNEL': channel_entry,
+        'minimize_to_tray': minimize_to_tray_var,
+        'windows_tray_notifications': windows_tray_notifications_var,
+        'testing_tab_enabled': testing_tab_enabled_var,
+        'chunk_alert': chunk_alert_var,
+        'chunk_alert_value': chunk_alert_trigger_entry,
+        'announcedelay': announce_delay_var,
+        'announcedelayseconds': delay_seconds_entry,
+        'reset_audio': reset_audio_var,
+        'audio_device': selected_device,
+        'UI_THEME': selected_theme,
+        'chat_messages_enabled': chat_messages_enabled_var,
+        'chat_team_announcements': chat_team_announcements_var,
+        'chat_quest_announcements': chat_quest_announcements_var,
+        'chat_br_results': chat_br_results_var,
+        'chat_race_results': chat_race_results_var,
+        'chat_leaderboard_show_medals': chat_leaderboard_show_medals_var,
+        'chat_tilt_results': chat_tilt_results_var,
+        'chat_tilt_suppress_offline': chat_tilt_suppress_offline_var,
+        'chat_tilt_redact_survivor_names': chat_tilt_redact_survivor_names_var,
+        'chat_all_commands': chat_all_commands_var,
+        'competitive_raid_monitor_enabled': competitive_raid_monitor_enabled_var,
+        'chat_narrative_alerts': chat_narrative_alerts_var,
+        'narrative_alert_grinder_enabled': narrative_alert_grinder_var,
+        'narrative_alert_winmilestone_enabled': narrative_alert_winmilestone_var,
+        'narrative_alert_leadchange_enabled': narrative_alert_leadchange_var,
+        'narrative_alert_cooldown_races': narrative_alert_cooldown_entry,
+        'narrative_alert_min_lead_change_points': narrative_alert_min_gap_entry,
+        'narrative_alert_max_items': narrative_alert_max_items_entry,
+        'race_narrative_alerts_enabled': race_narrative_alerts_var,
+        'race_narrative_grinder_enabled': race_narrative_grinder_var,
+        'race_narrative_winmilestone_enabled': race_narrative_winmilestone_var,
+        'race_narrative_leadchange_enabled': race_narrative_leadchange_var,
+        'race_narrative_alert_cooldown_races': race_narrative_cooldown_entry,
+        'race_narrative_alert_min_lead_change_points': race_narrative_min_gap_entry,
+        'race_narrative_alert_max_items': race_narrative_max_items_entry,
+        'tiltsurvivors_min_levels': tiltsurvivors_min_levels_entry,
+        'season_quests_enabled': season_quests_enabled_var,
+        'rivals_enabled': rivals_enabled_var,
+        'mycycle_enabled': mycycle_enabled_var,
+        'mycycle_announcements_enabled': mycycle_announce_var,
+        'mycycle_include_br': mycycle_include_br_var,
+        'mycycle_min_place': mycycle_min_place_entry,
+        'mycycle_max_place': mycycle_max_place_entry,
+        'teams_enabled': teams_enabled_var,
+        'teams_points_mode': teams_points_mode_var,
+        'teams_max_size': teams_max_size_entry,
+        'teams_bits_bonus_enabled': teams_bits_bonus_enabled_var,
+        'teams_bits_bonus_percent': teams_bits_bonus_percent_entry,
+        'teams_bonus_bits_threshold': teams_bonus_bits_threshold_entry,
+        'teams_bonus_duration_minutes': teams_bonus_duration_entry,
+        'teams_tep_bonus_enabled': teams_tep_bonus_enabled_var,
+        'teams_tep_bonus_percent': teams_tep_bonus_percent_entry,
+        'teams_tep_threshold': teams_tep_threshold_entry,
+        'teams_tep_per_race': teams_tep_per_race_entry,
+        'teams_tep_bonus_duration_minutes': teams_tep_bonus_duration_entry,
+        'teams_tep_bits_cooldown_minutes': teams_tep_bits_cooldown_entry,
+        'teams_tep_member_daily_cap': teams_tep_member_daily_cap_entry,
+        'teams_tep_team_daily_cap': teams_tep_team_daily_cap_entry,
+        'teams_bonus_weight_15': teams_bonus_weight_15_entry,
+        'teams_bonus_weight_25': teams_bonus_weight_25_entry,
+        'teams_bonus_weight_35': teams_bonus_weight_35_entry,
+        'teams_bonus_weight_67': teams_bonus_weight_67_entry,
+        'chat_max_names': selected_max_names,
+        'overlay_rotation_seconds': overlay_rotation_entry,
+        'overlay_refresh_seconds': overlay_refresh_entry,
+        'overlay_server_port': overlay_port_entry,
+        'overlay_theme': overlay_theme_var,
+        'overlay_card_opacity': overlay_opacity_entry,
+        'overlay_text_scale': overlay_text_scale_entry,
+        'overlay_show_medals': overlay_show_medals_var,
+        'overlay_compact_rows': overlay_compact_rows_var,
+        'overlay_horizontal_layout': overlay_horizontal_layout_var,
+        'overlay_horizontal_feed_season': overlay_horizontal_feed_season_var,
+        'overlay_horizontal_feed_today': overlay_horizontal_feed_today_var,
+        'overlay_horizontal_feed_races_season': overlay_horizontal_feed_races_season_var,
+        'overlay_horizontal_feed_brs_season': overlay_horizontal_feed_brs_season_var,
+        'overlay_horizontal_feed_races_today': overlay_horizontal_feed_races_today_var,
+        'overlay_horizontal_feed_brs_today': overlay_horizontal_feed_brs_today_var,
+        'overlay_horizontal_feed_myteams': overlay_horizontal_feed_myteams_var,
+        'overlay_horizontal_feed_previous_race': overlay_horizontal_feed_previous_race_var,
+        'overlay_horizontal_feed_events': overlay_horizontal_feed_events_var,
+        'overlay_horizontal_feed_tilt_current': overlay_horizontal_feed_tilt_current_var,
+        'overlay_horizontal_feed_tilt_today': overlay_horizontal_feed_tilt_today_var,
+        'overlay_horizontal_feed_tilt_season': overlay_horizontal_feed_tilt_season_var,
+        'overlay_horizontal_feed_tilt_last_run': overlay_horizontal_feed_tilt_last_run_var,
+        'tilt_lifetime_base_xp': tilt_lifetime_base_entry,
+        'tilt_season_best_level': tilt_season_best_entry,
+        'tilt_personal_best_level': tilt_personal_best_entry,
+        'tilt_overlay_theme': tilt_overlay_theme_var,
+        'tilt_scroll_step_px': tilt_scroll_step_entry,
+        'tilt_scroll_interval_ms': tilt_scroll_interval_entry,
+        'tilt_scroll_pause_ms': tilt_scroll_pause_entry,
+        'app_language': app_language_var,
+        'rivals_min_races': rivals_min_races_entry,
+        'rivals_max_point_gap': rivals_max_gap_entry,
+        'rivals_pair_count': rivals_pair_count_entry,
+        'mycycle_primary_session_id': selected_session_name,
+        'chunk_alert_sound': chunk_sound_var,
+        'reset_audio_sound': reset_sound_var,
+        'season_quest_target_races': season_quest_races_entry,
+        'season_quest_target_points': season_quest_points_entry,
+        'season_quest_target_race_hs': season_quest_race_hs_entry,
+        'season_quest_target_br_hs': season_quest_br_hs_entry,
+        'season_quest_target_tilt_levels': season_quest_tilt_levels_entry,
+        'season_quest_target_tilt_tops': season_quest_tilt_tops_entry,
+        'season_quest_target_tilt_points': season_quest_tilt_points_entry,
+    }
+
+    def descendants(widget):
+        yield widget
+        for child in widget.winfo_children():
+            yield from descendants(child)
+
+    def find_control_widget(control):
+        if not isinstance(control, tk.Variable):
+            return control
+        for widget in descendants(settings_window):
+            for option in ('variable', 'textvariable'):
+                try:
+                    if str(widget.cget(option)) == str(control):
+                        return widget
+                except tk.TclError:
+                    pass
+        return None
+
+    field_widgets = {key: find_control_widget(control) for key, control in settings_controls.items()}
+    settings_style = ttk.Style(settings_window)
+    settings_style.map('Settings.TEntry', fieldbackground=[('invalid', '#5b1f2a')], foreground=[('invalid', '#ffffff')])
+    for widget in field_widgets.values():
+        if isinstance(widget, ttk.Entry) and not isinstance(widget, ttk.Combobox):
+            widget.configure(style='Settings.TEntry')
+
+    field_widgets['chunk_alert_sound'] = chunk_alert_label
+    field_widgets['reset_audio_sound'] = reset_audio_label
+    field_labels = {
+        'CHANNEL': 'Channel', 'UI_THEME': 'Desktop theme', 'announcedelayseconds': 'Message delay (seconds)',
+        'teams_max_size': 'Maximum team size', 'teams_bits_bonus_percent': 'Bits bonus percentage',
+        'teams_bonus_duration_minutes': 'Bits bonus duration (minutes)',
+        'teams_tep_bonus_duration_minutes': 'TEP bonus duration (minutes)',
+        'overlay_server_port': 'Overlay server port', 'overlay_card_opacity': 'Overlay opacity (%)',
+        'overlay_text_scale': 'Overlay text size (%)', 'mycycle_min_place': 'MyCycle first placement',
+        'mycycle_max_place': 'MyCycle last placement',
+    }
+    pending_baseline = collect_settings_values()
+    restart_required = set()
+    footer = ttk.Frame(settings_window, style='App.TFrame')
+    footer.grid(row=1, column=0, sticky='ew', padx=15, pady=10)
+    status_var = tk.StringVar(value='No pending changes. Management actions and tests take effect immediately.')
+    status_label = ttk.Label(footer, textvariable=status_var, wraplength=760)
+    status_label.pack(anchor='w', pady=(0, 6))
+    footer.bind('<Configure>', lambda event: status_label.configure(wraplength=max(300, event.width - 20)))
+    buttons = ttk.Frame(footer)
+    buttons.pack(fill='x')
+
+    def set_control_value(key, value):
+        control = settings_controls[key]
+        if key == 'app_language':
+            value = app_language_code_to_name.get(value, LANGUAGE_DISPLAY_NAMES['en'])
+        if isinstance(control, tk.BooleanVar):
+            control.set(str(value).lower() == 'true')
+        elif isinstance(control, tk.Variable):
+            control.set(value)
+        else:
+            old_state = control.cget('state')
+            control.configure(state='normal')
+            control.delete(0, tk.END)
+            control.insert(0, value)
+            control.configure(state=old_state)
+
+    def is_in_page(widget, page):
+        while widget is not None:
+            if widget == page:
+                return True
+            widget = getattr(widget, 'master', None)
+        return False
+
+    def active_page():
+        for section in (general_sections, chat_sections, overlay_sections, feature_sections, teams_sections, diagnostics_sections):
+            if section.winfo_ismapped() and section.select():
+                outer = settings_window.nametowidget(section.select())
+                return getattr(outer, '_settings_content', outer)
+        return None
+
+    def show_field(key):
+        widget = field_widgets.get(key)
+        if widget is None:
+            return
+        current = widget
+        while current is not None and current != settings_window:
+            parent = getattr(current, 'master', None)
+            if isinstance(parent, ttk.Notebook):
+                parent.select(current)
+            current = parent
+        settings_window.update_idletasks()
+        current = widget
+        while current is not None:
+            if hasattr(current, '_settings_canvas'):
+                canvas = current._settings_canvas
+                y = widget.winfo_rooty() - current.winfo_rooty()
+                x = widget.winfo_rootx() - current.winfo_rootx()
+                canvas.yview_moveto(max(0, y / max(1, current.winfo_height())))
+                left = canvas.canvasx(0)
+                if x < left or x + widget.winfo_width() > left + canvas.winfo_width():
+                    canvas.xview_moveto(max(0, (x - 12) / max(1, current.winfo_width())))
+                break
+            current = getattr(current, 'master', None)
+        widget.focus_set()
+
+    def set_enabled(keys, enabled):
+        for key in keys:
+            widget = field_widgets.get(key)
+            if isinstance(widget, (ttk.Entry, ttk.Combobox, ttk.Checkbutton)):
+                state = 'readonly' if isinstance(widget, ttk.Combobox) else 'normal'
+                widget.configure(state=state if enabled or widget.instate(['invalid']) else 'disabled')
+
+    def update_dependencies(*_):
+        master_chat = chat_messages_enabled_var.get()
+        set_enabled(['chat_br_results', 'chat_race_results', 'chat_all_commands', 'chat_tilt_results',
+                     'chat_team_announcements', 'chat_quest_announcements', 'competitive_raid_monitor_enabled',
+                     'chat_leaderboard_show_medals'], master_chat)
+        set_enabled(['race_narrative_alerts_enabled'], True)
+        set_enabled(['chat_narrative_alerts'], True)
+        set_enabled(['chat_tilt_suppress_offline', 'chat_tilt_redact_survivor_names'], master_chat and chat_tilt_results_var.get())
+        set_enabled(['race_narrative_grinder_enabled', 'race_narrative_winmilestone_enabled', 'race_narrative_leadchange_enabled',
+                     'race_narrative_alert_cooldown_races', 'race_narrative_alert_min_lead_change_points', 'race_narrative_alert_max_items'],
+                    race_narrative_alerts_var.get())
+        set_enabled(['narrative_alert_grinder_enabled', 'narrative_alert_winmilestone_enabled', 'narrative_alert_leadchange_enabled',
+                     'narrative_alert_cooldown_races', 'narrative_alert_min_lead_change_points', 'narrative_alert_max_items'],
+                    chat_narrative_alerts_var.get())
+        set_enabled(['announcedelayseconds'], announce_delay_var.get())
+        set_enabled(['chunk_alert_value'], chunk_alert_var.get())
+        set_enabled(['mycycle_min_place', 'mycycle_max_place', 'mycycle_include_br'], mycycle_enabled_var.get())
+        set_enabled(['mycycle_announcements_enabled'], mycycle_enabled_var.get() and master_chat)
+        set_enabled(['rivals_min_races', 'rivals_max_point_gap', 'rivals_pair_count'], rivals_enabled_var.get())
+        set_enabled([key for key in settings_controls if key.startswith('season_quest_target_')], season_quests_enabled_var.get())
+        set_enabled(['teams_tep_threshold', 'teams_tep_per_race', 'teams_tep_bonus_percent', 'teams_tep_bonus_duration_minutes',
+                     'teams_tep_bits_cooldown_minutes', 'teams_tep_member_daily_cap', 'teams_tep_team_daily_cap'], teams_tep_bonus_enabled_var.get())
+        set_enabled(['teams_bonus_bits_threshold', 'teams_bits_bonus_percent', 'teams_bonus_duration_minutes'], teams_bits_bonus_enabled_var.get())
+        random_bonus = teams_bits_bonus_percent_entry.get().strip() == '0'
+        set_enabled(['teams_bonus_weight_15', 'teams_bonus_weight_25', 'teams_bonus_weight_35', 'teams_bonus_weight_67'], teams_bits_bonus_enabled_var.get() and random_bonus)
+        # Alert options remain editable because they also drive overlay events.
+
+    def update_dirty_status(*_):
+        update_dependencies()
+        dirty = collect_settings_values() != pending_baseline
+        settings_window.title(tr('Settings') + (' *' if dirty else ''))
+        if dirty:
+            status_var.set('Unsaved changes — Apply or Save and Close to keep them.')
+        elif restart_required:
+            status_var.set('Saved. Restart MyStats to apply connection, port, or language changes.')
+        else:
+            status_var.set('No pending changes. Management actions and tests take effect immediately.')
+
+    def reset_preferences(section_only=False):
+        page = active_page() if section_only else None
+        defaults = dict(config.defaults)
+        defaults.update({'chunk_alert': 'True', 'reset_audio': 'False', 'audio_device': 'Primary Sound Driver'})
+        if defaults.get('UI_THEME') not in available_themes:
+            defaults['UI_THEME'] = available_themes[0]
+        protected = {'CHANNEL', 'mycycle_primary_session_id', 'chunk_alert_sound', 'reset_audio_sound',
+                     'tilt_lifetime_base_xp', 'tilt_season_best_level', 'tilt_personal_best_level'}
+        keys = [key for key in settings_controls if key in defaults and key not in protected
+                and (not section_only or is_in_page(field_widgets.get(key), page))]
+        if not keys:
+            status_var.set('This section has no resettable preferences.')
+            return
+        title = 'Reset this section' if section_only else 'Reset all preferences'
+        if not messagebox.askyesno(title, 'Stage default preferences? Channel, sound files, selected session, teams and progress are kept. Nothing is saved until Apply or Save and Close.', parent=settings_window):
+            return
+        for key in keys:
+            set_control_value(key, defaults[key])
+        update_dirty_status()
+
+    def apply_settings(close_after=False):
+        values = collect_settings_values()
+        errors = settings_validation_errors(values)
+        if values.get('UI_THEME') not in available_themes:
+            errors['UI_THEME'] = 'Choose one of the available themes.'
+        for widget in field_widgets.values():
+            if isinstance(widget, ttk.Entry):
+                widget.state(['!invalid'])
+        if errors:
+            for key in errors:
+                widget = field_widgets.get(key)
+                if isinstance(widget, ttk.Entry):
+                    widget.state(['invalid'])
+                    # An invalid saved value must remain editable even if its feature is off.
+                    widget.configure(state='normal')
+            show_field(next(iter(errors)))
+            detail = '\n'.join(f"{field_labels.get(key, key.replace('_', ' ').capitalize())}: {reason}" for key, reason in errors.items())
+            messagebox.showerror('Check settings', detail, parent=settings_window)
+            status_var.set('Nothing saved. Correct the highlighted fields and try again.')
+            return False
+        changed = {key: value for key, value in values.items() if pending_baseline.get(key) != value}
+        try:
+            config.set_settings_batch(changed)
+        except Exception as exc:
+            messagebox.showerror('Settings not saved', f'No preferences were applied. {exc}', parent=settings_window)
+            status_var.set('Saving failed. Your pending changes are still here.')
+            return False
+        restart_required.update({'CHANNEL', 'overlay_server_port', 'app_language'} & changed.keys())
+        pending_baseline.clear()
+        pending_baseline.update(values)
+        if 'UI_THEME' in changed:
+            try:
+                apply_theme(values['UI_THEME'])
+                for widget in descendants(settings_window):
+                    if isinstance(widget, tk.Canvas):
+                        widget.configure(background=ttk.Style().lookup('TFrame', 'background') or '#202020')
+            except Exception as exc:
+                messagebox.showwarning('Theme', f'Settings were saved, but the theme could not be applied: {exc}', parent=settings_window)
+        if close_after:
+            if restart_required:
+                messagebox.showinfo('Restart needed', 'Settings saved. Restart MyStats to apply connection, port, or language changes.', parent=settings_window)
+            root._settings_window = None
+            settings_window.destroy()
+        else:
+            update_dirty_status()
+            refresh_diagnostics()
+        return True
+
+    def close_settings():
+        if collect_settings_values() != pending_baseline:
+            choice = messagebox.askyesnocancel('Unsaved changes', 'Save your changes before closing? Yes saves; No discards pending preferences. Immediate management actions cannot be undone here.', parent=settings_window)
+            if choice is None:
+                return
+            if choice:
+                apply_settings(close_after=True)
+                return
+        root._settings_window = None
         settings_window.destroy()
 
-    ttk.Button(footer, text=tr("Save and Close"), command=save_settings_and_close, style="Primary.TButton").pack(side="right")
+    def scroll_settings(event):
+        if isinstance(event.widget, (tk.Text, ttk.Treeview, ttk.Combobox)):
+            return
+        current = event.widget
+        while current is not None:
+            if hasattr(current, '_settings_canvas'):
+                canvas = current._settings_canvas
+                scroll = canvas.xview_scroll if event.state & 1 else canvas.yview_scroll
+                scroll(-1 if event.delta > 0 else 1, 'units')
+                return 'break'
+            current = getattr(current, 'master', None)
+
+    settings_window.bind('<MouseWheel>', scroll_settings, add='+')
+    settings_window.bind('<KeyRelease>', update_dirty_status, add='+')
+    settings_window.bind('<<ComboboxSelected>>', update_dirty_status, add='+')
+    settings_window.protocol('WM_DELETE_WINDOW', close_settings)
+    for control in settings_controls.values():
+        if isinstance(control, tk.Variable):
+            control.trace_add('write', update_dirty_status)
+    for key, control in settings_controls.items():
+        if key in SETTINGS_NUMBER_BOUNDS and isinstance(control, ttk.Entry):
+            lower, upper = SETTINGS_NUMBER_BOUNDS[key]
+            control.bind('<FocusIn>', lambda event, lo=lower, hi=upper: status_var.set(f'Allowed range: {lo:,} to {hi:,} (whole numbers).'), add='+')
+            control.bind('<FocusOut>', update_dirty_status, add='+')
+    reset_buttons = ttk.Frame(buttons)
+    save_buttons = ttk.Frame(buttons)
+    buttons.grid_columnconfigure(0, weight=1)
+    reset_buttons.grid(row=0, column=0, sticky='w')
+    save_buttons.grid(row=0, column=1, sticky='e')
+    ttk.Button(reset_buttons, text='Reset section', command=lambda: reset_preferences(True)).pack(side='left', padx=(0, 6))
+    ttk.Button(reset_buttons, text='Reset all preferences', command=reset_preferences).pack(side='left')
+    ttk.Button(save_buttons, text='Save and Close', command=lambda: apply_settings(True), style='Primary.TButton').pack(side='right')
+    ttk.Button(save_buttons, text='Apply', command=apply_settings).pack(side='right', padx=6)
+    ttk.Button(save_buttons, text='Cancel', command=close_settings).pack(side='right')
+
+    def layout_footer(event):
+        narrow = event.width < reset_buttons.winfo_reqwidth() + save_buttons.winfo_reqwidth() + 12
+        save_buttons.grid(row=1 if narrow else 0, column=0 if narrow else 1, sticky='e', pady=(6 if narrow else 0, 0))
+
+    buttons.bind('<Configure>', layout_footer)
+    update_dirty_status()
+
 
 def test_chunkaudio_playback():
     """
@@ -10302,6 +10624,7 @@ def set_tilt_runtime_setting(key, value):
 
 class ConfigManager:
     def __init__(self):
+        self._settings_lock = threading.RLock()
         self.settings_file = SETTINGS_FILE_PATH
         self.settings = {}
         self.transient_settings = {}
@@ -10535,30 +10858,69 @@ class ConfigManager:
             print("Settings file not found. Please check the file path and filename.")
 
     def get_setting(self, key):
-        if key in self.transient_settings:
-            return self.transient_settings[key]
-        if key in self.settings:
-            return self.settings[key]
-        return self.defaults.get(key, None)
+        with self._settings_lock:
+            if key in self.transient_settings:
+                return self.transient_settings[key]
+            if key in self.settings:
+                return self.settings[key]
+            return self.defaults.get(key, None)
 
     def set_setting(self, key, value, persistent=True):
-        if key == "CHANNEL":
-            value = value.lower()
+        with self._settings_lock:
+            if key == "CHANNEL":
+                value = value.lower()
 
-        if persistent:
-            if key in self.persistent_keys:
+            if persistent:
+                if key in self.persistent_keys:
+                    if self.validate_setting(key, value):
+                        self.settings[key] = str(value).strip()
+                        if key in self.unmanaged_settings:
+                            del self.unmanaged_settings[key]
+                        if key not in self.settings_order:
+                            self.settings_order.append(key)
+                        self.save_settings()
+            else:
+                if key not in self.transient_keys and key not in self.persistent_keys:
+                    self.transient_keys.add(key)
                 if self.validate_setting(key, value):
-                    self.settings[key] = str(value).strip()
-                    if key in self.unmanaged_settings:
-                        del self.unmanaged_settings[key]
+                    self.transient_settings[key] = str(value).strip()
+
+    def set_settings_batch(self, values):
+        """Validate first, then publish one disk update; restore memory on failure."""
+        with self._settings_lock:
+            normalized = {key: str(value).strip() for key, value in values.items()}
+            if 'CHANNEL' in normalized:
+                normalized['CHANNEL'] = normalized['CHANNEL'].lower()
+            linked_values = dict(normalized)
+            groups = [('mycycle_min_place', 'mycycle_max_place'),
+                      ('teams_bits_bonus_enabled', 'teams_bits_bonus_percent', 'teams_bonus_weight_15',
+                       'teams_bonus_weight_25', 'teams_bonus_weight_35', 'teams_bonus_weight_67')]
+            for group in groups:
+                if any(key in normalized for key in group):
+                    for key in group:
+                        if key not in linked_values and self.get_setting(key) is not None:
+                            linked_values[key] = self.get_setting(key)
+            errors = settings_validation_errors(linked_values)
+            for key, value in normalized.items():
+                if key not in self.persistent_keys or not self.validate_setting(key, value):
+                    errors.setdefault(key, 'This setting could not be saved.')
+            if errors:
+                raise ValueError('; '.join(f'{key}: {reason}' for key, reason in errors.items()))
+            if not normalized:
+                return
+            previous = (dict(self.settings), dict(self.transient_settings),
+                        dict(self.unmanaged_settings), list(self.settings_order))
+            try:
+                for key, value in normalized.items():
+                    self.settings[key] = value
+                    self.transient_settings.pop(key, None)
+                    self.unmanaged_settings.pop(key, None)
                     if key not in self.settings_order:
                         self.settings_order.append(key)
-                    self.save_settings()
-        else:
-            if key not in self.transient_keys and key not in self.persistent_keys:
-                self.transient_keys.add(key)
-            if self.validate_setting(key, value):
-                self.transient_settings[key] = str(value).strip()
+                self.save_settings()
+            except Exception:
+                self.settings, self.transient_settings, self.unmanaged_settings, self.settings_order = previous
+                raise
 
     def validate_setting(self, key, value):
         if key == "chunk_alert_value":
@@ -10592,27 +10954,28 @@ class ConfigManager:
         return True
 
     def save_settings(self):
-        temp_file = f"{self.settings_file}.tmp"
-        with open(temp_file, "w", encoding="utf-8") as f:
-            written_keys = set()
+        with self._settings_lock:
+            temp_file = f"{self.settings_file}.tmp"
+            with open(temp_file, "w", encoding="utf-8") as f:
+                written_keys = set()
 
-            for key in self.settings_order:
-                if key in self.settings and key in self.persistent_keys:
-                    f.write(f"{key}={self.settings[key]}\n")
-                    written_keys.add(key)
-                elif key in self.unmanaged_settings:
-                    f.write(f"{key}={self.unmanaged_settings[key]}\n")
-                    written_keys.add(key)
+                for key in self.settings_order:
+                    if key in self.settings and key in self.persistent_keys:
+                        f.write(f"{key}={self.settings[key]}\n")
+                        written_keys.add(key)
+                    elif key in self.unmanaged_settings:
+                        f.write(f"{key}={self.unmanaged_settings[key]}\n")
+                        written_keys.add(key)
 
-            for key, value in self.settings.items():
-                if key in self.persistent_keys and key not in written_keys:
-                    f.write(f"{key}={value}\n")
-                    written_keys.add(key)
+                for key, value in self.settings.items():
+                    if key in self.persistent_keys and key not in written_keys:
+                        f.write(f"{key}={value}\n")
+                        written_keys.add(key)
 
-            for key, value in self.unmanaged_settings.items():
-                if key not in written_keys:
-                    f.write(f"{key}={value}\n")
-        os.replace(temp_file, self.settings_file)
+                for key, value in self.unmanaged_settings.items():
+                    if key not in written_keys:
+                        f.write(f"{key}={value}\n")
+            os.replace(temp_file, self.settings_file)
 
 
 config = ConfigManager()

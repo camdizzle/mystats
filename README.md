@@ -36,7 +36,7 @@ MyStats is a local companion app for Marbles on Stream creators that tracks race
 
 ### Overlay + dashboard server basics
 - Default server URL pattern: `http://127.0.0.1:<overlay_server_port>/...`
-- Default port is typically `5000` unless changed in **Settings → Overlay**.
+- Default port is typically `5000` unless changed in **Settings → Overlays → Race/BR**.
 - After changing server port, restart MyStats and update any OBS/browser links.
 
 ### 2-PC streaming setup
@@ -229,18 +229,18 @@ MyStats serves OBS-ready overlays from its built-in local Flask server so you ca
 ### Overlay URLs
 - Unified overlay (Race/BR/Tilt auto-rotation):
   - `http://127.0.0.1:<overlay_server_port>/overlay`
-- Legacy note: `/overlay/tilt` is deprecated; use `/overlay` and switch overlay mode in **Settings → Overlay**.
+- Legacy note: `/overlay/tilt` is deprecated; use `/overlay` and switch overlay mode in **Settings → Overlays → Race/BR**.
 
 ### OBS setup quickstart
 1. Start MyStats.
-2. Open **Settings → Overlay** and confirm the **Server Port**.
+2. Open **Settings → Overlays → Race/BR** and confirm the **Server Port**.
 3. In OBS, add a **Browser Source**.
 4. Paste one of the overlay URLs above.
 5. If you change the server port, restart MyStats and update OBS URLs.
 
 ### Overlay behavior summary
 - Overlay pages poll local API endpoints and auto-refresh data.
-- Overlay visual options (such as theme/text/spacing/rotation choices) are controlled from **Settings → Overlay**.
+- Overlay visual options (such as theme/text/spacing/rotation choices) are controlled from **Settings → Overlays → Race/BR**.
 - If using a 2-PC setup, replace `127.0.0.1` with your gaming-PC local IP.
 
 ### Overlay troubleshooting
@@ -260,7 +260,7 @@ MyStats includes web dashboards served from the local Flask server for monitorin
 
 ### Dashboard quickstart
 1. Start MyStats.
-2. Confirm **Settings → Overlay → Server Port**.
+2. Confirm **Settings → Overlays → Race/BR → Server Port**.
 3. Open `http://127.0.0.1:<overlay_server_port>/dashboard`.
 4. If data appears stale/missing, verify API output directly in browser.
 
