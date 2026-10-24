@@ -38,7 +38,7 @@ Legacy path behavior:
 - Multi-view top 10 boards (season/today/race-only/br-only)
 - Previous race top-3 presentation
 - World-record callout panel
-- Event popup panel (raid/cycle/quest/player-alert events)
+- Event popup panel (cycle/quest/player-alert events)
 - Optional horizontal ticker layout mode
 
 ### Tilt mode (`/overlay` rendering `tilt.html`)
