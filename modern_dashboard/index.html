@@ -99,14 +99,12 @@
           <div class="tilt-sort-controls">
             <label for="tilt-sort-by" class="sr-only">Sort tilt leaderboard by</label>
             <select id="tilt-sort-by" class="sort-select">
-              <option value="pressure_score">Pressure</option>
               <option value="name">Name</option>
               <option value="tilt_points">Tilt Points</option>
               <option value="tilt_levels">Tilt Levels</option>
               <option value="tilt_top_tiltee">Top Tiltees</option>
               <option value="deaths">Death Count</option>
               <option value="death_rate">Death Rate</option>
-              <option value="consistency">Consistency</option>
             </select>
             <label for="tilt-sort-order" class="sr-only">Sort order</label>
             <select id="tilt-sort-order" class="sort-select">
@@ -204,7 +202,7 @@
           <label>Range <select id="trend-range"><option value="7">Last 7 days</option><option value="21" selected>Last 21 days</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="all">All recorded days</option><option value="custom">Custom dates</option></select></label>
           <span id="trend-custom-dates" hidden><label>From <input id="trend-from" type="date"></label> <label>To <input id="trend-to" type="date"></label></span>
           <label>Group <select id="trend-grouping"><option value="daily">Daily</option><option value="weekly">Weekly (Monday)</option></select></label>
-          <label>Metric <select id="trend-metric"><option value="all">All metrics</option><option value="unique_racers">Winners</option><option value="total_races">Race + BR events</option><option value="ppr">Winning points per event</option><option value="br_count">BR events</option></select></label>
+          <label>Metric <select id="trend-metric"><option value="all">All metrics</option><option value="unique_participants">Participants</option><option value="unique_racers">Winners</option><option value="total_races" selected>Race + BR events</option><option value="ppr">Winning points per event</option><option value="br_count">BR events</option></select></label>
           <label><input id="trend-compare" type="checkbox"> Compare previous period</label>
           <button id="trend-export" type="button" class="mini-filter-btn">Export CSV</button>
         </div>
@@ -217,7 +215,7 @@
     <section id="panel-guide" class="guide-shell is-hidden" data-panel="guide" role="tabpanel">
       <div class="panel-title-row">
         <h2>MyStats Guide</h2>
-        <span class="range-pill">README</span>
+        <span class="range-pill">Tasks &amp; commands</span>
       </div>
       <div id="guide-content" class="guide-content" aria-live="polite">Loading guide…</div>
     </section>

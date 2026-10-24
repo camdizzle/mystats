@@ -2873,6 +2873,7 @@ def _build_team_leaderboard_rows(*, window='season', limit=10):
                 'members': list(team.get('members', [])),
                 'is_recruiting': bool(team.get('is_recruiting')),
                 'active_bonus_label': team.get('active_bonus_label') or '—',
+                'bonus_end': (team.get('active_bonus') or {}).get('end_at'),
                 'logo': team.get('logo'),
             }
             for team_name, team in channel_state.get('teams', {}).items()
@@ -2894,6 +2895,8 @@ def _build_team_leaderboard_rows(*, window='season', limit=10):
             'size': 1 + len(team.get('co_captains', [])) + len(team.get('members', [])),
             'recruiting': bool(team.get('is_recruiting')),
             'bonus_label': team.get('active_bonus_label') or '—',
+            'bonus_end': team.get('bonus_end'),
+            'roster': sorted(set(filter(None, [team.get('captain')] + team.get('co_captains', []) + team.get('members', [])))),
             'icon': logo_text,
             'icon_url': _team_logo_icon_url(logo_text, channel_name),
         })
@@ -3389,7 +3392,7 @@ def _load_csv_rows_with_detection(csv_path):
 
 def get_tilt_season_stats():
     user_stats = {}
-    totals = {'levels': 0, 'top_tiltees': 0, 'points': 0}
+    totals = {'levels': 0, 'top_tiltees': 0, 'points': 0, 'deaths': 0, 'known_outcomes': 0}
 
     directory = config.get_setting('directory')
     if not directory:
@@ -3417,12 +3420,21 @@ def get_tilt_season_stats():
                         'tilt_levels': 0,
                         'tilt_top_tiltee': 0,
                         'tilt_points': 0,
+                        'tilt_deaths': 0,
+                        'known_outcomes': 0,
                     }
 
                 user_stats[username]['tilt_levels'] += 1
                 user_stats[username]['tilt_points'] += detail['points']
                 totals['levels'] += 1
                 totals['points'] += detail['points']
+
+                if detail['survived'] is not None:
+                    user_stats[username]['known_outcomes'] += 1
+                    totals['known_outcomes'] += 1
+                    if detail['survived'] is False:
+                        user_stats[username]['tilt_deaths'] += 1
+                        totals['deaths'] += 1
 
                 if detail['is_top_tiltee']:
                     user_stats[username]['tilt_top_tiltee'] += 1
@@ -3700,6 +3712,9 @@ def get_race_dashboard_leaderboard(limit=250):
                             'br_points': 0,
                             'race_hs': 0,
                             'br_hs': 0,
+                            'br_kills': 0,
+                            'br_damage': 0,
+                            'br_stats_samples': 0,
                         }
 
                     if display_name:
@@ -3712,6 +3727,9 @@ def get_race_dashboard_leaderboard(limit=250):
                             stats_by_user[username]['race_hs'] = points
                     elif mode == 'br':
                         stats_by_user[username]['br_count'] += 1
+                        stats_by_user[username]['br_stats_samples'] += int(len(row) > 9)
+                        stats_by_user[username]['br_kills'] += _safe_int(row[8] if len(row) > 8 else 0)
+                        stats_by_user[username]['br_damage'] += _safe_int(row[9] if len(row) > 9 else 0)
                         stats_by_user[username]['br_points'] += points
                         if points > stats_by_user[username]['br_hs']:
                             stats_by_user[username]['br_hs'] = points
@@ -4714,6 +4732,7 @@ def get_mycycle_leaderboard(limit=200, session_id=None):
             'current_cycle_race_races': int(row.get('current_cycle_race_races', 0)),
             'current_cycle_br_races': int(row.get('current_cycle_br_races', 0)),
             'last_cycle_races': int(row.get('last_cycle_races', 0)),
+            'cycle_history': [dict(item) for item in (row.get('history') or [])[-50:] if isinstance(item, dict)],
             'total_races': int(row.get('total_races', 0)),
             'race_races': int(row.get('race_races', 0)),
             'br_races': int(row.get('br_races', 0)),
@@ -6058,6 +6077,11 @@ def _build_tilt_overlay_payload():
     settings_payload = _build_overlay_settings_payload()
     settings_payload['theme'] = settings_payload.get('tilt_theme') or settings_payload.get('theme') or 'midnight'
 
+    royale_survival = defaultdict(list)
+    for detail in load_royale_player_details():
+        if detail['survival_time'] > 0:
+            royale_survival[detail['username'].lower()].append(detail['survival_time'])
+
     payload = {
         'updated_at': get_internal_now_iso(timespec='seconds'),
         'title': 'MyStats Tilt Run Tracker',
@@ -6106,7 +6130,8 @@ def _build_unified_overlay_payload():
 
 @app.route('/overlay')
 def overlay_page():
-    horizontal_layout_enabled = str(config.get_setting('overlay_horizontal_layout') or 'False') == 'True'
+    horizontal_override = request.args.get('horizontal_layout')
+    horizontal_layout_enabled = (horizontal_override == 'true') if horizontal_override in ('true', 'false') else str(config.get_setting('overlay_horizontal_layout') or 'False') == 'True'
     overlay_file = 'index.html' if horizontal_layout_enabled else ('tilt.html' if get_overlay_mode() == 'tilt' else 'index.html')
 
     for candidate in _overlay_dir_candidates():
@@ -6172,9 +6197,9 @@ def _build_main_dashboard_payload():
 
     mycycle_session_ids, _ = _get_mycycle_home_session_ids()
     active_session_id = mycycle_session_ids[0] if mycycle_session_ids else None
-    mycycle_session, mycycle_rows = get_mycycle_leaderboard(limit=250, session_id=active_session_id)
+    mycycle_session, mycycle_rows = get_mycycle_leaderboard(limit=1000000, session_id=active_session_id)
 
-    season_quest_rows = get_quest_completion_leaderboard(limit=100)
+    season_quest_rows = get_quest_completion_leaderboard(limit=1000000)
     season_quest_targets = get_season_quest_targets()
     tilt_totals, tilt_users = get_tilt_season_stats()
     tilt_leaderboard_rows = sorted(
@@ -6187,6 +6212,7 @@ def _build_main_dashboard_payload():
                 'tilt_top_tiltee': _safe_int((stats or {}).get('tilt_top_tiltee', (stats or {}).get('tilt_tops', 0))),
                 'tilt_tops': _safe_int((stats or {}).get('tilt_tops', (stats or {}).get('tilt_top_tiltee', 0))),
                 'tilt_deaths': _safe_int((stats or {}).get('tilt_deaths', 0)),
+                'known_outcomes': _safe_int((stats or {}).get('known_outcomes', 0)),
             }
             for username, stats in (tilt_users or {}).items()
             if _safe_int((stats or {}).get('tilt_levels', 0)) > 0 or _safe_int((stats or {}).get('tilt_points', 0)) > 0
@@ -6209,7 +6235,7 @@ def _build_main_dashboard_payload():
             'targets': season_quest_targets,
         },
         'rivals': get_global_rivalries(limit=RIVALS_MAX_PAIRS),
-        'races': get_race_dashboard_leaderboard(limit=250),
+        'races': get_race_dashboard_leaderboard(limit=1000000),
         'race_totals': get_race_event_totals(),
         'teams': {
             'top_daily': _build_team_leaderboard_rows(window='daily', limit=100),
@@ -6240,6 +6266,11 @@ def _build_main_dashboard_payload():
         'analytics': analytics_payload,
         'race_trends': race_trends_payload,
     }
+    for row in payload['races']:
+        times = royale_survival.get(row['username'], [])
+        row['br_survival_samples'] = len(times)
+        row['br_survival_average'] = round(sum(times) / len(times), 2) if times else None
+        row['br_survival_best'] = max(times) if times else None
     _dashboard_main_cache['value'] = payload
     _dashboard_main_cache['created_at'] = now_ts
     return payload
@@ -6387,7 +6418,7 @@ def _aggregate_mode_from_directories(directories):
 
 
 def _aggregate_tilt_from_directories(directories):
-    totals = {'points': 0, 'levels': 0, 'top_tiltee': 0, 'deaths': 0}
+    totals = {'points': 0, 'levels': 0, 'top_tiltee': 0, 'deaths': 0, 'known_outcomes': 0}
     users = set()
 
     for directory in directories:
@@ -6403,16 +6434,16 @@ def _aggregate_tilt_from_directories(directories):
                         totals['levels'] += 1
                         if detail.get('is_top_tiltee'):
                             totals['top_tiltee'] += 1
-                        if detail.get('survived') is False or (
-                            detail.get('survived') is None and _safe_int(detail.get('points', 0)) <= 0
-                        ):
-                            totals['deaths'] += 1
+                        if detail.get('survived') is not None:
+                            totals['known_outcomes'] += 1
+                            if detail['survived'] is False:
+                                totals['deaths'] += 1
             except Exception:
                 continue
 
     totals['participants'] = len(users)
     totals['ppr'] = round((totals['points'] / totals['levels']), 2) if totals['levels'] else 0.0
-    totals['survival_rate'] = round(((totals['levels'] - totals['deaths']) / totals['levels']) * 100, 2) if totals['levels'] else 0.0
+    totals['survival_rate'] = round((1 - totals['deaths'] / totals['known_outcomes']) * 100, 2) if totals['known_outcomes'] else None
     return totals
 
 
@@ -6481,11 +6512,12 @@ def _build_dashboard_analytics_payload(mycycle_rows, tilt_totals, tilt_users):
         'participants': len(tilt_users or {}),
         'points': _safe_int((tilt_totals or {}).get('points', 0)),
         'levels': _safe_int((tilt_totals or {}).get('levels', 0)),
-        'top_tiltee': _safe_int((tilt_totals or {}).get('top_tiltee', 0)),
+        'top_tiltee': _safe_int((tilt_totals or {}).get('top_tiltees', 0)),
     }
-    tilt_season['deaths'] = max(0, tilt_season['levels'] - tilt_season['top_tiltee'])
+    tilt_season['deaths'] = _safe_int(tilt_totals.get('deaths'))
+    tilt_season['known_outcomes'] = _safe_int(tilt_totals.get('known_outcomes'))
     tilt_season['ppr'] = round((tilt_season['points'] / tilt_season['levels']), 2) if tilt_season['levels'] else 0.0
-    tilt_season['survival_rate'] = round(((tilt_season['levels'] - tilt_season['deaths']) / tilt_season['levels']) * 100, 2) if tilt_season['levels'] else 0.0
+    tilt_season['survival_rate'] = round((1 - tilt_season['deaths'] / tilt_season['known_outcomes']) * 100, 2) if tilt_season['known_outcomes'] else None
 
     mycycle_season = {
         'tracked_racers': len(mycycle_rows or []),
@@ -6572,6 +6604,18 @@ def _season_label_for_directory(directory):
     return base or 'Current Season'
 
 
+def _dashboard_daily_participants(directory):
+    days = defaultdict(set)
+    for filename in glob.glob(os.path.join(directory, 'allraces_*.csv')):
+        for row in _load_csv_rows_with_detection(filename):
+            if len(row) < 6 or str(row[4]).lower() not in ('race', 'br'):
+                continue
+            timestamp = _parse_overlay_timestamp(row[5])
+            if timestamp and str(row[1]).strip():
+                days[timestamp.strftime('%Y-%m-%d')].add(str(row[1]).strip().lower())
+    return days
+
+
 def _build_dashboard_race_trends_payload():
     current_dir = config.get_setting('directory') or os.getcwd()
     season_dirs, has_prior = _collect_results_season_directories(current_dir)
@@ -6638,6 +6682,14 @@ def _build_dashboard_race_trends_payload():
             'ppr': round((_safe_int(bucket['points']) / total_races), 2) if total_races else 0.0,
         })
 
+    participants = _dashboard_daily_participants(current_dir)
+    by_day = {row['date']: row for row in daily_rows}
+    for day, users in participants.items():
+        if day not in by_day:
+            by_day[day] = {'date': day, 'unique_racers': 0, 'race_count': 0, 'br_count': 0, 'total_races': 0, 'total_points': 0, 'ppr': 0}
+        by_day[day]['unique_participants'] = len(users)
+        by_day[day]['participant_ids'] = sorted(users)
+    daily_rows = [by_day[day] for day in sorted(by_day)]
     days_with_data = len(daily_rows)
     avg_racers_per_day = round(sum(row['unique_racers'] for row in daily_rows) / days_with_data, 2) if days_with_data else 0.0
     avg_races_per_day = round(sum(row['total_races'] for row in daily_rows) / days_with_data, 2) if days_with_data else 0.0
@@ -6709,6 +6761,40 @@ def dashboard_readme_page():
 def _build_dashboard_main_payload_for_args(args):
     payload = _build_main_dashboard_payload()
 
+    payload = copy.deepcopy(payload)
+    sessions, _ = get_mycycle_sessions(include_inactive=True)
+    payload['mycycle']['sessions'] = [{'id': x.get('id'), 'name': x.get('name'), 'active': x.get('active', True)} for x in sessions]
+    session_id = str(args.get('session') or '')
+    if session_id and any(str(x.get('id')) == session_id for x in sessions):
+        session, rows = get_mycycle_leaderboard(limit=1000000, session_id=session_id)
+        payload['mycycle']['session'] = session or {}
+        payload['mycycle']['rows'] = rows
+    if args.get('cycle_sort') == 'closest':
+        payload['mycycle']['rows'].sort(key=lambda r: (len(r.get('missing_places') or []), -r.get('cycles_completed', 0)))
+    payload['tilt']['confirming_run_end'] = bool(globals().get('_tilt_confirmation', {}).get('pending'))
+    payload['tilt']['scope'] = str(args.get('tilt_scope') or 'season')
+    if payload['tilt']['scope'] in ('today', 'current'):
+        scoped = {}
+        directory = config.get_setting('directory') or ''
+        today = _day_key_from_timestamp(datetime.now(timezone.utc))
+        run_id = str(config.get_setting('tilt_current_run_id') or '')
+        for filename in glob.glob(os.path.join(directory, 'tilts_*.csv')):
+            if payload['tilt']['scope'] == 'today' and os.path.basename(filename)[6:16] != today:
+                continue
+            for row in _load_csv_rows_with_detection(filename):
+                detail = parse_tilt_result_detail(row)
+                if not detail or (payload['tilt']['scope'] == 'current' and (not run_id or str(detail['run_id']) != run_id)):
+                    continue
+                user = detail['username'].lower()
+                item = scoped.setdefault(user, {'username': user, 'display_name': detail['display_name'], 'tilt_levels': 0, 'tilt_points': 0, 'tilt_top_tiltee': 0, 'tilt_deaths': 0, 'known_outcomes': 0})
+                item['tilt_levels'] += 1
+                item['tilt_points'] += detail['points']
+                item['tilt_top_tiltee'] += int(detail['is_top_tiltee'])
+                item['known_outcomes'] += int(detail['survived'] is not None)
+                item['tilt_deaths'] += int(detail['survived'] is False)
+        payload['tilt']['leaderboard'] = list(scoped.values())
+        payload['tilt']['totals'] = {'levels': sum(x['tilt_levels'] for x in scoped.values()), 'points': sum(x['tilt_points'] for x in scoped.values()), 'known_outcomes': sum(x['known_outcomes'] for x in scoped.values()), 'deaths': sum(x['tilt_deaths'] for x in scoped.values())}
+
     q = (args.get('mycycle_query') or '').strip().lower()
     try:
         page = max(1, int(args.get('mycycle_page', 1)))
@@ -6719,24 +6805,22 @@ def _build_dashboard_main_payload_for_args(args):
     except (TypeError, ValueError):
         page_size = 120
 
-    if q or page > 1 or page_size != 120:
-        payload = copy.deepcopy(payload)
-        rows = list(payload.get('mycycle', {}).get('rows') or [])
-        if q:
-            rows = [
-                row for row in rows
-                if q in str(row.get('display_name') or '').lower() or q in str(row.get('username') or '').lower()
-            ]
-        start = (page - 1) * page_size
-        end = start + page_size
-        payload['mycycle']['rows'] = rows[start:end]
-        payload['mycycle']['pagination'] = {
-            'page': page,
-            'page_size': page_size,
-            'total': len(rows),
-            'total_pages': max(1, math.ceil(len(rows) / page_size)) if rows else 1,
-            'query': q,
-        }
+    rows = list(payload.get('mycycle', {}).get('rows') or [])
+    if q:
+        rows = [
+            row for row in rows
+            if q in str(row.get('display_name') or '').lower() or q in str(row.get('username') or '').lower()
+        ]
+    start = (page - 1) * page_size
+    end = start + page_size
+    payload['mycycle']['rows'] = rows[start:end]
+    payload['mycycle']['pagination'] = {
+        'page': page,
+        'page_size': page_size,
+        'total': len(rows),
+        'total_pages': max(1, math.ceil(len(rows) / page_size)) if rows else 1,
+        'query': q,
+    }
 
     season_q = (args.get('season_query') or '').strip().lower()
     try:
@@ -6750,44 +6834,42 @@ def _build_dashboard_main_payload_for_args(args):
     season_sort_by = (args.get('season_sort_by') or 'completed').strip().lower()
     season_sort_order = (args.get('season_sort_order') or 'desc').strip().lower()
 
-    if season_q or season_page > 1 or season_page_size != 100 or season_sort_by != 'completed' or season_sort_order != 'desc':
-        payload = copy.deepcopy(payload)
-        season_rows = list(payload.get('season_quests', {}).get('rows') or [])
-        if season_q:
-            season_rows = [
-                row for row in season_rows
-                if season_q in str(row.get('display_name') or '').lower() or season_q in str(row.get('username') or '').lower()
-            ]
+    season_rows = list(payload.get('season_quests', {}).get('rows') or [])
+    if season_q:
+        season_rows = [
+            row for row in season_rows
+            if season_q in str(row.get('display_name') or '').lower() or season_q in str(row.get('username') or '').lower()
+        ]
 
-        sort_fields = {
-            'name': lambda row: str(row.get('display_name') or row.get('username') or '').lower(),
-            'completed': lambda row: (
-                int(row.get('completed', 0)),
-                (int(row.get('completed', 0)) / max(1, int(row.get('active_quests', 0)))) if int(row.get('active_quests', 0)) else 0,
-                int(row.get('points', 0)),
-            ),
-            'points': lambda row: int(row.get('points', 0)),
-            'races': lambda row: int(row.get('races', 0)),
-            'race_hs': lambda row: int(row.get('race_hs', 0)),
-            'br_hs': lambda row: int(row.get('br_hs', 0)),
-            'tilt_points': lambda row: int(row.get('tilt_points', 0)),
-        }
-        sort_key = sort_fields.get(season_sort_by, sort_fields['completed'])
-        reverse_sort = season_sort_order != 'asc'
-        season_rows.sort(key=sort_key, reverse=reverse_sort)
+    sort_fields = {
+        'name': lambda row: str(row.get('display_name') or row.get('username') or '').lower(),
+        'completed': lambda row: (
+            int(row.get('completed', 0)),
+            (int(row.get('completed', 0)) / max(1, int(row.get('active_quests', 0)))) if int(row.get('active_quests', 0)) else 0,
+            int(row.get('points', 0)),
+        ),
+        'points': lambda row: int(row.get('points', 0)),
+        'races': lambda row: int(row.get('races', 0)),
+        'race_hs': lambda row: int(row.get('race_hs', 0)),
+        'br_hs': lambda row: int(row.get('br_hs', 0)),
+        'tilt_points': lambda row: int(row.get('tilt_points', 0)),
+    }
+    sort_key = sort_fields.get(season_sort_by, sort_fields['completed'])
+    reverse_sort = season_sort_order != 'asc'
+    season_rows.sort(key=sort_key, reverse=reverse_sort)
 
-        season_start = (season_page - 1) * season_page_size
-        season_end = season_start + season_page_size
-        payload['season_quests']['rows'] = season_rows[season_start:season_end]
-        payload['season_quests']['pagination'] = {
-            'page': season_page,
-            'page_size': season_page_size,
-            'total': len(season_rows),
-            'total_pages': max(1, math.ceil(len(season_rows) / season_page_size)) if season_rows else 1,
-            'query': season_q,
-            'sort_by': season_sort_by,
-            'sort_order': 'asc' if season_sort_order == 'asc' else 'desc',
-        }
+    season_start = (season_page - 1) * season_page_size
+    season_end = season_start + season_page_size
+    payload['season_quests']['rows'] = season_rows[season_start:season_end]
+    payload['season_quests']['pagination'] = {
+        'page': season_page,
+        'page_size': season_page_size,
+        'total': len(season_rows),
+        'total_pages': max(1, math.ceil(len(season_rows) / season_page_size)) if season_rows else 1,
+        'query': season_q,
+        'sort_by': season_sort_by,
+        'sort_order': 'asc' if season_sort_order == 'asc' else 'desc',
+    }
 
     return payload
 
@@ -6816,6 +6898,33 @@ def _make_sse_response(payload_builder, *, poll_interval_s=3.0, heartbeat_interv
     response.headers['Cache-Control'] = 'no-store'
     response.headers['X-Accel-Buffering'] = 'no'
     return response
+
+
+def _dashboard_history_rows():
+    rows, _ = read_desktop_history(config.get_setting('directory') or os.getcwd())
+    return rows
+
+
+@app.route('/api/dashboard/details')
+def dashboard_details():
+    player = str(request.args.get('player') or '').strip().lower()[:100]
+    day = str(request.args.get('day') or '')[:10]
+    end = str(request.args.get('end') or day)[:10]
+    rows = _dashboard_history_rows()
+    selected = [r for r in rows if (not player or r['player'].lower() == player) and (not day or day <= r['day'] <= end)]
+    selected.sort(key=lambda r: r['timestamp'], reverse=True)
+    records = desktop_record_progress(list(reversed(selected)), player=player)
+    try:
+        goals = [dict(g, progress=goal_progress(g, rows)) for g in load_desktop_goals() if str(g.get('player', '')).lower() == player]
+        goals_error = False
+    except (OSError, ValueError):
+        goals, goals_error = [], True
+    return jsonify({'rows': selected[:200], 'total': len(selected), 'records': records[-30:], 'goals': goals, 'goals_error': goals_error})
+
+
+@app.route('/api/dashboard/guide')
+def dashboard_guide():
+    return jsonify({'commands': get_command_reference()})
 
 
 @app.route('/api/dashboard/main')
@@ -16628,7 +16737,17 @@ def process_season(directory, season):
 
 
 
+_tilt_confirmation = {'pending': False}
+
+
 async def read_confirmed_tilt_level(path, stop_event):
+    try:
+        return await _read_confirmed_tilt_level(path, stop_event)
+    finally:
+        _tilt_confirmation['pending'] = False
+
+
+async def _read_confirmed_tilt_level(path, stop_event):
     """Require a failed result to remain unchanged for five seconds before committing it."""
     previous_snapshot = None
     confirmation_deadline = None
@@ -16654,6 +16773,7 @@ async def read_confirmed_tilt_level(path, stop_event):
             logger.info("Tilt level %s reports run ended; watching for corrections for five seconds.", state['current_level'])
             previous_snapshot = snapshot
             confirmation_deadline = now + 5.0
+            _tilt_confirmation['pending'] = True
         remaining = confirmation_deadline - now
         if remaining <= 0:
             return state, after.st_mtime

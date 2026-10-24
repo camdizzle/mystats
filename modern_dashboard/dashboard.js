@@ -416,7 +416,7 @@ function renderSeasonQuestRows(data) {
     return `
       <div class="row">
         <div class="row-head">
-          ${renderRankBadge(idx + 1)}
+          ${renderRankBadge(idx + 1 + ((seasonPagination?.page || 1) - 1) * (seasonPagination?.page_size || 100))}
           <span class="name">${escapeHtml(row.display_name || row.username || '-')}</span>
           <span class="stat">${escapeHtml(`${completedText} ${t('complete')}`)}</span>
         </div>
@@ -452,13 +452,14 @@ function renderTiltKpis(rows = [], data = {}) {
   const totalLevels = Number(totals.levels || 0);
   const totalTopTiltees = Number(totals.top_tiltees ?? totals.tilt_tops ?? 0);
   const totalPoints = Number(totals.points || 0);
-  const totalDeaths = Math.max(0, totalLevels - totalTopTiltees);
-  const deathRate = totalLevels > 0 ? ((totalDeaths / totalLevels) * 100) : 0;
+  const totalDeaths = Number(totals.deaths || 0);
+  const knownOutcomes = Number(totals.known_outcomes || 0);
+  const deathRate = knownOutcomes > 0 ? (totalDeaths / knownOutcomes) * 100 : null;
 
   host.innerHTML = [
     { label: 'Tilt Competitors', value: fmt(uniqueParticipantCount(rows)) },
-    { label: t('Deaths Today'), value: fmt(deathsToday) },
-    { label: t('Death Rate'), value: `${deathRate.toFixed(1)}%` },
+    { label: 'Recorded deaths · selected scope', value: knownOutcomes ? fmt(totalDeaths) : 'Unknown' },
+    { label: t('Death Rate'), value: deathRate === null ? 'Unknown' : `${deathRate.toFixed(1)}%` },
     { label: t('Total Tilt Points'), value: fmt(totalPoints) },
   ].map((kpi) => (
     `<div class="kpi"><div class="kpi-label">${escapeHtml(kpi.label)}</div><div class="kpi-value">${escapeHtml(kpi.value)}</div></div>`
@@ -533,8 +534,8 @@ function renderTiltRows(data) {
     .map((row) => {
       const tiltLevels = Number(row.tilt_levels || 0);
       const topTiltees = getTopTilteeCount(row);
-      const deaths = Math.max(0, tiltLevels - topTiltees);
-      const deathRate = tiltLevels > 0 ? (deaths / tiltLevels) * 100 : 0;
+      const deaths = Number(row.tilt_deaths || 0);
+      const deathRate = Number(row.known_outcomes) > 0 ? (deaths / Number(row.known_outcomes)) * 100 : 0;
       const pressureScore = (Number(row.tilt_points || 0) * 1.5) + (topTiltees * 25) - (deaths * 8);
       const consistency = Math.max(0, 100 - deathRate);
 
@@ -744,9 +745,7 @@ function renderRivalsRows(data) {
 
   const incomingRows = Array.isArray(data?.rivals) ? data.rivals : [];
   rivalsSettingsSnapshot = data?.settings || rivalsSettingsSnapshot;
-  if (incomingRows.length) {
-    rivalsRowsSnapshot = incomingRows;
-  }
+  rivalsRowsSnapshot = incomingRows;
   const rows = getFilteredSortedRivalRows(rivalsRowsSnapshot);
   wireRivalsControls();
 
@@ -782,16 +781,16 @@ function renderRivalsRows(data) {
       <div class="row">
         <div class="row-head">
           ${renderRankBadge(idx + 1)}
-          <span class="name">${escapeHtml(`${row.display_a || row.user_a || '-'} vs ${row.display_b || row.user_b || '-'}`)}</span>
+          <span class="name"><button class="player-link" data-player="${escapeHtml(row.user_a)}">${escapeHtml(row.display_a || row.user_a || '-')}</button> vs <button class="player-link" data-player="${escapeHtml(row.user_b)}">${escapeHtml(row.display_b || row.user_b || '-')}</button></span>
           <span class="stat">${escapeHtml(`${leaderName} +${fmt(leadValue)}`)}</span>
         </div>
-        <div class="quest-metrics">
+        <details><summary>Compare matchup</summary><div class="quest-metrics">
           <span>${escapeHtml(row.display_a || row.user_a || 'Player A')}: ${escapeHtml(fmt(pointsA))} pts (${escapeHtml(fmt(racesA))} races)</span>
           <span>${escapeHtml(row.display_b || row.user_b || 'Player B')}: ${escapeHtml(fmt(pointsB))} pts (${escapeHtml(fmt(racesB))} races)</span>
           <span>Point Gap: ${escapeHtml(fmt(gap))}</span>
           <span>Race Gap: ${escapeHtml(fmt(Math.abs(raceDelta)))}</span>
           <span>PPR Edge: ${escapeHtml((Math.abs(pprDelta)).toFixed(2))} (${escapeHtml((pprDelta >= 0 ? (row.display_a || row.user_a || 'Player A') : (row.display_b || row.user_b || 'Player B')))} ahead)</span>
-        </div>
+        </div></details>
       </div>
     `;
   }).join('');
@@ -1068,7 +1067,7 @@ function buildAnalyticsGroupsMarkup(data) {
     ],
     tilt: [
       ['Participants', 'participants'], ['Tilt Points', 'points'], ['Tilt Levels', 'levels'], ['Top Tiltee Finishes', 'top_tiltee'],
-      ['Deaths', 'deaths'], ['Survival Rate %', 'survival_rate'], ['PPR', 'ppr'],
+      ['Recorded Deaths', 'deaths'], ['Known Outcomes', 'known_outcomes'], ['Survival Rate %', 'survival_rate'], ['PPR', 'ppr'],
     ],
     race_only: [
       ['Race Count', 'race_events'], ['Race Points', 'points'], ['Race Wins', 'wins'], ['Win Rate %', 'win_rate'], ['Unique Racers', 'unique_racers'],
@@ -1132,7 +1131,7 @@ function buildAnalyticsGroupsMarkup(data) {
 
 
 
-const trendControls = { range: '21', from: '', to: '', grouping: 'daily', metric: 'all', compare: false };
+const trendControls = { range: '21', from: '', to: '', grouping: 'daily', metric: 'total_races', compare: false };
 let latestTrendPayload = null;
 let trendExportRows = [];
 const TREND_DAY_MS = 86400000;
@@ -1151,15 +1150,16 @@ function groupTrendRows(rows, grouping, shiftDays = 0) {
     const date = new Date(stamp + shiftDays * TREND_DAY_MS);
     if (grouping === 'weekly') date.setUTCDate(date.getUTCDate() - (date.getUTCDay() + 6) % 7);
     const key = date.toISOString().slice(0, 10);
-    if (!groups.has(key)) groups.set(key, { date: key, days: 0, unique_racers: 0, total_races: 0, race_count: 0, br_count: 0, total_points: 0 });
+    if (!groups.has(key)) groups.set(key, { date: key, days: 0, unique_racers: 0, unique_participants: 0, total_races: 0, race_count: 0, br_count: 0, total_points: 0 });
     const bucket = groups.get(key);
     bucket.days++;
-    ['unique_racers', 'total_races', 'race_count', 'br_count'].forEach(field => bucket[field] += Number(row[field]) || 0);
+    ['unique_racers', 'unique_participants', 'total_races', 'race_count', 'br_count'].forEach(field => bucket[field] += Number(row[field]) || 0);
     bucket.total_points += Number.isFinite(Number(row.total_points)) && row.total_points != null
       ? Number(row.total_points) : (Number(row.ppr) || 0) * (Number(row.total_races) || 0);
   });
   return [...groups.values()].sort((a, b) => a.date.localeCompare(b.date)).map(row => ({ ...row,
     unique_racers: row.unique_racers / row.days,
+    unique_participants: row.unique_participants / row.days,
     ppr: row.total_races ? row.total_points / row.total_races : 0,
   }));
 }
@@ -1190,7 +1190,7 @@ function selectTrendWindow(rows, controls = trendControls) {
 
 function exportTrendCsv() {
   if (!trendExportRows.length) return;
-  const fields = ['period', 'date', 'unique_racers', 'race_count', 'br_count', 'total_races', 'total_points', 'ppr'];
+  const fields = ['period', 'date', 'unique_participants', 'unique_racers', 'race_count', 'br_count', 'total_races', 'total_points', 'ppr'];
   const lines = [fields.join(','), ...trendExportRows.map(row => fields.map(field => JSON.stringify(row[field] ?? '')).join(','))];
   const url = URL.createObjectURL(new Blob([lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }));
   const link = document.createElement('a'); link.href = url; link.download = 'mystats-trends.csv'; link.click();
@@ -1203,7 +1203,7 @@ function wireTrendControls() {
     input.addEventListener('change', () => {
       trendControls[key] = key === 'compare' ? input.checked : input.value;
       el('trend-custom-dates').hidden = trendControls.range !== 'custom';
-      if (latestTrendPayload) renderRaceTrends(latestTrendPayload);
+      if (latestTrendPayload) { renderRaceTrends(latestTrendPayload); enhanceDashboard(latestTrendPayload); }
     });
   });
   el('trend-export').addEventListener('click', exportTrendCsv);
@@ -1280,7 +1280,7 @@ function renderSimpleLineChart(title, rows, valueKey, labelKey, formatter = (v) 
   const pathD = points.map((pt, idx) => `${idx === 0 ? 'M' : 'L'}${pt.x.toFixed(2)} ${pt.y.toFixed(2)}`).join(' ');
 
   const dots = points.map((pt) => (
-    `<circle class="trend-line-dot" cx="${pt.x.toFixed(2)}" cy="${pt.y.toFixed(2)}" r="3.5">
+    `<circle data-history-day="${/^\d{4}-\d{2}-\d{2}$/.test(pt.label) ? escapeHtml(pt.label) : ''}" class="trend-line-dot" cx="${pt.x.toFixed(2)}" cy="${pt.y.toFixed(2)}" r="3.5">
       <title>${escapeHtml(`${pt.label}: ${formatter(pt.value)}`)}</title>
     </circle>`
   )).join('');
@@ -1359,7 +1359,8 @@ function renderRaceTrends(data) {
   pendingTrendCharts.length = 0;
   const metric = trendControls.metric;
   const include = key => metric === 'all' || metric === key;
-  const charts = [analyticsSection.markup];
+  const charts = [`<details><summary>Season and all-season statistics</summary>${analyticsSection.markup}</details>`];
+  if (include('unique_participants')) charts.push(chart(trendControls.grouping === 'weekly' ? 'Weekly Average Daily Participants' : 'Daily Unique Participants', latestDays, 'unique_participants', 'date', v => Number(v).toLocaleString(undefined,{maximumFractionDigits:1}), true));
   if (include('unique_racers')) charts.push(chart('Unique Winners per Season', seasonSeries, 'unique_racers', 'season_label'));
   if (include('total_races')) charts.push(chart('Total Races per Season', seasonSeries, 'total_races', 'season_label'));
   if (metric === 'ppr') charts.push(chart('Winning Points per Event per Season', seasonSeries, 'ppr', 'season_label', v => Number(v).toFixed(2)));
@@ -1475,6 +1476,7 @@ async function loadGuideContent() {
   if (!host) return;
   try {
     const resp = await fetch('/dashboard/readme', { cache: 'no-store' });
+    if (!resp.ok) throw new Error(`Guide unavailable (${resp.status})`);
     const htmlText = await resp.text();
     const parsed = new DOMParser().parseFromString(htmlText, 'text/html');
     const bodyHtml = parsed.body ? parsed.body.innerHTML : htmlText;
@@ -1487,7 +1489,7 @@ async function loadGuideContent() {
 
 function getRequestedViewFromLocation() {
   const hashView = String(window.location.hash || '').replace('#', '').trim();
-  const validViews = new Set(['mycycle', 'season-quests', 'tilt', 'rivals', 'races', 'teams', 'trends', 'guide']);
+  const validViews = new Set(['mycycle', 'season-quests', 'tilt', 'rivals', 'races', 'teams', 'trends', 'guide', 'overlays']);
   if (validViews.has(hashView)) return hashView;
 
   const viewFromQuery = new URLSearchParams(window.location.search).get('view');
@@ -1496,6 +1498,8 @@ function getRequestedViewFromLocation() {
 
 function setActiveView(viewName) {
   activeView = viewName;
+  if (viewName === 'overlays' && el('preset-size')) el('preset-size').onchange();
+  if (dashboardLastPayload) setTimeout(() => renderDashboardPayload(dashboardLastPayload, false), 0);
   if (window.location.hash !== `#${activeView}`) {
     window.history.replaceState(null, '', `#${activeView}`);
   }
@@ -1536,26 +1540,41 @@ function buildRefreshParams() {
   if (mycycleQuery) params.set('mycycle_query', mycycleQuery);
   if (seasonQuery) params.set('season_query', seasonQuery);
   params.set('season_page', String(seasonPage));
+  params.set('session', el('cycle-session')?.value || '');
+  params.set('cycle_sort', el('cycle-sort')?.value || 'leaderboard');
+  params.set('tilt_scope', el('tilt-scope')?.value || 'season');
   params.set('season_page_size', String(seasonPageSize));
   params.set('season_sort_by', seasonSortBy);
   params.set('season_sort_order', seasonSortOrder);
   return params;
 }
 
-function renderDashboardPayload(data) {
+function renderDashboardPayload(data, received = true) {
+  const panel = document.querySelector(`[data-panel="${activeView}"]`);
+  const detailKey = node => `${node.closest(".row")?.querySelector("[data-player]")?.dataset.player || node.closest(".row")?.querySelector("strong")?.textContent || "panel"}|${node.querySelector("summary")?.textContent}`;
+  const openDetails = new Set([...panel?.querySelectorAll("details[open]") || []].map(detailKey));
+  dashboardLastPayload = data;
+  if (received) { dashboardLastReceived = Date.now(); setConnectionStatus('Connected · live updates'); }
   currentLanguage = data?.settings?.language || currentLanguage || 'en';
   el('updated-at').textContent = data.updated_at ? `${t('Updated')} ${data.updated_at}` : t('Updated now');
-  renderMyCycleRows(data);
-  renderSeasonQuestRows(data);
-  renderTiltRows(data);
-  renderRivalsRows(data);
-  renderRaceDashboardRows(data);
-  renderTeamsRows(data);
-  renderRaceTrends(data);
+  const renderers = {'mycycle': renderMyCycleRows, 'season-quests': renderSeasonQuestRows,
+    tilt: renderTiltRows, rivals: renderRivalsRows, races: renderRaceDashboardRows,
+    teams: renderTeamsRows, trends: renderRaceTrends};
+  const focused = document.activeElement;
+  const draft = focused?.id ? {id: focused.id, value: focused.value, start: focused.selectionStart, end: focused.selectionEnd} : null;
+  renderers[activeView]?.(data);
+  if (draft) {
+    const input = el(draft.id);
+    if (input && input !== focused) { input.value = draft.value; input.focus(); try { input.setSelectionRange(draft.start, draft.end); } catch (_) {} }
+  }
+  enhanceDashboard(data);
+  panel?.querySelectorAll("details").forEach(node => { if (openDetails.has(detailKey(node))) node.open = true; });
 }
 
 function renderDashboardError(error) {
   console.error('dashboard refresh failed', error);
+  setConnectionStatus('Reconnecting — showing last successful data', true);
+  if (dashboardLastPayload) return;
   const fallback = `<div class="empty">${escapeHtml(t('Unable to load MyStats data.'))}</div>`;
   ['mycycle', 'season-quests', 'tilt-leaderboard', 'rivals-leaderboard', 'races-leaderboard', 'teams-leaderboard', 'trend-charts'].forEach((id) => {
     const node = el(id);
@@ -1571,8 +1590,9 @@ async function refresh() {
       startDashboardStream();
     }
     const resp = await fetch(`/api/dashboard/main?${nextQuery}`, { cache: 'no-store' });
+    if (!resp.ok) throw new Error(`Dashboard request failed (${resp.status})`);
     const data = await resp.json();
-    renderDashboardPayload(data);
+    if (nextQuery === buildRefreshParams().toString()) renderDashboardPayload(data);
   } catch (error) {
     renderDashboardError(error);
   }
@@ -1603,13 +1623,14 @@ function startDashboardStream() {
   stream.addEventListener('update', (event) => {
     try {
       const data = JSON.parse(event.data || '{}');
-      renderDashboardPayload(data);
+      if (dashboardStream === stream) renderDashboardPayload(data);
     } catch (error) {
       console.error('dashboard stream parse failed', error);
     }
   });
 
   stream.onerror = () => {
+    setConnectionStatus('Reconnecting — showing last successful data', true);
     stopDashboardStream();
     dashboardStreamReconnectTimer = setTimeout(() => {
       refresh();
@@ -1619,6 +1640,249 @@ function startDashboardStream() {
 
   return true;
 }
+
+// Dashboard controls and details use the same read-only data as the desktop tools.
+let dashboardLastPayload = null;
+let dashboardLastReceived = 0;
+let detailRequest = 0;
+const dashboardFilters = {};
+function readPreference(key, fallback) {
+  try { return JSON.parse(localStorage.getItem(`mystats.${key}`)) ?? fallback; } catch (_) { return fallback; }
+}
+function savePreference(key, value) {
+  try { localStorage.setItem(`mystats.${key}`, JSON.stringify(value)); } catch (_) { /* Private browser storage may be unavailable. */ }
+}
+function setConnectionStatus(message, warning = false) {
+  const status = el('connection-status');
+  if (status) { status.textContent = message; status.classList.toggle('status-warning', warning); }
+}
+function playerButton(row) {
+  return `<button class="player-link" data-player="${escapeHtml(row.username || row.player || '')}">${escapeHtml(row.display_name || row.display || row.username || row.player || 'Unknown')}</button>`;
+}
+function metric(label, value) { return `<span><small>${escapeHtml(label)}</small><strong>${escapeHtml(value ?? 'Unavailable')}</strong></span>`; }
+function progressLine(label, value, target) {
+  const n = Number(value || 0), goal = Number(target || 0);
+  if (goal <= 0) return '';
+  return `<div class="quest-progress"><span>${escapeHtml(label)}: ${fmt(n)} / ${fmt(goal)}</span><progress max="${goal}" value="${Math.min(goal, n)}" aria-label="${escapeHtml(label)}"></progress></div>`;
+}
+function installDashboardControls() {
+  const nav = document.querySelector('.dashboard-nav');
+  nav.insertAdjacentHTML('beforeend', '<button class="dashboard-nav-btn" data-view="overlays" role="tab" aria-selected="false" aria-controls="panel-overlays">OBS presets</button>');
+  document.querySelector('.topbar').insertAdjacentHTML('beforeend', '<label>Theme <select id="dashboard-theme"><option value="midnight">Midnight</option><option value="darkly">Darkly</option></select></label>');
+  document.querySelector('.topbar').insertAdjacentHTML('afterend', '<div id="connection-status" class="connection-status" role="status" aria-live="polite">Connecting…</div>');
+  const theme = el('dashboard-theme'); theme.value = readPreference('theme', 'darkly');
+  document.documentElement.dataset.theme = theme.value;
+  theme.onchange = () => { document.documentElement.dataset.theme = theme.value; savePreference('theme', theme.value); };
+  const definitions = [
+    ['mycycle','MyCycle session','<label>Session <select id="cycle-session"></select></label><label>Order <select id="cycle-sort"><option value="leaderboard">Cycles completed</option><option value="closest">Closest to completion</option></select></label>'],
+    ['tilt','Tilt scope','<label>Scope <select id="tilt-scope"><option value="season">Season</option><option value="today">Today</option><option value="current">Current run</option></select></label>'],
+    ['races','Season Race / BR','<label>Metric <select id="race-metric"><option value="points">Points</option><option value="events">Entries</option><option value="high">High score</option><option value="kills">BR kills</option><option value="damage">BR damage</option><option value="survival">BR survival average</option></select></label>'],
+    ['teams','Team window','<label>Order <select id="teams-sort"><option value="points">Points</option><option value="name">Name</option><option value="size">Members</option></select></label><label><input id="teams-recruiting" type="checkbox"> Recruiting only</label>'],
+    ['season-quests','Season quests','']
+  ];
+  for (const [view, scope, extra] of definitions) {
+    const host = el(`panel-${view}`).querySelector('.leaderboard-panel');
+    const controls = document.createElement('div'); controls.className = 'shared-controls';
+    controls.innerHTML = `<span class="scope-label">${scope}</span>${extra}<label>Find <input type="search" data-find="${view}" placeholder="Player or team"></label><button data-reset="${view}">Reset</button><label><input type="checkbox" data-compact="${view}" checked> Compact list</label>`;
+    host.prepend(controls);
+  }
+  document.querySelectorAll('[data-find]').forEach(input => {
+    let pending; input.oninput = () => {
+      const view = input.dataset.find;
+      if (view === 'mycycle' || view === 'season-quests') { clearTimeout(pending); pending = setTimeout(() => { if (view === 'mycycle') { mycycleQuery = input.value.trim(); mycyclePage = 1; } else { seasonQuery = input.value.trim(); seasonPage = 1; } refresh(); }, 250); }
+      else { dashboardFilters[view] = input.value.toLowerCase(); if (dashboardLastPayload) enhanceDashboard(dashboardLastPayload); }
+    };
+  });
+  document.querySelectorAll('[data-compact]').forEach(input => input.onchange = () => { const panel = el(`panel-${input.dataset.compact}`); panel.classList.toggle('expanded-list', !input.checked); panel.querySelectorAll('.row details').forEach(details => details.open = !input.checked); });
+  document.querySelectorAll('[data-reset]').forEach(button => button.onclick = () => {
+    const view = button.dataset.reset; dashboardFilters[view] = '';
+    document.querySelector(`[data-find="${view}"]`).value = '';
+    if (view === 'mycycle') { mycyclePage = 1; mycycleQuery = ''; el('cycle-sort').value = 'leaderboard'; }
+    if (view === 'season-quests') { seasonPage = 1; seasonQuery = ''; el('season-query').value = ''; seasonSortBy = 'completed'; seasonSortOrder = 'desc'; el('season-sort-by').value = 'completed'; el('season-sort-order').value = 'desc'; }
+    if (view === 'tilt') { el('tilt-scope').value = 'season'; tiltSortBy = 'tilt_points'; el('tilt-sort-by').value = 'tilt_points'; }
+    if (view === 'races') { raceDashboardFilter = 'both'; el('race-metric').value = 'points'; }
+    if (view === 'teams') { el('teams-sort').value = 'points'; el('teams-recruiting').checked = false; teamLeaderboardFilter = 'season'; }
+    document.querySelectorAll('[data-race-filter]').forEach(btn => btn.classList.toggle('mini-filter-btn--active', btn.dataset.raceFilter === raceDashboardFilter));
+    document.querySelectorAll('[data-team-filter]').forEach(btn => btn.classList.toggle('mini-filter-btn--active', btn.dataset.teamFilter === teamLeaderboardFilter));
+    refresh();
+  });
+  ['cycle-session','cycle-sort','tilt-scope'].forEach(id => el(id).onchange = () => { mycyclePage = 1; refresh(); startDashboardStream(); });
+  ['race-metric','teams-recruiting','teams-sort'].forEach(id => el(id).onchange = () => dashboardLastPayload && enhanceDashboard(dashboardLastPayload));
+  el('rivals-export').insertAdjacentHTML('afterend','<button id="rivals-reset">Reset</button>');
+  el('rivals-reset').onclick = () => { rivalsSearchQuery = ''; rivalsSortBy = 'closest'; rivalsGapPreset = 'all'; el('rivals-search').value = ''; el('rivals-sort').value = 'closest'; el('rivals-preset').value = 'all'; savePreference('pinnedRival',''); refresh(); };
+  el('trend-export').insertAdjacentHTML('afterend','<button id="trends-reset" class="mini-filter-btn">Reset</button>');
+  el('trends-reset').onclick = () => { Object.assign(trendControls,{range:'21',from:'',to:'',grouping:'daily',metric:'total_races',compare:false}); for (const key of ['range','from','to','grouping','metric']) el(`trend-${key}`).value = trendControls[key]; el('trend-compare').checked = false; el('trend-custom-dates').hidden = true; if (dashboardLastPayload) renderDashboardPayload(dashboardLastPayload,false); };
+  document.body.insertAdjacentHTML('beforeend', '<dialog id="player-drawer" aria-labelledby="drawer-title"><button id="drawer-close" class="drawer-close" aria-label="Close details">Close</button><h2 id="drawer-title">Player details</h2><div id="drawer-content"></div></dialog>');
+  el('drawer-close').onclick = () => { detailRequest++; el('player-drawer').close(); };
+  document.addEventListener('click', event => {
+    const player = event.target.closest('[data-player]');
+    if (player) openPlayerDetails(player.dataset.player);
+    const day = event.target.closest('[data-history-day]');
+    if (day) openPlayerDetails('', day.dataset.historyDay);
+  });
+  document.querySelector('main').insertAdjacentHTML('beforeend', '<section id="panel-overlays" class="guide-shell is-hidden" data-panel="overlays" role="tabpanel"><h2>OBS presentation presets</h2><div id="overlay-presets"></div></section>');
+  installOverlayPresets();
+  installGuide();
+  setInterval(() => {
+    if (dashboardLastReceived && Date.now() - dashboardLastReceived > 90000) setConnectionStatus('Data is stale — reconnecting; last successful results retained', true);
+    document.querySelectorAll('[data-bonus-end]').forEach(node => {
+      const seconds = Math.max(0, Math.ceil((Date.parse(node.dataset.bonusEnd) - Date.now()) / 1000));
+      node.textContent = Number.isFinite(seconds) ? (seconds ? `Bonus ends in ${Math.floor(seconds / 60)}m ${seconds % 60}s` : 'Bonus ended') : 'Bonus timing unavailable';
+    });
+  }, 1000);
+}
+function matchesDashboardFilter(row, view) {
+  const query = dashboardFilters[view] || '';
+  return !query || `${row.username || ''} ${row.display_name || ''} ${row.name || ''}`.toLowerCase().includes(query);
+}
+function enhanceDashboard(data) {
+  const view = activeView;
+  if (view === 'mycycle') {
+    const selector = el('cycle-session'), selected = data.mycycle?.session?.id;
+    if (document.activeElement !== selector) {
+      selector.innerHTML = (data.mycycle?.sessions || []).map(x => `<option value="${escapeHtml(x.id)}">${escapeHtml(x.name || x.id)}${x.active ? '' : ' (inactive)'}</option>`).join('');
+      if (selected) selector.value = selected;
+    }
+    const rows = data.mycycle?.rows || [];
+    const cards = [...el('mycycle').querySelectorAll('.row')];
+    cards.forEach((card, i) => {
+      const row = rows[i]; if (!row) return;
+      card.hidden = !matchesDashboardFilter(row, view);
+      const name = card.querySelector('.name'); if (name) name.innerHTML = playerButton(row);
+      card.classList.toggle('one-away', row.missing_places?.length === 1);
+      if (row.missing_places?.length === 1 && !card.querySelector('.one-away-label')) card.insertAdjacentHTML('beforeend', `<span class="one-away-label">One position away: ${escapeHtml(row.missing_places[0])}</span>`);
+      if (!card.querySelector('details')) card.insertAdjacentHTML('beforeend', `<details><summary>Cycle history</summary><p>${fmt(row.cycles_completed)} completed · Last cycle: ${fmt(row.last_cycle_races)} entries · Completed ${escapeHtml(row.last_cycle_completed_at || 'not recorded')}</p>${(row.cycle_history || []).slice().reverse().map(c => `<p>${escapeHtml(c.completed_at || 'Unknown date')} · ${fmt(c.races_used)} entries (${fmt(c.race_races)} Race / ${fmt(c.br_races)} BR)</p>`).join('') || '<p>Earlier cycle history was not recorded.</p>'}<button data-player="${escapeHtml(row.username)}">Open recorded results</button></details>`);
+    });
+    if (data.mycycle?.pagination && !el('mycycle-meta').textContent.includes('Summary covers')) el('mycycle-meta').textContent += ' · Summary covers this page';
+    // Wire empty-state pagination too, so a search can always be cleared.
+    const search = el('mycycle-search');
+    if (search) el('mycycle-search-btn').onclick = () => { mycycleQuery = search.value.trim(); mycyclePage = 1; refresh(); };
+  }
+  if (view === 'season-quests') {
+    const rows = data.season_quests?.rows || [], targets = data.season_quests?.targets || {};
+    [...el('season-quests').querySelectorAll('.row')].forEach((card, i) => {
+      const row = rows[i]; if (!row) return; card.hidden = !matchesDashboardFilter(row, view);
+      card.querySelector('.name').innerHTML = playerButton(row);
+      if (card.querySelector('details')) return;
+      const keys = {points:'Points',races:'Entries',race_hs:'Race high score',br_hs:'BR high score',tilt_levels:'Tilt levels',tilt_tops:'Top Tiltees',tilt_points:'Tilt points'};
+      const questRow = {...row, tilt_tops:getTopTilteeCount(row)};
+      const quests = Object.keys(keys).filter(key => Number(targets[key]) > 0);
+      const next = quests.filter(key => Number(questRow[key] || 0) < Number(targets[key])).sort((a,b) => Number(questRow[b] || 0) / targets[b] - Number(questRow[a] || 0) / targets[a])[0];
+      card.insertAdjacentHTML('beforeend', `<p class="next-goal">${next ? `Next closest: ${keys[next]} · ${fmt(targets[next] - Number(questRow[next] || 0))} remaining` : (quests.length ? 'All active quests complete' : 'No active quest targets')}</p><details><summary>Progress for each quest</summary>${quests.map(key => progressLine(keys[key],questRow[key],targets[key])).join('') || '<p>No active quest targets.</p>'}</details>`);
+    });
+    if (!el('season-range-pill').textContent.includes('Summary covers')) el('season-range-pill').textContent += ' · Summary covers this page';
+  }
+  if (view === 'tilt') {
+    const rows = (data.tilt?.leaderboard || []).filter(row => matchesDashboardFilter(row,view)).map(row => ({...row, deaths:Number(row.tilt_deaths || 0), death_rate:row.known_outcomes ? row.tilt_deaths / row.known_outcomes * 100 : null})).sort((a,b) => compareTiltRows(a,b,tiltSortBy,tiltSortOrder));
+    el('tilt-leaderboard').innerHTML = rows.map((row,i) => {
+      const known = Number(row.known_outcomes || 0), deaths = Number(row.tilt_deaths || 0);
+      return `<article class="row"><div class="row-head">${renderRankBadge(i+1)}${playerButton(row)}<span class="stat">${fmt(row.tilt_points)} pts</span></div><div class="compact-metrics">${metric('Levels',fmt(row.tilt_levels))}${metric('Top Tiltees',fmt(row.tilt_top_tiltee))}${metric('Recorded deaths', known ? fmt(deaths) : 'Unknown')}${metric('Survival',known ? `${((1-deaths/known)*100).toFixed(1)}%` : 'Unknown')}${metric('Known outcomes',`${known}/${row.tilt_levels}`)}</div></article>`;
+    }).join('') || '<p class="empty">No recorded results in this scope.</p>';
+    el('tilt-highlights').innerHTML = `<p class="meta">${data.tilt?.confirming_run_end ? 'Confirming run end… watching for corrected results.' : 'Watching for new results.'}</p><p>Survival uses explicit recorded outcomes only. Older exports may have unknown outcomes. Top Tiltee is a ranking, not survival.</p>`;
+    // Remove speculative Pressure and Consistency choices entirely.
+    [...el('tilt-sort-by').options].filter(x => ['pressure_score','consistency'].includes(x.value)).forEach(x => x.remove());
+    if (!el('tilt-sort-by').value) el('tilt-sort-by').value = 'tilt_points';
+  }
+  if (view === 'races') {
+    const choice = el('race-metric').value;
+    const value = row => choice === 'survival' ? Number(row.br_survival_average || 0) : choice === 'kills' ? Number(row.br_kills || 0) : choice === 'damage' ? Number(row.br_damage || 0) : choice === 'events' ? getRaceRowTotals(row, raceDashboardFilter).events : choice === 'high' ? getRaceRowTotals(row, raceDashboardFilter).highScore : getRaceRowTotals(row, raceDashboardFilter).points;
+    const rows = (data.races || []).filter(row => matchesDashboardFilter(row,view)).filter(row => raceDashboardFilter === 'both' || Number(row[`${raceDashboardFilter}_count`]) > 0).sort((a,b) => value(b)-value(a));
+    el('races-leaderboard').innerHTML = rows.map((row,i) => `<article class="row"><div class="row-head">${renderRankBadge(i+1)}${playerButton(row)}<span class="stat">${fmt(value(row))} ${escapeHtml(choice)}</span></div><div class="compact-metrics">${metric('Race entries',fmt(row.race_count))}${metric('BR entries',fmt(row.br_count))}${metric('BR kills',row.br_stats_samples ? fmt(row.br_kills) : 'Unavailable')}${metric('BR damage',row.br_stats_samples ? fmt(row.br_damage) : 'Unavailable')}${metric('BR survival avg',row.br_survival_samples ? `${row.br_survival_average}s` : 'Unavailable')}</div><details><summary>More statistics</summary><p>Race high score ${fmt(row.race_hs)} · BR high score ${fmt(row.br_hs)} · BR survival: ${row.br_survival_samples ? `${Number(row.br_survival_average).toFixed(1)}s average · ${Number(row.br_survival_best).toFixed(1)}s best · ${fmt(row.br_survival_samples)} recorded rounds` : 'Unavailable in archived results'}.</p><button data-player="${escapeHtml(row.username)}">Results, records and goals</button></details></article>`).join('') || '<p class="empty">No matching players.</p>';
+  }
+  if (view === 'teams') {
+    const rows = (data.teams?.[`top_${teamLeaderboardFilter}`] || []).filter(row => matchesDashboardFilter(row,view)).filter(row => !el('teams-recruiting').checked || row.recruiting).sort((a,b) => el('teams-sort').value === 'name' ? a.name.localeCompare(b.name) : Number(b[el('teams-sort').value] || 0) - Number(a[el('teams-sort').value] || 0));
+    el('teams-leaderboard').innerHTML = rows.map((row,i) => `<article class="row"><div class="row-head">${renderRankBadge(i+1)}<strong>${escapeHtml(row.name)}</strong><span class="stat">${fmt(row.points)} pts</span></div><div class="compact-metrics">${metric('Members',row.size)}${metric('Recruiting',row.recruiting?'Open':'Closed')}${metric('Bonus',row.bonus_label)}</div>${row.bonus_end ? `<p data-bonus-end="${escapeHtml(row.bonus_end)}">Calculating bonus time…</p>` : ''}<details><summary>Roster and member results</summary><p>Team totals may include bonuses and historical membership. Member season points show individual results.</p>${(row.roster || []).map(user => { const stats = (data.races || []).find(x => x.username === user); return `<p>${playerButton(stats || {username:user})} · ${stats ? fmt(stats.total_points) + ' season points' : 'No saved race results'}</p>`; }).join('')}</details></article>`).join('') || '<p class="empty">No teams match this filter.</p>';
+  }
+  if (view === 'rivals' && document.activeElement?.id !== 'rival-pin') renderPinnedRival(data);
+  if (view === 'trends') {
+    const host = el('trend-charts');
+    if (!el('trend-history-links')) host.insertAdjacentHTML('beforeend', `<details id="trend-history-links"><summary>Open recorded results by day</summary>${(data.race_trends?.daily_current_season || []).slice(-90).reverse().map(row => `<button data-history-day="${escapeHtml(row.date)}">${escapeHtml(row.date)}</button>`).join('')}</details>`);
+    host.querySelectorAll('canvas').forEach(canvas => {
+      if (typeof Chart === 'undefined') return;
+      const chart = Chart.getChart(canvas); if (!chart) return;
+      chart.options.onClick = (event, elements) => {
+        if (!elements.length) return;
+        const element = elements[0]; let day = String(chart.data.labels[element.index]);
+        if (!/^\d{4}-\d{2}-\d{2}/.test(day)) return;
+        if (element.datasetIndex === 1) {
+          const windowed = selectTrendWindow(data.race_trends?.daily_current_season || []);
+          const index = windowed.previous.findIndex(row => row.date === day);
+          day = windowed.previousOriginal?.[index]?.date || '';
+        }
+        if (!day) return;
+        const end = trendControls.grouping === 'weekly' ? new Date(trendDate(day) + 6 * TREND_DAY_MS).toISOString().slice(0,10) : day;
+        openPlayerDetails('',day,end);
+      };
+    });
+  }
+}
+async function openPlayerDetails(player, day = '', end = day) {
+  const requestId = ++detailRequest, drawer = el('player-drawer');
+  el('drawer-title').textContent = player ? `Player · ${player}` : `Results · ${day}${end !== day ? ` to ${end}` : ''}`;
+  el('drawer-content').textContent = 'Loading recorded results…';
+  if (!drawer.open) drawer.showModal();
+  try {
+    const response = await fetch(`/api/dashboard/details?${new URLSearchParams({player,day,end})}`);
+    if (!response.ok) throw new Error('Details unavailable');
+    const details = await response.json();
+    if (requestId !== detailRequest) return;
+    const stats = (dashboardLastPayload?.races || []).find(r => r.username === player);
+    el('drawer-content').innerHTML = `${stats ? `<div class="compact-metrics">${metric('Season points',fmt(stats.total_points))}${metric('Race entries',fmt(stats.race_count))}${metric('BR entries',fmt(stats.br_count))}</div>` : ''}<p>Showing ${details.rows.length} of ${fmt(details.total)} saved results in the current season.</p><h3>Goals</h3>${details.goals.map(g => `<p>${escapeHtml(g.kind)}: ${fmt(g.progress?.[0])} / ${fmt(g.target)} points (${Number(g.progress?.[1] || 0).toFixed(1)}%)</p>`).join('') || (details.goals_error ? '<p>Saved goals could not be read. Check desktop Tools.</p>' : '<p>No saved goals for this player. Add one in desktop Tools.</p>')}<h3>Personal records</h3>${details.records.map(r => `<p>${escapeHtml(r.kind)} · ${fmt(r.points)} pts · ${escapeHtml(r.day)}</p>`).join('') || '<p>No recorded improvements.</p>'}<h3>Recent results</h3><div class="history-list">${details.rows.map(r => `<p>${escapeHtml(r.day)} · ${escapeHtml(r.display || r.player)} · ${escapeHtml(r.kind)} · ${fmt(r.points)} pts · Position ${escapeHtml(r.position ?? '—')}</p>`).join('') || '<p>No matching saved results.</p>'}</div>`;
+  } catch (_) { if (requestId === detailRequest) el('drawer-content').textContent = 'Details could not be loaded. Close and reopen to retry.'; }
+}
+function renderPinnedRival(data) {
+  let host = el('pinned-rival');
+  if (!host) { el('rivals-leaderboard').insertAdjacentHTML('beforebegin','<div id="pinned-rival"></div>'); host = el('pinned-rival'); }
+  const rows = data.rivals || [], pinned = readPreference('pinnedRival','');
+  host.innerHTML = `<label>Pin matchup <select id="rival-pin"><option value="">Choose a matchup</option>${rows.map(row => `<option value="${escapeHtml(`${row.user_a}|${row.user_b}`)}">${escapeHtml(row.display_a || row.user_a)} / ${escapeHtml(row.display_b || row.user_b)}</option>`).join('')}</select></label><div id="rival-comparison"></div>`;
+  el('rival-pin').value = pinned;
+  el('rival-pin').onchange = () => { savePreference('pinnedRival',el('rival-pin').value); renderPinnedRival(data); };
+  const row = rows.find(r => `${r.user_a}|${r.user_b}` === pinned); if (!row) return;
+  // Samples reflect actual dashboard observations, never invented historic points.
+  const histories = readPreference('rivalHistory',{}), history = histories[pinned] || [];
+  const sample = {at:data.updated_at,gap:Number(row.point_gap || 0)};
+  if (!history.length || history[history.length-1].gap !== sample.gap) history.push(sample);
+  histories[pinned] = history.slice(-60); savePreference('rivalHistory',histories);
+  el('rival-comparison').innerHTML = `<div class="comparison-grid">${['a','b'].map(side => `<article>${playerButton({username:row[`user_${side}`],display_name:row[`display_${side}`]})}${metric('Points',fmt(row[`points_${side}`]))}${metric('Entries',fmt(row[`races_${side}`]))}</article>`).join('')}</div><details><summary>Observed point-gap history (${history.length} samples)</summary><p>Saved in this browser when this pinned matchup changes; earlier history is unavailable.</p>${history.length > 1 ? `<svg class="rival-gap-chart" viewBox="0 0 400 100" role="img" aria-label="Observed point gap"><polyline fill="none" stroke="#63d3ac" stroke-width="3" points="${history.map((x,i) => `${5+i*390/(history.length-1)},${95-x.gap/Math.max(1,...history.map(v=>v.gap))*85}`).join(' ')}"/></svg>` : ''}${history.slice(-60).map(x => `<p>${escapeHtml(x.at)} · Gap ${fmt(x.gap)}</p>`).join('')}</details>`;
+}
+async function installGuide() {
+  guideLoaded = true; // The task guide works even when the optional README.html is absent.
+  el('guide-content').innerHTML = `<label>Search guide and commands <input id="guide-search" type="search"></label><div id="guide-tasks"><article data-guide-item><h3>Set up MyStats</h3><p>Select the game export folder in Settings, connect your Twitch channel, and confirm the monitoring status in the desktop Overview.</p></article><article data-guide-item><h3>Add an OBS source</h3><p>Open OBS presets, choose a size and stats, then copy its URL into an OBS Browser Source with the matching width and height.</p></article><article data-guide-item><h3>Control chat</h3><p>Use Settings to choose which game messages are enabled. Desktop Tools lets you pause outgoing chat and preview messages for the current session.</p></article><article data-guide-item><h3>Troubleshoot</h3><p>Check desktop Diagnostics for file monitoring, export paths and recent errors. Run history shows what was saved. A stale banner retains the last successful dashboard while reconnecting.</p></article></div><div id="guide-commands">Loading command reference…</div>`;
+  const filter = () => document.querySelectorAll('[data-guide-item]').forEach(item => item.hidden = !item.textContent.toLowerCase().includes(el('guide-search').value.toLowerCase()));
+  el('guide-search').oninput = filter;
+  try {
+    const response = await fetch('/api/dashboard/guide'); if (!response.ok) throw new Error('Unavailable');
+    const result = await response.json();
+    el('guide-commands').innerHTML = '<h3>Chat commands</h3>' + result.commands.map(c => `<article data-guide-item><strong>${escapeHtml(c.usage || c.name)}</strong><p>${escapeHtml(c.description)}</p><small>${escapeHtml(c.category)}</small></article>`).join(''); filter();
+  } catch (_) { el('guide-commands').innerHTML = '<p>Command reference unavailable. Open Help → Commands in the desktop application.</p><button id="retry-guide">Retry</button>'; el('retry-guide').onclick = installGuide; }
+}
+function installOverlayPresets() {
+  const defaults = {name:'Stream card',size:'800x600',opacity:90,scale:110,horizontal:false,stats:'season'};
+  const presets = readPreference('overlayPresets',[defaults,{name:'Wide ticker',size:'1920x160',opacity:95,scale:110,horizontal:true,stats:'today'}]);
+  el('overlay-presets').innerHTML = `<p>Presets are saved in this browser. Each OBS URL carries its own settings, so sources can use different presentations.</p><div class="shared-controls"><label>Saved preset <select id="preset-select">${presets.map((x,i) => `<option value="${i}">${escapeHtml(x.name)}</option>`).join('')}</select></label><label>Name <input id="preset-name" maxlength="60"></label><label>Target size <select id="preset-size"><option>800x600</option><option>1920x160</option><option>1280x720</option><option>480x800</option></select></label><label>Card opacity <input id="preset-opacity" type="range" min="65" max="100"></label><label>Text scale <input id="preset-scale" type="range" min="80" max="150"></label><label><input id="preset-horizontal" type="checkbox"> Horizontal ticker</label><label>Stats <select id="preset-stats"><option value="season">Season</option><option value="today">Today</option><option value="all">All enabled stats</option></select></label><button id="preset-save">Save preset</button><button id="preset-copy">Copy OBS URL</button></div><p id="preset-status" role="status"></p><input id="preset-url" readonly aria-label="OBS browser source URL"><div class="preset-preview"><iframe id="preset-frame" title="OBS target size preview" loading="lazy"></iframe></div><p>Checkerboard shows transparency. Preview is scaled to fit; set OBS to the target dimensions shown above.</p>`;
+  const update = () => {
+    const size = el('preset-size').value, [width,height] = size.split('x').map(Number);
+    const params = new URLSearchParams({card_opacity:el('preset-opacity').value,text_scale:el('preset-scale').value,horizontal_layout:String(el('preset-horizontal').checked),stats:el('preset-stats').value});
+    const url = `${location.origin}/overlay?${params}`;
+    el('preset-url').value = url;
+    const frame = el('preset-frame'); if (activeView === 'overlays') frame.src = url; frame.width = width; frame.height = height;
+    frame.style.width = `${width}px`; frame.style.height = `${height}px`;
+    const ratio = Math.min(1, (el('overlay-presets').clientWidth || 600) / width);
+    frame.style.transform = `scale(${ratio})`; frame.parentElement.style.height = `${height * ratio}px`;
+    el('preset-status').textContent = `OBS source: ${width} × ${height} · Opacity ${el('preset-opacity').value}% · Text ${el('preset-scale').value}%`;
+  };
+  const load = () => { const x = presets[Number(el('preset-select').value)] || defaults; for (const key of ['name','size','opacity','scale','stats']) el(`preset-${key}`).value = x[key]; el('preset-horizontal').checked = x.horizontal; update(); };
+  el('preset-select').onchange = load;
+  ['size','opacity','scale','horizontal','stats'].forEach(key => el(`preset-${key}`).onchange = update);
+  el('preset-save').onclick = () => {
+    const x = {name:el('preset-name').value.trim() || 'My preset',size:el('preset-size').value,opacity:Number(el('preset-opacity').value),scale:Number(el('preset-scale').value),horizontal:el('preset-horizontal').checked,stats:el('preset-stats').value};
+    const index = presets.findIndex(p => p.name === x.name); if (index >= 0) presets[index] = x; else presets.push(x);
+    savePreference('overlayPresets',presets.slice(-30)); installOverlayPresets(); el('preset-select').value = String(Math.max(0,presets.findIndex(p => p.name === x.name))); el('preset-select').onchange();
+  };
+  el('preset-copy').onclick = async () => { try { await navigator.clipboard.writeText(el('preset-url').value); el('preset-status').textContent += ' · URL copied'; } catch (_) { el('preset-url').select(); el('preset-status').textContent += ' · Select and copy the URL above'; } };
+  load();
+}
+installDashboardControls();
 
 const requestedView = getRequestedViewFromLocation();
 if (requestedView) {
