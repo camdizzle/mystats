@@ -16390,6 +16390,7 @@ async def competitive_raid_monitor(bot):
 async def read_confirmed_tilt_level(path, stop_event):
     """Require a failed result to remain unchanged for five seconds before committing it."""
     previous_snapshot = None
+    confirmation_deadline = None
     while not stop_event.is_set():
         try:
             before = os.stat(path)
@@ -16405,11 +16406,20 @@ async def read_confirmed_tilt_level(path, stop_event):
         if state is None:
             return None
         snapshot = (signature, rows)
-        if state['level_passed'] or snapshot == previous_snapshot:
+        if state['level_passed']:
             return state, after.st_mtime
-        logger.info("Tilt level %s reports run ended; waiting five seconds for a corrected export.", state['current_level'])
-        previous_snapshot = snapshot
-        await asyncio.sleep(5)
+        now = time.monotonic()
+        if snapshot != previous_snapshot:
+            logger.info("Tilt level %s reports run ended; watching for corrections for five seconds.", state['current_level'])
+            previous_snapshot = snapshot
+            confirmation_deadline = now + 5.0
+        remaining = confirmation_deadline - now
+        if remaining <= 0:
+            return state, after.st_mtime
+        # Watchdog wakes us immediately; also re-read at least once a second if
+        # notifications are unavailable or missed. Duplicate events do not reset
+        # the deadline unless the export actually changed.
+        await file_changes.wait(path, timeout=min(1.0, remaining))
     return None
 
 
