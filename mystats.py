@@ -200,7 +200,7 @@ file_changes = FileChanges()
 
 
 # Global Variables
-version = '6.4.1'
+version = '7.0.0'
 text_widget = None
 bot = None
 BOT_SHOULD_RUN = True
