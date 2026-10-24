@@ -1365,6 +1365,40 @@ def apply_ui_styles(style):
     style.configure("TCombobox", padding=3)
     style.configure("TCheckbutton", padding=2)
 
+    # Resolve surfaces from the selected theme so light and dark themes both work.
+    background = style.lookup('TFrame', 'background') or '#f3f5f9'
+    foreground = style.lookup('TLabel', 'foreground') or '#172033'
+    try:
+        rgb = style.master.winfo_rgb(background)
+        dark = sum(rgb) / (3 * 65535) < 0.5
+    except (tk.TclError, AttributeError):
+        dark = False
+    if not dark:
+        background = '#f3f5f9'
+    surface = '#252d3b' if dark else '#ffffff'
+    muted = '#acb8cb' if dark else '#526078'
+    accent = '#a5b4fc' if dark else '#4338ca'
+    style.configure('App.TFrame', background=background)
+    style.configure('Heading.TLabel', background=background, foreground=foreground)
+    style.configure('Small.TLabel', background=background, foreground=muted)
+    style.configure('Overview.TFrame', background=background, padding=0)
+    style.configure('Surface.TFrame', background=surface, padding=(12, 8), relief='flat')
+    style.configure('Metric.TLabel', background=surface, foreground=foreground, font=('Segoe UI', 21, 'bold'))
+    style.configure('MetricTitle.TLabel', background=surface, foreground=muted, font=('Segoe UI', 10))
+    style.configure('Accent.Metric.TLabel', background=surface, foreground=accent, font=('Segoe UI', 21, 'bold'))
+    style.configure('Muted.TLabel', background=background, foreground=muted, font=('Segoe UI', 9))
+    style.configure('Status.TLabel', background=surface, foreground=muted, font=('Segoe UI', 9), padding=(10, 3))
+    for name, color in (('Ready', '#86efac' if dark else '#166534'), ('Waiting', '#fcd34d' if dark else '#92400e')):
+        style.configure(name + '.Status.TLabel', background=surface, foreground=color, font=('Segoe UI', 9), padding=(10, 3))
+    style.configure('Activity.Treeview', background=surface, fieldbackground=surface, foreground=foreground,
+                    rowheight=32, borderwidth=0, relief='flat', font=('Segoe UI', 10))
+    style.configure('Activity.Treeview.Heading', background=surface, foreground=muted,
+                    font=('Segoe UI', 9, 'bold'), padding=(8, 9), relief='flat')
+    style.map('Activity.Treeview', background=[('selected', '#4338ca')], foreground=[('selected', '#ffffff')])
+    style.configure('Main.TNotebook', background=background, borderwidth=0, tabmargins=(0, 8, 0, 0))
+    style.configure('Main.TNotebook.Tab', background=background, foreground=muted, font=('Segoe UI', 10), padding=(14, 9))
+    style.map('Main.TNotebook.Tab', foreground=[('selected', accent)], background=[('selected', surface)])
+
 
 def get_available_ui_themes():
     return sorted(app_style.theme_names())
@@ -9746,43 +9780,51 @@ def get_overview_status():
 
 def build_overview(parent, status_parent):
     """Refresh desktop widgets only on Tk's thread; keep activity bounded in memory."""
-    status_frame = ttk.Frame(status_parent, style='App.TFrame')
+    status_frame = ttk.Frame(status_parent, style='Overview.TFrame')
     status_frame.grid(row=1, column=0, columnspan=2, sticky='ew', padx=5, pady=(8, 4))
     status_labels = []
     for index in range(4):
         status_frame.grid_columnconfigure(index % 2, weight=1, uniform='status')
-        label = ttk.Label(status_frame, text='', style='Small.TLabel', wraplength=300)
-        label.grid(row=index // 2, column=index % 2, sticky='w', padx=(0, 12), pady=2)
+        label = ttk.Label(status_frame, text='', style='Status.TLabel', wraplength=300)
+        label.grid(row=index // 2, column=index % 2, sticky='ew', padx=(0, 8), pady=3)
         status_labels.append(label)
 
     parent.grid_columnconfigure(0, weight=1)
     parent.grid_rowconfigure(3, weight=1)
-    toolbar = ttk.Frame(parent, style='App.TFrame')
-    toolbar.grid(row=0, column=0, sticky='ew', padx=14, pady=(14, 8))
-    ttk.Label(toolbar, text='Your stream at a glance', style='Heading.TLabel').pack(side='left')
+    toolbar = ttk.Frame(parent, style='Overview.TFrame')
+    toolbar.grid(row=0, column=0, sticky='ew', padx=14, pady=(10, 6))
+    introduction = ttk.Frame(toolbar, style='Overview.TFrame')
+    introduction.pack(side='left')
+    ttk.Label(introduction, text='Your stream at a glance', style='Heading.TLabel').pack(anchor='w', pady=(3, 0))
     period = tk.StringVar(value='Today')
     selector = ttk.Combobox(toolbar, textvariable=period, values=('Today', 'Season'), state='readonly', width=9)
     selector.pack(side='right')
     ttk.Label(toolbar, text='Show: ').pack(side='right')
 
-    cards = ttk.Frame(parent, style='App.TFrame')
+    cards = ttk.Frame(parent, style='Overview.TFrame')
     cards.grid(row=1, column=0, sticky='ew', padx=10)
     values = []
     for index, title in enumerate(('Total points', 'Races & BRs', 'Average points', 'Best race score', 'Best BR score')):
         cards.grid_columnconfigure(index % 3, weight=1, uniform='overview_cards')
-        card = ttk.LabelFrame(cards, text=title, style='Card.TLabelframe', padding=12)
-        card.grid(row=index // 3, column=index % 3, sticky='nsew', padx=4, pady=4)
-        value = ttk.Label(card, text='0', font=('Segoe UI', 20, 'bold'))
-        value.pack(anchor='w')
+        card = ttk.Frame(cards, style='Surface.TFrame', padding=(12, 6))
+        card.grid(row=index // 3, column=index % 3, sticky='nsew', padx=5, pady=5)
+        ttk.Label(card, text=title, style='MetricTitle.TLabel').pack(anchor='w')
+        value = ttk.Label(card, text='0', style='Accent.Metric.TLabel' if index == 0 else 'Metric.TLabel')
+        value.pack(anchor='w', pady=(4, 0))
         values.append(value)
 
-    ttk.Label(parent, text='Recent activity · this session', style='Heading.TLabel').grid(
-        row=2, column=0, sticky='w', padx=14, pady=(16, 6))
-    activity_frame = ttk.Frame(parent, style='App.TFrame')
+    explore = ttk.Frame(cards, style='Surface.TFrame', padding=(12, 6))
+    explore.grid(row=1, column=2, sticky='nsew', padx=5, pady=5)
+    ttk.Label(explore, text='Go deeper', style='MetricTitle.TLabel').pack(anchor='w')
+    ttk.Button(explore, text='Explore trends →', command=open_dashboard).pack(anchor='w', pady=(10, 0))
+
+    ttk.Label(parent, text='Recent activity · this session', style='Muted.TLabel').grid(
+        row=2, column=0, sticky='w', padx=14, pady=(10, 4))
+    activity_frame = ttk.Frame(parent, style='Overview.TFrame')
     activity_frame.grid(row=3, column=0, sticky='nsew', padx=14, pady=(0, 14))
     activity_frame.grid_columnconfigure(0, weight=1)
     activity_frame.grid_rowconfigure(0, weight=1)
-    activity = ttk.Treeview(activity_frame, columns=('time', 'event'), show='headings', height=6, selectmode='browse')
+    activity = ttk.Treeview(activity_frame, columns=('time', 'event'), show='headings', height=6, selectmode='browse', style='Activity.Treeview')
     activity.heading('time', text='Time')
     activity.heading('event', text='Activity')
     activity.column('time', width=78, minwidth=70, stretch=False)
@@ -9809,8 +9851,10 @@ def build_overview(parent, status_parent):
         for label, value in zip(values, get_overview_statistics(period.get())):
             label.configure(text=value)
         status = get_overview_status()
-        for label, title, value in zip(status_labels, ('Twitch', 'Outgoing chat', 'File monitoring', 'Last export update'), status):
-            label.configure(text=f'{title}: {value}')
+        for index, (label, title, value) in enumerate(zip(status_labels, ('Twitch', 'Outgoing chat', 'File monitoring', 'Last export update'), status)):
+            ready = value in ('Connected', 'Enabled', 'Watchdog active')
+            style = ('Ready' if ready else 'Waiting') + '.Status.TLabel' if index < 3 else 'Status.TLabel'
+            label.configure(text=f'{title}  ·  {value}', style=style)
         snapshot = {
             'Twitch': status[0], 'Outgoing chat': status[1], 'File monitoring': status[2],
             'results': (get_int_setting('totalcounttoday', 0), get_int_setting('totalpointstoday', 0)),
@@ -9934,10 +9978,10 @@ def build_main_content(parent):
     login_button = ttk.Button(login_button_frame, text="Custom Bot Login", command=open_login_url, style="Primary.TButton")
     login_button.grid(row=1, column=1, sticky='e', padx=(0, 5))
 
-    notebook = ttk.Notebook(parent)
+    notebook = ttk.Notebook(parent, style='Main.TNotebook')
     notebook.grid(row=1, column=1, sticky='nsew', padx=(0, 5), pady=5)
 
-    overview_tab = ttk.Frame(notebook, style="App.TFrame")
+    overview_tab = ttk.Frame(notebook, style="Overview.TFrame")
     console_tab = ttk.Frame(notebook, style="App.TFrame")
     season_quests_tab = ttk.Frame(notebook, style="App.TFrame")
     rivals_tab = ttk.Frame(notebook, style="App.TFrame")
