@@ -6944,6 +6944,8 @@ TWITCH_CREDENTIAL_TARGET = 'MyStats/TwitchOAuth'
 TOKEN_STORAGE_LOCK = threading.RLock()
 _TOKEN_STORAGE_NOTICES = set()
 DEFAULT_BOT_USERNAME = 'mystats_results'
+# Populate only in the private build source; never commit a shared bot credential.
+DEFAULT_BOT_TOKEN = ''
 TOKEN_REFRESH_EARLY_SECONDS = 300
 TOKEN_VALIDATION_CONSOLE_LOGGED = False
 TOKEN_VALIDATION_LOG_LOCK = threading.Lock()
@@ -11405,6 +11407,30 @@ def set_tilt_runtime_setting(key, value):
     config.set_setting(key, value, persistent=(key in TILT_RUNTIME_PERSISTENT_KEYS))
 
 
+def remove_legacy_default_bot_setting(path):
+    """Remove obsolete token lines without changing the other settings bytes."""
+    import tempfile
+    try:
+        with open(path, 'rb') as stream:
+            raw = stream.read()
+        lines = raw.splitlines(keepends=True)
+        filtered = [line for line in lines if line.lstrip(b'\xef\xbb\xbf').partition(b'=')[0].strip().upper() != b'TWITCH_TOKEN']
+        if len(filtered) == len(lines):
+            return
+        descriptor, temporary = tempfile.mkstemp(prefix='.mystats-settings-', suffix='.tmp', dir=os.path.dirname(os.path.abspath(path)))
+        try:
+            with os.fdopen(descriptor, 'wb') as stream:
+                stream.write(b''.join(filtered))
+            os.replace(temporary, path)
+        finally:
+            if os.path.exists(temporary):
+                os.remove(temporary)
+    except FileNotFoundError:
+        pass
+    except OSError:
+        print('An obsolete bot-token setting could not be removed. Check settings.txt permissions; its value will not be used.')
+
+
 class ConfigManager:
     def __init__(self):
         self._settings_lock = threading.RLock()
@@ -11413,7 +11439,7 @@ class ConfigManager:
         self.transient_settings = {}
         self.unmanaged_settings = {}
         self.settings_order = []
-        self.persistent_keys = {'TWITCH_USERNAME', 'TWITCH_TOKEN', 'CHANNEL', 'chunk_alert', 'chunk_alert_value',
+        self.persistent_keys = {'TWITCH_USERNAME', 'CHANNEL', 'chunk_alert', 'chunk_alert_value',
                                 'marble_day', 'allraces_file', 'announcedelay', 'announcedelayseconds',
                                 'directory', 'app_install_directory', 'race_file', 'br_file', 'season', 'reset_audio', 'sync', 'MPL',
                                 'chunk_alert_sound', 'reset_audio_sound', 'audio_device', 'checkpoint_file',
@@ -11614,6 +11640,7 @@ class ConfigManager:
         self.load_settings()
 
     def load_settings(self):
+        remove_legacy_default_bot_setting(self.settings_file)
         try:
             with open(self.settings_file, "r", encoding="utf-8", errors="ignore") as f:
                 for line in f:
@@ -11622,6 +11649,8 @@ class ConfigManager:
                         continue
 
                     key, value = clean_line.split('=', 1)
+                    if key.strip().upper() == 'TWITCH_TOKEN':
+                        continue
                     if key not in self.settings_order:
                         self.settings_order.append(key)
                     if key in self.persistent_keys:
@@ -11736,6 +11765,8 @@ class ConfigManager:
                 written_keys = set()
 
                 for key in self.settings_order:
+                    if key.strip().upper() == 'TWITCH_TOKEN':
+                        continue
                     if key in self.settings and key in self.persistent_keys:
                         f.write(f"{key}={self.settings[key]}\n")
                         written_keys.add(key)
@@ -11744,11 +11775,15 @@ class ConfigManager:
                         written_keys.add(key)
 
                 for key, value in self.settings.items():
+                    if key.strip().upper() == 'TWITCH_TOKEN':
+                        continue
                     if key in self.persistent_keys and key not in written_keys:
                         f.write(f"{key}={value}\n")
                         written_keys.add(key)
 
                 for key, value in self.unmanaged_settings.items():
+                    if key.strip().upper() == 'TWITCH_TOKEN':
+                        continue
                     if key not in written_keys:
                         f.write(f"{key}={value}\n")
             os.replace(temp_file, self.settings_file)
@@ -13644,16 +13679,16 @@ class Bot(commands.Bot):
             set_default_bot_login_button("Custom token could not be used")
 
         else:
-            print("No custom Windows credential found, falling back to ConfigManager token...")
+            print("No custom Windows credential found; checking the built-in default bot credential...")
 
-        config_token = config.get_setting('TWITCH_TOKEN')
+        config_token = DEFAULT_BOT_TOKEN.strip()
         if config_token:
-            print("Using ConfigManager token.")
+            print("Using the built-in default bot credential.")
             set_default_bot_login_button("Using MyStats default account token")
             self._initial_token_validation_logged = True
             return config_token  # Use the token from config if no token file exists
 
-        raise Exception("No valid token found in ConfigManager. Please authenticate.")
+        raise Exception("This build has no default bot credential. Please use Custom Bot Login or install an official configured build.")
 
     async def event_ready(self):
         self._diagnostic_connection = 'Connected'
