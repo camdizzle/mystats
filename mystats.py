@@ -10163,8 +10163,31 @@ def open_rivals_dashboard():
     webbrowser.open_new(dashboard_url)
 
 
-def get_overview_statistics(period):
-    """Use the same saved totals as the desktop statistics and overlays."""
+def get_overview_card_titles(period, mode):
+    if mode == 'tilt':
+        if period == 'Today':
+            return ('Tilt XP', 'Best run XP', 'Highest level reached', 'Best level points', 'Deaths')
+        return ('Tilt points', 'Player-level results', 'Top Tiltee finishes', 'Participants', 'Recorded deaths')
+    return ('Total points', 'Races & BRs', 'Average points', 'Best race score', 'Best BR score')
+
+
+def get_overview_statistics(period, mode='race'):
+    """Use saved totals for the last detected game mode, without changing the selected period."""
+    if mode == 'tilt':
+        if period == 'Today':
+            highest = get_int_setting('tilt_highest_level_reached_num', 0)
+            # Game levels are zero-based; match the existing HighestLevelReached export.
+            return (f'{get_int_setting("tilt_total_xp_today", 0):,}',
+                    f'{get_int_setting("tilt_best_run_xp_today", 0):,}',
+                    str(highest + 1) if highest > 0 or get_int_setting('tilt_highest_level_points_today', 0) > 0 else '—',
+                    f'{get_int_setting("tilt_highest_level_points_today", 0):,}',
+                    f'{get_int_setting("tilt_total_deaths_today", 0):,}')
+        totals, participants = get_tilt_season_stats()
+        return (f'{_safe_int(totals.get("points")):,}',
+                f'{_safe_int(totals.get("levels")):,}',
+                f'{_safe_int(totals.get("top_tiltees")):,}',
+                f'{len(participants):,}',
+                f'{_safe_int(totals.get("deaths")):,}' if totals.get('known_outcomes') else 'Unknown')
     today = period == 'Today'
     suffix = 'today' if today else 'season'
     points = get_int_setting('totalpoints' + suffix, 0)
@@ -10215,7 +10238,8 @@ def build_overview(parent, status_parent):
     toolbar.grid(row=0, column=0, sticky='ew', padx=14, pady=(10, 6))
     introduction = ttk.Frame(toolbar, style='Overview.TFrame')
     introduction.pack(side='left')
-    ttk.Label(introduction, text='Your stream at a glance', style='Heading.TLabel').pack(anchor='w', pady=(3, 0))
+    mode_label = ttk.Label(introduction, text='Race & BR overview', style='Heading.TLabel')
+    mode_label.pack(anchor='w', pady=(3, 0))
     period = tk.StringVar(value='Today')
     selector = ttk.Combobox(toolbar, textvariable=period, values=('Today', 'Season'), state='readonly', width=9)
     selector.pack(side='right')
@@ -10224,11 +10248,14 @@ def build_overview(parent, status_parent):
     cards = ttk.Frame(parent, style='Overview.TFrame')
     cards.grid(row=1, column=0, sticky='ew', padx=10)
     values = []
-    for index, title in enumerate(('Total points', 'Races & BRs', 'Average points', 'Best race score', 'Best BR score')):
+    titles = []
+    for index, title in enumerate(get_overview_card_titles(period.get(), 'race')):
         cards.grid_columnconfigure(index % 3, weight=1, uniform='overview_cards')
         card = ttk.Frame(cards, style='Surface.TFrame', padding=(12, 6))
         card.grid(row=index // 3, column=index % 3, sticky='nsew', padx=5, pady=5)
-        ttk.Label(card, text=title, style='MetricTitle.TLabel').pack(anchor='w')
+        title_label = ttk.Label(card, text=title, style='MetricTitle.TLabel')
+        title_label.pack(anchor='w')
+        titles.append(title_label)
         value = ttk.Label(card, text='0', style='Accent.Metric.TLabel' if index == 0 else 'Metric.TLabel')
         value.pack(anchor='w', pady=(4, 0))
         values.append(value)
@@ -10244,9 +10271,7 @@ def build_overview(parent, status_parent):
     activity_frame.grid(row=3, column=0, sticky='nsew', padx=14, pady=(0, 14))
     activity_frame.grid_columnconfigure(0, weight=1)
     activity_frame.grid_rowconfigure(0, weight=1)
-    activity = ttk.Treeview(activity_frame, columns=('time', 'event'), show='headings', height=6, selectmode='browse', style='Activity.Treeview')
-    activity.heading('time', text='Time')
-    activity.heading('event', text='Activity')
+    activity = ttk.Treeview(activity_frame, columns=('time', 'event'), show='', height=6, selectmode='browse', style='Activity.Treeview')
     activity.column('time', width=78, minwidth=70, stretch=False)
     activity.column('event', width=360, minwidth=100)
     activity.grid(row=0, column=0, sticky='nsew')
@@ -10268,7 +10293,11 @@ def build_overview(parent, status_parent):
             if schedule:
                 parent.after(1000, refresh)
             return
-        for label, value in zip(values, get_overview_statistics(period.get())):
+        mode = 'tilt' if get_overlay_mode() == 'tilt' else 'race'
+        mode_label.configure(text=('Tilt' if mode == 'tilt' else 'Race & BR') + ' overview')
+        for label, title in zip(titles, get_overview_card_titles(period.get(), mode)):
+            label.configure(text=title)
+        for label, value in zip(values, get_overview_statistics(period.get(), mode)):
             label.configure(text=value)
         status = get_overview_status()
         for index, (label, title, value) in enumerate(zip(status_labels, ('Twitch', 'Outgoing chat', 'File monitoring', 'Last export update'), status)):
