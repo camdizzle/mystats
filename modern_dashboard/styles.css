@@ -458,3 +458,10 @@ body {
   border: 1px solid rgba(127,216,255,.2);
   padding: 6px;
 }
+
+.trend-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 16px 0; }
+.trend-controls label { display: inline-flex; align-items: center; gap: 6px; }
+.trend-controls select, .trend-controls input[type="date"] { color: #d7e6ff; background: #121f36; border: 1px solid #59758a; border-radius: 6px; padding: 7px; color-scheme: dark; }
+.trend-controls :focus-visible { outline: 2px solid #7fd8ff; outline-offset: 3px; }
+.trend-controls [hidden] { display: none; }
+.trend-controls button:disabled { opacity: .5; }

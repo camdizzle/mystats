@@ -94,6 +94,8 @@ class FileChanges:
         self._subscriptions = {}
         self._lock = threading.Lock()
         self._fallback_logged = False
+        self._last_notifications = {}
+        self._last_error = None
         atexit.register(self.close)
 
     @staticmethod
@@ -108,6 +110,9 @@ class FileChanges:
             paths.add(self._key(event.dest_path))
         with self._lock:
             targets = [value for key, value in self._subscriptions.items() if key[1] in paths]
+            for path in paths:
+                if any(key[1] == path for key in self._subscriptions):
+                    self._last_notifications[path] = time.time()
         for loop, signal in targets:
             if not loop.is_closed():
                 try:
@@ -150,8 +155,10 @@ class FileChanges:
                 handler.on_deleted = self._notify
                 self._observer.schedule(handler, directory, recursive=False)
                 self._directories.add(directory)
+                self._last_error = None
                 logging.getLogger('mystats').info('Watchdog active: monitoring %s', directory)
-        except Exception:
+        except Exception as exc:
+            self._last_error = type(exc).__name__
             logging.getLogger('mystats').warning('File notifications unavailable; using periodic checks', exc_info=True)
             await asyncio.sleep(timeout)
             return
@@ -5500,32 +5507,91 @@ def open_mycycle_leaderboard_window(parent_window, initial_session_id=None):
     render_session_by_index(current_index)
 
 
-async def send_chat_message(channel, message, category=None, apply_delay=False):
-    category_map = {
-        "br": "chat_br_results",
-        "race": "chat_race_results",
-        "tilt": "chat_tilt_results",
-        "mystats": "chat_all_commands",
-    }
+CHAT_DELIVERY_LOCK = threading.Lock()
+CHAT_DELIVERY = {'sent': 0, 'blocked': 0, 'failed': 0, 'last': 'No messages attempted'}
 
-    if category in category_map and not is_chat_response_enabled(category_map[category]):
+
+def record_chat_delivery(status, category):
+    with CHAT_DELIVERY_LOCK:
+        CHAT_DELIVERY[status] += 1
+        CHAT_DELIVERY['last'] = f"{datetime.now().strftime('%H:%M:%S')} - {category or 'uncategorized'}: {status}"
+
+
+def chat_delivery_allowed(category=None, feature_setting=None):
+    category_map = {'race': 'chat_race_results', 'br': 'chat_br_results',
+                    'tilt': 'chat_tilt_results', 'mystats': 'chat_all_commands',
+                    'team': 'chat_team_announcements'}
+    return (is_chat_response_enabled('chat_messages_enabled')
+            and (category not in category_map or is_chat_response_enabled(category_map[category]))
+            and (not feature_setting or is_chat_response_enabled(feature_setting)))
+
+
+def build_diagnostics_report():
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    observer = file_changes._observer
+    active = observer is not None and observer.is_alive()
+    monitor = 'Watchdog active' if active and not file_changes._last_error else 'Periodic checks (fallback)'
+    if observer is None and Observer is not None and not file_changes._last_error:
+        monitor = 'Not started - monitoring begins when Twitch connects'
+    if Observer is None:
+        monitor = 'Periodic checks - Watchdog not installed'
+    try:
+        asset_id = hashlib.sha256(Path(DASHBOARD_DIR, 'dashboard.js').read_bytes()).hexdigest()[:12]
+    except OSError:
+        asset_id = 'Missing or inaccessible'
+    with CHAT_DELIVERY_LOCK:
+        delivery = dict(CHAT_DELIVERY)
+    lines = [f'MyStats {version} - Diagnostics ({now})', '',
+             f'Twitch: {getattr(bot, "_diagnostic_connection", "Not connected")}',
+             f'File monitoring: {monitor}',
+             f'Monitor error: {file_changes._last_error or "None"}',
+             f'Dashboard: http://127.0.0.1:{_load_overlay_server_port()}/dashboard',
+             f'Dashboard assets: {DASHBOARD_DIR}',
+             f'Dashboard build: {asset_id}',
+             f'Chart.js: {"Present" if os.path.isfile(os.path.join(DASHBOARD_DIR, "vendor", "chart.umd.js")) else "Missing - SVG fallback"}',
+             f'Log: {appdata_path("mystats.log")}', '', 'Monitored exports:']
+    for label, key in [('Race', 'race_file'), ('BR', 'br_file'), ('Tilt', 'tilt_level_file'), ('Checkpoint', 'checkpoint_file')]:
+        path = config.get_setting(key)
+        try:
+            stamp = datetime.fromtimestamp(os.path.getmtime(path)).strftime('%Y-%m-%d %H:%M:%S') if path else 'Not configured'
+        except (OSError, TypeError, ValueError):
+            stamp = 'Missing or inaccessible'
+        with file_changes._lock:
+            notified = file_changes._last_notifications.get(file_changes._key(path)) if path else None
+        notification = datetime.fromtimestamp(notified).strftime('%Y-%m-%d %H:%M:%S') if notified else 'None this session'
+        lines.extend([f'{label}: {path or "Not configured"}', f'  File updated: {stamp}',
+                      f'  Last notification: {notification}' if key != 'checkpoint_file' else '  Uses periodic checks'])
+    lines.extend(['', 'Saved chat settings:'])
+    for label, key in [('Master chat', 'chat_messages_enabled'), ('Race', 'chat_race_results'), ('BR', 'chat_br_results'),
+                       ('Tilt', 'chat_tilt_results'), ('Commands', 'chat_all_commands'),
+                       ('MyCycle announcements', 'mycycle_announcements_enabled'),
+                       ('Quest announcements', 'chat_quest_announcements'), ('Team announcements', 'chat_team_announcements')]:
+        lines.append(f'{label}: {"Enabled" if is_chat_response_enabled(key) else "Disabled"}')
+    lines.extend(['', f'Chat this session: {delivery["sent"]} sent, {delivery["blocked"]} blocked, {delivery["failed"]} failed',
+                  f'Last attempt: {delivery["last"]}', '', 'This report contains local file paths. It does not include tokens or chat contents.'])
+    return '\n'.join(lines)
+
+
+async def send_chat_message(channel, message, category=None, apply_delay=False, feature_setting=None):
+    if not chat_delivery_allowed(category, feature_setting):
+        record_chat_delivery('blocked', category)
         return False
-
     if apply_delay and config.get_setting('announcedelay') == 'True':
         try:
-            await asyncio.sleep(int(config.get_setting('announcedelayseconds') or 0))
+            await asyncio.sleep(max(0, int(config.get_setting('announcedelayseconds') or 0)))
         except ValueError:
             await asyncio.sleep(0)
-
-    # Recheck after any delay so saving a disabled setting cancels queued output.
-    if category in category_map and not is_chat_response_enabled(category_map[category]):
+    # Settings may change while a message is waiting.
+    if not chat_delivery_allowed(category, feature_setting):
+        record_chat_delivery('blocked', category)
         return False
-
     try:
         await channel.send(translate_chat_message(message))
+        record_chat_delivery('sent', category)
         logger.info("Chat message sent (category=%s)", category)
         return True
     except Exception as e:
+        record_chat_delivery('failed', category)
         logger.exception(f"Failed to send chat message ({category}): {e}")
         return False
 
@@ -7028,6 +7094,7 @@ def _build_dashboard_race_trends_payload():
             'race_count': race_count,
             'br_count': br_count,
             'total_races': total_races,
+            'total_points': _safe_int(bucket['points']),
             'ppr': round((_safe_int(bucket['points']) / total_races), 2) if total_races else 0.0,
         })
 
@@ -7846,6 +7913,34 @@ def open_settings_window():
     teams_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
     testing_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
     notebook.add(teams_tab, text="MyTeams")
+    diagnostics_tab = ttk.Frame(notebook, style="App.TFrame", padding=10)
+    notebook.add(diagnostics_tab, text="Diagnostics")
+    diagnostics_tab.grid_columnconfigure(0, weight=1)
+    diagnostics_tab.grid_rowconfigure(1, weight=1)
+    diagnostic_actions = ttk.Frame(diagnostics_tab)
+    diagnostic_actions.grid(row=0, column=0, sticky="w", pady=(0, 8))
+    diagnostic_text = tk.Text(diagnostics_tab, width=75, height=22, wrap="word")
+    diagnostic_text.grid(row=1, column=0, sticky="nsew")
+    diagnostic_scroll = ttk.Scrollbar(diagnostics_tab, orient="vertical", command=diagnostic_text.yview)
+    diagnostic_scroll.grid(row=1, column=1, sticky="ns")
+    diagnostic_text.configure(yscrollcommand=diagnostic_scroll.set)
+
+    def refresh_diagnostics():
+        diagnostic_text.configure(state="normal")
+        diagnostic_text.delete('1.0', tk.END)
+        diagnostic_text.insert('1.0', build_diagnostics_report())
+        diagnostic_text.configure(state="disabled")
+
+    def copy_diagnostics():
+        refresh_diagnostics()
+        diagnostics_tab.clipboard_clear()
+        diagnostics_tab.clipboard_append(diagnostic_text.get('1.0', 'end-1c'))
+
+    ttk.Button(diagnostic_actions, text="Refresh status", command=refresh_diagnostics).pack(side="left", padx=(0, 8))
+    ttk.Button(diagnostic_actions, text="Copy report", command=copy_diagnostics).pack(side="left")
+    notebook.bind('<<NotebookTabChanged>>', lambda event: refresh_diagnostics() if notebook.select() == str(diagnostics_tab) else None, add='+')
+    refresh_diagnostics()
+
 
     # --- General tab ---
     ttk.Label(general_tab, text=tr("Core app settings"), style="Small.TLabel").grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
@@ -8075,6 +8170,14 @@ def open_settings_window():
 
     # --- Chat tab ---
     ttk.Label(race_chat_tab, text="Control what MyStats announces in chat", style="Small.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 8))
+
+    chat_messages_enabled_var = tk.BooleanVar(value=is_chat_response_enabled('chat_messages_enabled'))
+    chat_team_announcements_var = tk.BooleanVar(value=is_chat_response_enabled('chat_team_announcements'))
+    chat_quest_announcements_var = tk.BooleanVar(value=is_chat_response_enabled('chat_quest_announcements'))
+    ttk.Checkbutton(race_chat_tab, text="Enable all outgoing chat (master switch)", variable=chat_messages_enabled_var).grid(row=6, column=0, sticky="w", pady=(12, 2))
+    ttk.Checkbutton(race_chat_tab, text="Team bonus announcements", variable=chat_team_announcements_var).grid(row=7, column=0, sticky="w", pady=2)
+    ttk.Checkbutton(race_chat_tab, text="Season quest announcements", variable=chat_quest_announcements_var).grid(row=8, column=0, sticky="w", pady=2)
+    ttk.Label(race_chat_tab, text="Save to apply. The master switch mutes all chat. Race/BR/Tilt switches also control their related announcements.\nMyCycle announcements keep their own switch in MyCycle settings.", wraplength=560).grid(row=9, column=0, sticky="w", pady=8)
 
     chat_br_results_var = tk.BooleanVar(value=is_chat_response_enabled("chat_br_results"))
     chat_race_results_var = tk.BooleanVar(value=is_chat_response_enabled("chat_race_results"))
@@ -8938,6 +9041,9 @@ def open_settings_window():
         windows_tray_notifications_var.set(False)
         testing_tab_enabled_var.set(False)
         app_language_var.set(LANGUAGE_DISPLAY_NAMES['en'])
+        chat_messages_enabled_var.set(True)
+        chat_team_announcements_var.set(True)
+        chat_quest_announcements_var.set(True)
         chat_br_results_var.set(True)
         chat_race_results_var.set(True)
         chat_tilt_results_var.set(True)
@@ -9069,6 +9175,9 @@ def open_settings_window():
         config.set_setting("reset_audio", str(reset_audio_var.get()), persistent=True)
         config.set_setting("audio_device", selected_device.get(), persistent=True)
         config.set_setting("UI_THEME", selected_theme.get(), persistent=True)
+        config.set_setting("chat_messages_enabled", str(chat_messages_enabled_var.get()), persistent=True)
+        config.set_setting("chat_team_announcements", str(chat_team_announcements_var.get()), persistent=True)
+        config.set_setting("chat_quest_announcements", str(chat_quest_announcements_var.get()), persistent=True)
         config.set_setting("chat_br_results", str(chat_br_results_var.get()), persistent=True)
         config.set_setting("chat_race_results", str(chat_race_results_var.get()), persistent=True)
         config.set_setting("chat_leaderboard_show_medals", str(chat_leaderboard_show_medals_var.get()), persistent=True)
@@ -10207,6 +10316,7 @@ class ConfigManager:
                                 'race_summary_file', 'last_watched_marble_file', 'br_summary_file',
                                 'last_watched_results_file', 'map_races_results_file', 'br_details_results_file',
                                 'tilt_details_results_file',
+                                'chat_messages_enabled', 'chat_team_announcements', 'chat_quest_announcements',
                                 'UI_THEME', 'chat_br_results', 'chat_race_results', 'chat_leaderboard_show_medals', 'chat_tilt_results',
                                 'chat_tilt_suppress_offline', 'chat_tilt_redact_survivor_names',
                                 'chat_mystats_command', 'chat_all_commands', 'chat_narrative_alerts', 'competitive_raid_monitor_enabled', 'competitive_raid_phase', 'competitive_raid_queue_started_at', 'competitive_raid_live_started_at', 'competitive_raid_last_summary_live_started_at', 'competitive_raid_last_queue_open_live_started_at',
@@ -10251,6 +10361,9 @@ class ConfigManager:
                                 'testing_tab_enabled', *TILT_RUNTIME_PERSISTENT_KEYS}
         self.transient_keys = set([])
         self.defaults = {
+            'chat_messages_enabled': 'True',
+            'chat_team_announcements': 'True',
+            'chat_quest_announcements': 'True',
             'chat_br_results': 'True',
             'chat_race_results': 'True',
             'chat_leaderboard_show_medals': 'True',
@@ -12528,6 +12641,7 @@ class Bot(commands.Bot):
         raise Exception("No valid token found in ConfigManager. Please authenticate.")
 
     async def event_ready(self):
+        self._diagnostic_connection = 'Connected'
         self.channel = self.get_channel(self.channel_name)
         print(f"Sending message to Twitch as: {self.nick}")
         print(f"Connected to channel: {self.channel_name}\n")
@@ -12557,6 +12671,7 @@ class Bot(commands.Bot):
             config.set_setting('data_sync', 'no', persistent=False)
 
     async def event_disconnect(self):
+        self._diagnostic_connection = 'Disconnected - reconnecting'
         print("Disconnected from Twitch chat. Waiting for reconnection...")
 
     async def event_error(self, error, data=None):
@@ -12595,6 +12710,7 @@ class Bot(commands.Bot):
         await self.handle_commands(new_message)
 
     async def shutdown(self):
+        self._diagnostic_connection = 'Stopped'
         print("Shutting down bot and tasks...")
         self.stop_event.set()  # Signal tasks to stop
 
@@ -12856,7 +12972,7 @@ class Bot(commands.Bot):
         await self._save_channel_team_state(data)
 
         for msg in activated_messages[:1]:
-            await send_chat_message(message.channel, msg, category="mystats")
+            await send_chat_message(message.channel, msg, category="team")
 
     @commands.command(name='createteam')
     async def createteam(self, ctx, *, team_name: str = None):
@@ -13638,13 +13754,13 @@ class Bot(commands.Bot):
             separator=', ',
             max_length=480,
         ):
-            await ctx.send(message)
+            await self.send_command_response(ctx, message)
 
     @commands.command(name='teamhelp')
     async def team_help(self, ctx):
         if not self._teams_feature_enabled():
             return
-        await ctx.send("MyTeams is live! Type `!tcommands` for team commands. Use `!createteam` to start a team, `!invite` to recruit, `!renameteam` to rename your team (captain only), and `!dailyteams` / `!weeklyteams` / `!myteam` / `!teambonus` to track standings and bonus progress.")
+        await self.send_command_response(ctx, "MyTeams is live! Type `!tcommands` for team commands. Use `!createteam` to start a team, `!invite` to recruit, `!renameteam` to rename your team (captain only), and `!dailyteams` / `!weeklyteams` / `!myteam` / `!teambonus` to track standings and bonus progress.")
 
     @commands.command(name='tcommands')
     async def team_commands(self, ctx):
@@ -13652,7 +13768,7 @@ class Bot(commands.Bot):
             return
         team_commands_list = [f'!{cmd.name}' for cmd in self.commands.values() if cmd.name in self.TEAM_COMMAND_NAMES]
         commands_description = ', '.join(sorted(team_commands_list))
-        await ctx.send(f'MyTeams commands: {commands_description}')
+        await self.send_command_response(ctx, f'MyTeams commands: {commands_description}')
 
     # Method to expose the command list outside the class
     def get_commands(self):
@@ -14204,13 +14320,13 @@ class Bot(commands.Bot):
     async def lastrace_command(self, ctx, username: str = None):
         events = _group_history_events(load_map_race_history())
         if not events:
-            await ctx.send("No map race history has been captured yet.")
+            await self.send_command_response(ctx, "No map race history has been captured yet.")
             return
         latest = events[-1]
         target = _target_username(ctx, username) if username else ''
         result = next((row for row in latest if row['username'].lower() == target.lower()), None) if target else min(latest, key=lambda row: row['position'] or 999999)
         if result is None:
-            await ctx.send(f"No result for @{target} in the latest race.")
+            await self.send_command_response(ctx, f"No result for @{target} in the latest race.")
             return
         outcome = 'DNF' if result['eliminated'] else _format_race_time(result['finish_time'])
         season = latest_season_snapshot(result['username'])
@@ -14218,7 +14334,7 @@ class Bot(commands.Bot):
             f" | MOS Season: {season['season_points']:,} pts, {season['season_wins']:,} wins / "
             f"{season['season_matches']:,} matches" if season else ''
         )
-        await ctx.send(_chat_safe(
+        await self.send_command_response(ctx, _chat_safe(
             f"Last Race | {result['map_name'] or 'Unknown map'} by {result['map_builder'] or 'Unknown'} | "
             f"{result['display_name']}: #{result['position']} / {result['marble_count']}, "
             f"{result['points']:,} pts, {outcome}{season_text}"
@@ -14229,7 +14345,7 @@ class Bot(commands.Bot):
         target = _target_username(ctx, username)
         rows = [row for row in load_map_race_history() if row['username'].lower() == target.lower()]
         if not rows:
-            await ctx.send(f"No map race history found for @{target}.")
+            await self.send_command_response(ctx, f"No map race history found for @{target}.")
             return
         wins = sum(row['position'] == 1 for row in rows)
         podiums = sum(1 <= row['position'] <= 3 for row in rows)
@@ -14245,7 +14361,7 @@ class Bot(commands.Bot):
             f"{season['season_matches']:,} matches | Coverage {len(rows):,}/{season['season_matches']:,}"
             if season else ''
         )
-        await ctx.send(_chat_safe(
+        await self.send_command_response(ctx, _chat_safe(
             f"Race Card @{target} | {len(rows)} races, {wins} wins, {podiums} podiums, "
             f"{sum(row['points'] for row in rows):,} pts | Avg finish {avg_finish:.2f} | "
             f"Completion {len(completed) / len(rows) * 100:.1f}% | Best map: {best_map}{official_text}"
@@ -14256,10 +14372,10 @@ class Bot(commands.Bot):
         target = _target_username(ctx, username)
         season = latest_season_snapshot(target)
         if not season:
-            await ctx.send(f"No official Marbles season snapshot found for @{target}.")
+            await self.send_command_response(ctx, f"No official Marbles season snapshot found for @{target}.")
             return
         win_rate = season['season_wins'] / season['season_matches'] * 100 if season['season_matches'] else 0
-        await ctx.send(_chat_safe(
+        await self.send_command_response(ctx, _chat_safe(
             f"MOS Season Card @{target} | {season['season_points']:,} points | "
             f"{season['season_wins']:,} wins / {season['season_matches']:,} matches ({win_rate:.1f}%) | "
             f"Latest: {season['points_earned']:+,} pts in {season['game_mode'] or 'event'} | "
@@ -14271,38 +14387,38 @@ class Bot(commands.Bot):
         target = _target_username(ctx, username)
         season = latest_season_snapshot(target)
         if not season:
-            await ctx.send(f"No official Marbles season snapshot found for @{target}.")
+            await self.send_command_response(ctx, f"No official Marbles season snapshot found for @{target}.")
             return
         observed = sum(row['username'].lower() == target.lower() for row in load_map_race_history())
         observed += sum(row['username'].lower() == target.lower() for row in load_royale_history())
         total = season['season_matches']
         rate = observed / total * 100 if total else 0
-        await ctx.send(f"Coverage @{target} | MyStats captured {observed:,} of {total:,} official matches ({rate:.1f}%).")
+        await self.send_command_response(ctx, f"Coverage @{target} | MyStats captured {observed:,} of {total:,} official matches ({rate:.1f}%).")
 
     @commands.command(name='maprecord')
     async def maprecord_command(self, ctx, *, map_name: str = None):
         history = load_map_race_history()
         if not history:
-            await ctx.send("No map race history has been captured yet.")
+            await self.send_command_response(ctx, "No map race history has been captured yet.")
             return
         query = (map_name or history[-1]['map_name']).strip().lower()
         rows = [row for row in history if query in row['map_name'].lower()]
         if not rows:
-            await ctx.send(f"No recorded races match '{map_name}'.")
+            await self.send_command_response(ctx, f"No recorded races match '{map_name}'.")
             return
         official = next((row for row in reversed(rows) if row['record_time'] > 0), None)
         if official:
-            await ctx.send(_chat_safe(
+            await self.send_command_response(ctx, _chat_safe(
                 f"Map Record | {official['map_name']}: {_format_race_time(official['record_time'])} by "
                 f"{official['record_holder'] or 'Unknown'}"
             ))
             return
         valid = [row for row in rows if not row['eliminated'] and row['finish_time'] > 0]
         if not valid:
-            await ctx.send(f"No valid finish recorded for {rows[-1]['map_name']}.")
+            await self.send_command_response(ctx, f"No valid finish recorded for {rows[-1]['map_name']}.")
             return
         fastest = min(valid, key=lambda row: row['finish_time'])
-        await ctx.send(_chat_safe(
+        await self.send_command_response(ctx, _chat_safe(
             f"Observed Map Record | {fastest['map_name']}: {_format_race_time(fastest['finish_time'])} by {fastest['display_name']}"
         ))
 
@@ -14318,16 +14434,16 @@ class Bot(commands.Bot):
             key=lambda item: (item[2], -item[1], item[0].lower()),
         )[:3]
         if not ranked:
-            await ctx.send(f"@{target} needs at least 3 results on a map before !bestmaps can rank it.")
+            await self.send_command_response(ctx, f"@{target} needs at least 3 results on a map before !bestmaps can rank it.")
             return
-        await ctx.send(_chat_safe(
+        await self.send_command_response(ctx, _chat_safe(
             f"Best Maps @{target} | " + " | ".join(f"{index}. {name} — {average:.2f} avg ({count})" for index, (name, count, average) in enumerate(ranked, 1))
         ))
 
     @commands.command(name='top10map')
     async def top10map_command(self, ctx, *, map_name: str = None):
         if not map_name:
-            await ctx.send("Usage: !top10map <map name>")
+            await self.send_command_response(ctx, "Usage: !top10map <map name>")
             return
         matching = [row for row in load_map_race_history() if map_name.lower() in row['map_name'].lower()]
         by_user = defaultdict(list)
@@ -14340,25 +14456,25 @@ class Bot(commands.Bot):
             key=lambda item: (item[2], -item[1], item[0].lower()),
         )[:10]
         if not ranked:
-            await ctx.send(f"No racers have 3 results on a map matching '{map_name}'.")
+            await self.send_command_response(ctx, f"No racers have 3 results on a map matching '{map_name}'.")
             return
         title = matching[-1]['map_name'] if matching else map_name
-        await ctx.send(_chat_safe(
+        await self.send_command_response(ctx, _chat_safe(
             f"Top 10 {title} | " + " | ".join(f"{i}. {display[user]} {avg:.2f} avg" for i, (user, _, avg) in enumerate(ranked, 1))
         ))
 
     @commands.command(name='builderstats')
     async def builderstats_command(self, ctx, *, builder_name: str = None):
         if not builder_name:
-            await ctx.send("Usage: !builderstats <builder name>")
+            await self.send_command_response(ctx, "Usage: !builderstats <builder name>")
             return
         rows = [row for row in load_map_race_history() if builder_name.lower() in row['map_builder'].lower()]
         if not rows:
-            await ctx.send(f"No map races found for builder '{builder_name}'.")
+            await self.send_command_response(ctx, f"No map races found for builder '{builder_name}'.")
             return
         events = len({row['timestamp'] for row in rows})
         eliminated = sum(row['eliminated'] for row in rows)
-        await ctx.send(_chat_safe(
+        await self.send_command_response(ctx, _chat_safe(
             f"Builder Stats | {rows[-1]['map_builder']} — {len({row['map_name'] for row in rows})} maps, "
             f"{events} races, {len(rows)} marble runs, {eliminated / len(rows) * 100:.1f}% observed elimination"
         ))
@@ -14375,9 +14491,9 @@ class Bot(commands.Bot):
             key=lambda item: (-item[2], -item[1], item[0].lower()),
         )[:5]
         if not ranked:
-            await ctx.send("No maps have at least 3 recorded races yet.")
+            await self.send_command_response(ctx, "No maps have at least 3 recorded races yet.")
             return
-        await ctx.send(_chat_safe(
+        await self.send_command_response(ctx, _chat_safe(
             "Hardest Maps | " + " | ".join(f"{i}. {name} {rate:.1f}% elim ({races} races)" for i, (name, races, rate) in enumerate(ranked, 1))
         ))
 
@@ -14388,12 +14504,12 @@ class Bot(commands.Bot):
         target = _target_username(ctx, username)
         rows = self._br_rows_for(target)
         if not rows:
-            await ctx.send(f"No Royale history found for @{target}.")
+            await self.send_command_response(ctx, f"No Royale history found for @{target}.")
             return
         total = sum(row[value_key] for row in rows)
         value = total / len(rows) if per_game else total
         rendered = f"{value:.2f}" if per_game else f"{value:,}"
-        await ctx.send(f"@{target} {label}: {rendered} ({len(rows)} Royales)")
+        await self.send_command_response(ctx, f"@{target} {label}: {rendered} ({len(rows)} Royales)")
 
     async def _send_br_leaderboard(self, ctx, label, value_key, per_game=False):
         by_user = defaultdict(list)
@@ -14410,9 +14526,9 @@ class Bot(commands.Bot):
         ranked.sort(key=lambda item: (-item[1], -item[2], item[0].lower()))
         if not ranked:
             suffix = " with at least 25 Royales" if per_game else ""
-            await ctx.send(f"No {label} data{suffix} yet.")
+            await self.send_command_response(ctx, f"No {label} data{suffix} yet.")
             return
-        await ctx.send(_chat_safe(
+        await self.send_command_response(ctx, _chat_safe(
             f"Top 10 {label} | " + " | ".join(
                 f"{i}. {display[user]} {value:.2f}" if per_game else f"{i}. {display[user]} {int(value):,}"
                 for i, (user, value, _) in enumerate(ranked[:10], 1)
@@ -14423,13 +14539,13 @@ class Bot(commands.Bot):
     async def lastroyale_command(self, ctx, username: str = None):
         events = _group_history_events(load_royale_history())
         if not events:
-            await ctx.send("No Royale history has been captured yet.")
+            await self.send_command_response(ctx, "No Royale history has been captured yet.")
             return
         latest = events[-1]
         target = _target_username(ctx, username) if username else ''
         result = next((row for row in latest if row['username'].lower() == target.lower()), None) if target else min(latest, key=lambda row: row['position'] or 999999)
         if result is None:
-            await ctx.send(f"No result for @{target} in the latest Royale.")
+            await self.send_command_response(ctx, f"No result for @{target} in the latest Royale.")
             return
         detail = next((row for row in reversed(load_royale_player_details(result['username']))), None)
         survival_text = f", survived {_format_race_time(detail['survival_time'])}" if detail and detail['survival_time'] > 0 else ''
@@ -14438,7 +14554,7 @@ class Bot(commands.Bot):
             f" | MOS Season: {season['season_points']:,} pts, {season['season_wins']:,} wins / "
             f"{season['season_matches']:,} matches" if season else ''
         )
-        await ctx.send(_chat_safe(
+        await self.send_command_response(ctx, _chat_safe(
             f"Last Royale | {result['display_name']}: #{result['position']} / {result['marble_count']}, "
             f"{result['points']:,} pts, {result['kills']:,} kills, {result['damage']:,} damage"
             f"{survival_text}{season_text}"
@@ -14449,7 +14565,7 @@ class Bot(commands.Bot):
         target = _target_username(ctx, username)
         rows = self._br_rows_for(target)
         if not rows:
-            await ctx.send(f"No Royale history found for @{target}.")
+            await self.send_command_response(ctx, f"No Royale history found for @{target}.")
             return
         wins = sum(row['position'] == 1 for row in rows)
         kills = sum(row['kills'] for row in rows)
@@ -14465,7 +14581,7 @@ class Bot(commands.Bot):
             f" | MOS Season {season['season_points']:,} pts, {season['season_wins']:,} wins / "
             f"{season['season_matches']:,} matches" if season else ''
         )
-        await ctx.send(_chat_safe(
+        await self.send_command_response(ctx, _chat_safe(
             f"BR Card @{target} | {len(rows)} Royales, {wins} wins ({wins / len(rows) * 100:.1f}%), "
             f"{sum(row['points'] for row in rows):,} pts | {kills:,} kills ({kills / len(rows):.2f}/BR) | "
             f"{damage:,} damage ({damage / len(rows):.2f}/BR){survival_text}{official_text}"
@@ -14476,10 +14592,10 @@ class Bot(commands.Bot):
         target = _target_username(ctx, username)
         rows = [row for row in load_royale_player_details(target) if row['survival_time'] > 0]
         if not rows:
-            await ctx.send(f"No Royale survival-time history found for @{target}.")
+            await self.send_command_response(ctx, f"No Royale survival-time history found for @{target}.")
             return
         average = sum(row['survival_time'] for row in rows) / len(rows)
-        await ctx.send(
+        await self.send_command_response(ctx,
             f"BR Survival @{target} | Avg {_format_race_time(average)} | "
             f"Best {_format_race_time(max(row['survival_time'] for row in rows))} | {len(rows):,} Royales"
         )
@@ -14529,7 +14645,7 @@ class Bot(commands.Bot):
             if result:
                 results.append(result['position'] == 1)
         if not results:
-            await ctx.send(f"No Royale history found for @{target}.")
+            await self.send_command_response(ctx, f"No Royale history found for @{target}.")
             return
         longest = current = running = 0
         for won in results:
@@ -14539,16 +14655,16 @@ class Bot(commands.Bot):
             if not won:
                 break
             current += 1
-        await ctx.send(f"BR Streak @{target} | Longest: {longest} | Current: {current}")
+        await self.send_command_response(ctx, f"BR Streak @{target} | Longest: {longest} | Current: {current}")
 
     @commands.command(name='slayer')
     async def slayer_command(self, ctx):
         history = load_royale_history()
         if not history:
-            await ctx.send("No Royale combat history has been captured yet.")
+            await self.send_command_response(ctx, "No Royale combat history has been captured yet.")
             return
         best = max(history, key=lambda row: (row['kills'], row['damage']))
-        await ctx.send(f"Slayer | {best['display_name']} — {best['kills']:,} kills, {best['damage']:,} damage")
+        await self.send_command_response(ctx, f"Slayer | {best['display_name']} — {best['kills']:,} kills, {best['damage']:,} damage")
 
     def _combat_attribution(self, username, mode):
         target = username.lower()
@@ -14568,20 +14684,20 @@ class Bot(commands.Bot):
         target = _target_username(ctx, username)
         counts = self._combat_attribution(target, 'nemesis')
         if not counts:
-            await ctx.send(f"No killer/victim attribution has been captured for @{target}.")
+            await self.send_command_response(ctx, f"No killer/victim attribution has been captured for @{target}.")
             return
         name, count = max(counts.items(), key=lambda item: item[1])
-        await ctx.send(f"@{target}'s nemesis: {name} ({count} eliminations)")
+        await self.send_command_response(ctx, f"@{target}'s nemesis: {name} ({count} eliminations)")
 
     @commands.command(name='victims')
     async def victims_command(self, ctx, username: str = None):
         target = _target_username(ctx, username)
         counts = self._combat_attribution(target, 'victims')
         if not counts:
-            await ctx.send(f"No killer/victim attribution has been captured for @{target}.")
+            await self.send_command_response(ctx, f"No killer/victim attribution has been captured for @{target}.")
             return
         name, count = max(counts.items(), key=lambda item: item[1])
-        await ctx.send(f"@{target}'s top victim: {name} ({count} eliminations)")
+        await self.send_command_response(ctx, f"@{target}'s top victim: {name} ({count} eliminations)")
 
     @commands.command(name='weaponstats')
     async def weaponstats_command(self, ctx, username: str = None):
@@ -14596,10 +14712,10 @@ class Bot(commands.Bot):
             weapons[weapon]['uses'] += 1
             weapons[weapon]['damage'] += _safe_int(_raw_record_value(record, 'Damage', 'DamageGiven', 'MatchDamageDealt'))
         if not weapons:
-            await ctx.send(f"No weapon attribution has been captured for @{target}.")
+            await self.send_command_response(ctx, f"No weapon attribution has been captured for @{target}.")
             return
         ranked = sorted(weapons.items(), key=lambda item: (item[1]['damage'], item[1]['uses']), reverse=True)[:5]
-        await ctx.send(_chat_safe(
+        await self.send_command_response(ctx, _chat_safe(
             f"Weapon Stats @{target} | " + " | ".join(f"{name}: {stats['uses']} uses, {stats['damage']:,} dmg" for name, stats in ranked)
         ))
 
@@ -14607,7 +14723,7 @@ class Bot(commands.Bot):
     async def watching_command(self, ctx):
         state = read_last_watched_state()
         if not state or not state.get('username'):
-            await ctx.send("No watched marble snapshot is available.")
+            await self.send_command_response(ctx, "No watched marble snapshot is available.")
             return
         name = state.get('display_name') or state['username']
         season_text = (
@@ -14615,7 +14731,7 @@ class Bot(commands.Bot):
             f"{int(state['season_games']):,} games, rank {int(state['season_rank']):,}, "
             f"{int(state['season_eliminations']):,} eliminations"
         )
-        await ctx.send(_chat_safe(
+        await self.send_command_response(ctx, _chat_safe(
             f"Watching | {name} (@{state['username']}) | {state.get('game_mode') or 'Unknown mode'} "
             f"{state.get('session_type') or ''} | {state.get('map_name') or 'Unknown map'} | "
             f"State: {state.get('watch_state') or state.get('status') or 'Unknown'}{season_text}"
@@ -14625,7 +14741,7 @@ class Bot(commands.Bot):
     async def where_command(self, ctx):
         state = read_last_watched_state()
         if not state or not state.get('username'):
-            await ctx.send("No watched marble snapshot is available.")
+            await self.send_command_response(ctx, "No watched marble snapshot is available.")
             return
         parts = [f"Watched Marble @{state['username']}"]
         if state['level']:
@@ -14640,18 +14756,18 @@ class Bot(commands.Bot):
             parts.append(f"{state['distance_finish']:.1f}m to finish")
         if state['speed']:
             parts.append(f"{state['speed']:.1f} kph")
-        await ctx.send(_chat_safe(" | ".join(parts)))
+        await self.send_command_response(ctx, _chat_safe(" | ".join(parts)))
 
     @commands.command(name='health')
     async def health_command(self, ctx):
         state = read_last_watched_state()
         if not state or not state.get('username'):
-            await ctx.send("No watched marble snapshot is available.")
+            await self.send_command_response(ctx, "No watched marble snapshot is available.")
             return
         health = int(state['health'])
         maximum = int(state['max_health'])
         percent = health / maximum * 100 if maximum else 0
-        await ctx.send(
+        await self.send_command_response(ctx,
             f"Health @{state['username']} | {health:,}/{maximum:,} ({percent:.1f}%) | "
             f"Damage {int(state['match_damage']):,} | Kills {int(state['kills']):,}"
         )
@@ -14660,7 +14776,7 @@ class Bot(commands.Bot):
     async def marbleloadout_command(self, ctx):
         state = read_last_watched_state()
         if not state or not state.get('username'):
-            await ctx.send("No watched marble snapshot is available.")
+            await self.send_command_response(ctx, "No watched marble snapshot is available.")
             return
         items = [
             ('Skin', state.get('skin')), ('Stack', state.get('skin_stack')),
@@ -14670,7 +14786,7 @@ class Bot(commands.Bot):
             ('Death', state.get('death_effect')),
         ]
         visible = [f"{label}: {value}" for label, value in items if value]
-        await ctx.send(_chat_safe(
+        await self.send_command_response(ctx, _chat_safe(
             f"Marble Loadout @{state['username']} | " + (" | ".join(visible) if visible else "No equipped item IDs reported")
         ))
 
@@ -14678,7 +14794,7 @@ class Bot(commands.Bot):
     async def lasttilt_command(self, ctx):
         events = [event for event in load_tilt_detail_events() if event.get('level')]
         if not events:
-            await ctx.send("No completed Tilt detail has been captured yet.")
+            await self.send_command_response(ctx, "No completed Tilt detail has been captured yet.")
             return
         event = events[-1]
         level = event['level']
@@ -14687,7 +14803,7 @@ class Bot(commands.Bot):
         survivors = max(0, player_count - eliminated)
         difficulty = _raw_record_value(level, 'Difficulty') or 'Unknown'
         passed = parse_boolean_token(_raw_record_value(level, 'LevelPassed', 'Passed'), default=False)
-        await ctx.send(_chat_safe(
+        await self.send_command_response(ctx, _chat_safe(
             f"Last Tilt | Level {_raw_record_value(level, 'Level', 'CurrentLevel') or '?'} ({difficulty}) | "
             f"Time {_raw_record_value(level, 'LevelDurationSeconds', 'ElapsedTime') or '?'}s | "
             f"Top Tiltee: {_raw_record_value(level, 'TopTilteeUsername', 'CurrentTopTiltee') or 'None'} | "
@@ -14701,7 +14817,7 @@ class Bot(commands.Bot):
     async def tiltlevel_command(self, ctx):
         level_rows = safe_read_csv_rows(config.get_setting('tilt_level_file'))
         state = parse_tilt_level_state(level_rows) or {}
-        await ctx.send(_chat_safe(
+        await self.send_command_response(ctx, _chat_safe(
             f"Tilt Level | Current: {state.get('current_level', config.get_setting('tilt_current_level') or '0')} "
             f"({state.get('difficulty') or 'Unknown'}) | "
             f"Elapsed: {state.get('elapsed_time', config.get_setting('tilt_current_elapsed') or '0:00')} | "
@@ -14715,12 +14831,12 @@ class Bot(commands.Bot):
         target = _target_username(ctx, username)
         rows = [row for row in load_tilt_history() if row['username'].lower() == target.lower()]
         if not rows:
-            await ctx.send(f"No Tilt history found for @{target}.")
+            await self.send_command_response(ctx, f"No Tilt history found for @{target}.")
             return
         survived = [row for row in rows if row['survived'] is True or (row['survived'] is None and row['points'] > 0)]
         tops = sum(row['is_top_tiltee'] for row in rows)
         best_level = max((row['level'] for row in survived), default=0)
-        await ctx.send(_chat_safe(
+        await self.send_command_response(ctx, _chat_safe(
             f"Tilt Card @{target} | {len(rows)} levels, {sum(row['points'] for row in rows):,} pts, "
             f"{tops} Top Tiltees | {len(survived)} survivors, {len(rows) - len(survived)} deaths "
             f"({len(survived) / len(rows) * 100:.1f}% survive) | Best level {best_level}"
@@ -14731,20 +14847,20 @@ class Bot(commands.Bot):
         target = _target_username(ctx, username)
         rows = [row for row in load_tilt_history() if row['username'].lower() == target.lower()]
         if not rows:
-            await ctx.send(f"No Tilt history found for @{target}.")
+            await self.send_command_response(ctx, f"No Tilt history found for @{target}.")
             return
         deaths = sum(row['survived'] is False or (row['survived'] is None and row['points'] <= 0) for row in rows)
-        await ctx.send(f"Tilt Deaths @{target} | {deaths} deaths / {len(rows)} levels | {(len(rows) - deaths) / len(rows) * 100:.1f}% survival")
+        await self.send_command_response(ctx, f"Tilt Deaths @{target} | {deaths} deaths / {len(rows)} levels | {(len(rows) - deaths) / len(rows) * 100:.1f}% survival")
 
     @commands.command(name='toprate')
     async def toprate_command(self, ctx, username: str = None):
         target = _target_username(ctx, username)
         rows = [row for row in load_tilt_history() if row['username'].lower() == target.lower()]
         if not rows:
-            await ctx.send(f"No Tilt history found for @{target}.")
+            await self.send_command_response(ctx, f"No Tilt history found for @{target}.")
             return
         tops = sum(row['is_top_tiltee'] for row in rows)
-        await ctx.send(f"Top Tiltee Rate @{target} | {tops} tops / {len(rows)} levels ({tops / len(rows) * 100:.1f}%)")
+        await self.send_command_response(ctx, f"Top Tiltee Rate @{target} | {tops} tops / {len(rows)} levels ({tops / len(rows) * 100:.1f}%)")
 
     @commands.command(name='top10toprate')
     async def top10toprate_command(self, ctx):
@@ -14757,9 +14873,9 @@ class Bot(commands.Bot):
             key=lambda item: (-item[3], -item[2], item[0].lower()),
         )[:10]
         if not ranked:
-            await ctx.send("No players have at least 20 Tilt levels for Top Tiltee rate.")
+            await self.send_command_response(ctx, "No players have at least 20 Tilt levels for Top Tiltee rate.")
             return
-        await ctx.send(_chat_safe(
+        await self.send_command_response(ctx, _chat_safe(
             "Top 10 Top Tiltee Rate | " + " | ".join(f"{i}. {user} {rate:.1f}% ({tops}/{levels})" for i, (user, levels, tops, rate) in enumerate(ranked, 1))
         ))
 
@@ -14768,7 +14884,7 @@ class Bot(commands.Bot):
         target = _target_username(ctx, username)
         rows = [row for row in load_tilt_history() if row['username'].lower() == target.lower()]
         if not rows:
-            await ctx.send(f"No Tilt history found for @{target}.")
+            await self.send_command_response(ctx, f"No Tilt history found for @{target}.")
             return
         outcomes = [row['survived'] is True or (row['survived'] is None and row['points'] > 0) for row in rows]
         longest = current = running = 0
@@ -14779,7 +14895,7 @@ class Bot(commands.Bot):
             if not survived:
                 break
             current += 1
-        await ctx.send(f"Tilt Survival Streak @{target} | Longest: {longest} | Current: {current}")
+        await self.send_command_response(ctx, f"Tilt Survival Streak @{target} | Longest: {longest} | Current: {current}")
 
     @commands.command(name='hardesttiltlevels')
     async def hardesttiltlevels_command(self, ctx):
@@ -14793,9 +14909,9 @@ class Bot(commands.Bot):
             key=lambda item: (-item[2], -item[1], item[0]),
         )[:5]
         if not ranked:
-            await ctx.send("No Tilt level has at least 20 recorded attempts yet.")
+            await self.send_command_response(ctx, "No Tilt level has at least 20 recorded attempts yet.")
             return
-        await ctx.send(_chat_safe(
+        await self.send_command_response(ctx, _chat_safe(
             "Hardest Tilt Levels | " + " | ".join(f"{i}. L{level} {rate:.1f}% elim ({attempts})" for i, (level, attempts, rate) in enumerate(ranked, 1))
         ))
 
@@ -14812,10 +14928,10 @@ class Bot(commands.Bot):
                 candidates.append((elapsed, level_number))
         if not candidates:
             suffix = f" {requested}" if requested else ''
-            await ctx.send(f"No completed timing captured for Tilt level{suffix}.")
+            await self.send_command_response(ctx, f"No completed timing captured for Tilt level{suffix}.")
             return
         elapsed, level_number = min(candidates)
-        await ctx.send(f"Fastest Tilt Level | Level {level_number}: {_format_race_time(elapsed)}")
+        await self.send_command_response(ctx, f"Fastest Tilt Level | Level {level_number}: {_format_race_time(elapsed)}")
 
     @commands.command(name='mytilts')
     async def mytilts_command(self, ctx, username: str = None):
@@ -17151,6 +17267,7 @@ async def race(bot):
 
             # Prepare messages for Twitch chat
             messages = []
+            message_features = {}
 
             narrative_messages = []
             if not nowinner and is_chat_response_enabled("race_narrative_alerts_enabled"):
@@ -17344,11 +17461,13 @@ async def race(bot):
                         f"Cycle #{event['cycles_completed']} took {event['races_used']} races."
                     )
                     messages.append(cycle_message)
+                    message_features[cycle_message] = "mycycle_announcements_enabled"
                     enqueue_overlay_event('cycle_completed', cycle_message)
 
             quest_messages = get_season_quest_updates()
             messages.extend(quest_messages)
             for quest_message in quest_messages:
+                message_features[quest_message] = "chat_quest_announcements"
                 enqueue_overlay_event('quest_completed', quest_message)
 
             channel = bot.get_channel(config.get_setting('CHANNEL'))
@@ -17358,7 +17477,7 @@ async def race(bot):
                 for msg in messages:
                     if DEBUG:
                         print('Debug:', msg)
-                    await send_chat_message(channel, msg, category="race")
+                    await send_chat_message(channel, msg, category="race", feature_setting=message_features.get(msg))
                     write_overlays()
 
 
@@ -17787,12 +17906,12 @@ async def royale(bot):
                             await send_chat_message(
                                 bot.channel,
                                 cycle_message,
-                                category="br"
+                                category="br", feature_setting="mycycle_announcements_enabled"
                             )
 
                     for quest_message in get_season_quest_updates():
                         enqueue_overlay_event('quest_completed', quest_message)
-                        await send_chat_message(bot.channel, quest_message, category="br")
+                        await send_chat_message(bot.channel, quest_message, category="br", feature_setting="chat_quest_announcements")
 
                     namecolor = map_name_color(br_winner[3])
                     if crownwin:
