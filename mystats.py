@@ -7129,98 +7129,78 @@ def verify_token(token, emit_console=True):
 
 
 # Function to handle menu actions
+def style_help_text(widget):
+    """Classic Tk text widgets need explicit colors from the active ttk theme."""
+    def update_colors(event=None):
+        style = ttk.Style(widget)
+        foreground = style.lookup('Activity.Treeview', 'foreground') or style.lookup('TLabel', 'foreground') or '#172033'
+        background = style.lookup('Activity.Treeview', 'background') or style.lookup('TFrame', 'background') or '#ffffff'
+        widget.configure(background=background, foreground=foreground, insertbackground=foreground,
+                         selectbackground='#4338ca', selectforeground='#ffffff', relief='flat', highlightthickness=0)
+    widget.bind('<<ThemeChanged>>', update_colors, add='+')
+    update_colors()
+
+
 def show_about_window():
-    about_window = tk.Toplevel()
-    about_window.title(tr("About"))
-    about_window.resizable(False, False)
-
-    # Set the window icon (optional)
-    about_window.iconbitmap('circle1.ico')  # Uncomment and provide your icon file if available
-
-    # Ensure the root window updates its position and size information
-    root.update_idletasks()
-
-    # Center the window within the main window (root)
-    window_width = 400
-    window_height = 600
-
-    # Get the position and size of the root window
-    root_x = root.winfo_x()
-    root_y = root.winfo_y()
-    root_width = root.winfo_width()
-    root_height = root.winfo_height()
-
-    # Calculate position for the about window to center it over the root window
-    x_coordinate = root_x + int((root_width / 2) - (window_width / 2))
-    y_coordinate = root_y + int((root_height / 2) - (window_height / 2))
-    about_window.geometry(f"{window_width}x{window_height}+{x_coordinate}+{y_coordinate}")
-
-    # Create a frame to hold the content
-    content_frame = ttk.Frame(about_window, padding="10")
-    content_frame.pack(fill='both', expand=True)
-
-    # Load and display the logo image
-    try:
-        response = requests.get("https://mystats.camwow.tv/assets/images/mystats_logo.png")
-        image_data = BytesIO(response.content)
-        logo_image = Image.open(image_data)
-        width, height = 100, 100
-        logo_image = logo_image.resize((width, height), Image.LANCZOS)
-        logo_photo = ImageTk.PhotoImage(logo_image)
-        logo_label = ttk.Label(content_frame, image=logo_photo)
-        logo_label.image = logo_photo  # Keep a reference to prevent garbage collection
-        logo_label.pack(pady=(0, 10))
-    except Exception as e:
-        logger.error("Error loading logo image", exc_info=True)
-        # If the logo can't be loaded, display a text placeholder
-        logo_label = ttk.Label(content_frame, text="MyStats", font=("Arial", 14, "bold"))
-        logo_label.pack(pady=(0, 10))
-
-    # Application Name and Version
-    app_name_label = ttk.Label(content_frame, text=tr("Mystats Application"), font=("Arial", 14, "bold"))
-    app_name_label.pack()
-
-    version_label = ttk.Label(content_frame, text=f"{tr('Version')} {version}", font=("Arial", 9))
-    version_label.pack(pady=(0, 10))
-
-    # Short Description
-    description_text = tr("The application is a companion tool for Marbles On Stream, designed to enhance user engagement and streamline data management. It tracks and processes race data in real-time, handles event management, and posts automated race results to Twitch chat. Key features include Battle Royale crown win tracking, checkpoint processing, event status toggling, and seamless integration with the Twitch API for authenticating users and dynamically updating relevant stats and events. The application provides a user-friendly interface built with Tkinter, ensuring that race results, event statuses, and other critical information are easily accessible to both streamers and their viewers.")
-
-    description_label = ttk.Label(content_frame, text=description_text, font=("Arial", 8),
-                                  wraplength=380, justify="center")
-    description_label.pack(pady=(0, 10))
-
-    # Author Names
-    authors_label = ttk.Label(content_frame, text=tr("Developed by\nCamWOW"), font=("Arial", 10), justify="center")
-    authors_label.pack(pady=(0, 10))
-
-    # Contact Information
-    contact_label = ttk.Label(
-        content_frame,
-        text=tr("Contact Information\nDiscord: http://camwow.tv/discord\nWebsite: https://www.camwow.tv"),
-        font=("Arial", 9),
-        justify="center"
-    )
-    contact_label.pack(pady=(0, 10))
-
-    # Acknowledgments or Credits
-    credits_label = ttk.Label(
-        content_frame,
-        text=tr("Acknowledgments\nA heartfelt thank you to Vibblez for his incredible contributions, ideas, and unwavering support. His creative vision and technical expertise have been instrumental not only in shaping the MyStats application, but more specifically in elevating the website to new heights. From conceptualizing unique features to refining the user experience, his efforts have left an indelible mark on this project."),
-        font=("Arial", 8),
-        justify="center",
-        wraplength=380
-    )
-
-    credits_label.pack(pady=(0, 10))
-
-    # Close Button
-    close_button = ttk.Button(content_frame, text=tr("Close"), command=about_window.destroy)
-    close_button.pack(pady=(10, 0))
-
-    # Disable resizing
-    about_window.grid_rowconfigure(0, weight=1)
+    existing = getattr(root, '_about_window', None)
+    if existing is not None and existing.winfo_exists():
+        existing.lift()
+        existing.focus_set()
+        return
+    about_window = tk.Toplevel(root)
+    root._about_window = about_window
+    about_window.title(tr('About') + ' MyStats')
+    about_window.transient(root)
+    _apply_window_icon(about_window)
+    width = min(620, about_window.winfo_screenwidth() - 60)
+    height = min(480, about_window.winfo_screenheight() - 100)
+    center_toplevel(about_window, width, height)
+    about_window.minsize(min(480, width), min(380, height))
     about_window.grid_columnconfigure(0, weight=1)
+    about_window.grid_rowconfigure(0, weight=1)
+    notebook = ttk.Notebook(about_window, style='Main.TNotebook')
+    notebook.grid(row=0, column=0, sticky='nsew', padx=16, pady=(12, 0))
+    overview = ttk.Frame(notebook, style='App.TFrame', padding=18)
+    credits = ttk.Frame(notebook, style='App.TFrame', padding=12)
+    notebook.add(overview, text=tr('About'))
+    notebook.add(credits, text='Credits')
+    ttk.Label(overview, text='MyStats', style='Heading.TLabel', font=('Segoe UI', 26, 'bold')).pack(anchor='w')
+    ttk.Label(overview, text=f'{tr("Version")} {version}', style='Small.TLabel').pack(anchor='w', pady=(4, 16))
+    description = ttk.Label(overview, text='Your Marbles on Stream companion.\n\n'
+                            'Track Race, Battle Royale and Tilt results; manage events, teams and goals; '
+                            'and bring your stream to life with chat announcements, dashboards and overlays.',
+                            style='Small.TLabel', wraplength=520, justify='left')
+    description.pack(anchor='w', fill='x')
+    overview.bind('<Configure>', lambda event: description.configure(wraplength=max(180, event.width - 36)))
+    ttk.Label(overview, text='Developed by CamWOW!!!', style='Small.TLabel').pack(anchor='w', pady=(18, 10))
+    links = ttk.Frame(overview, style='Overview.TFrame')
+    links.pack(anchor='w')
+    ttk.Button(links, text='MyStats website', command=lambda: webbrowser.open_new_tab('https://mystats.camwow.tv')).pack(side='left', padx=(0, 8))
+    ttk.Button(links, text='Discord & support', command=lambda: webbrowser.open_new_tab('http://camwow.tv/discord')).pack(side='left')
+    credits.grid_columnconfigure(0, weight=1)
+    credits.grid_rowconfigure(0, weight=1)
+    credit_text = tk.Text(credits, wrap='word', height=9, font=('Segoe UI', 10), padx=12, pady=12)
+    style_help_text(credit_text)
+    credit_text.grid(row=0, column=0, sticky='nsew')
+    credit_text.insert('1.0', 'Developed by CamWOW!!!\n\nAcknowledgments\n\n'
+                       'A heartfelt thank you to Vibblez for his incredible contributions, ideas, and unwavering support. '
+                       'His creative vision and technical expertise have been instrumental not only in shaping the MyStats '
+                       'application, but more specifically in elevating the website to new heights. From conceptualizing '
+                       'unique features to refining the user experience, his efforts have left an indelible mark on this project.')
+    credit_text.configure(state='disabled')
+    scroll = ttk.Scrollbar(credits, orient='vertical', command=credit_text.yview)
+    scroll.grid(row=0, column=1, sticky='ns')
+    credit_text.configure(yscrollcommand=scroll.set)
+    footer = ttk.Frame(about_window, padding=12)
+    footer.grid(row=1, column=0, sticky='ew')
+
+    def copy_version():
+        about_window.clipboard_clear()
+        about_window.clipboard_append(f'MyStats {version}')
+
+    ttk.Button(footer, text='Copy version', command=copy_version).pack(side='left')
+    ttk.Button(footer, text=tr('Close'), command=about_window.destroy).pack(side='right')
+    about_window.bind('<Escape>', lambda event: about_window.destroy())
 
 
 def open_settings():
@@ -7237,34 +7217,234 @@ def check_for_updates_from_menu():
 
 # Updated show_help function to display the commands in a messagebox
 # Function to display the help window centered in the main window
+COMMAND_REFERENCE = {
+    'Getting started': (
+        ('!commands', 'List the viewer commands in chat.'),
+        ('!info', 'Application version and stream totals; broadcaster/designated maintainers only.'),
+        ('!meta', 'Marbles on Stream meta information.'),
+        ('!mosapp', 'Link to the Marbles on Stream app.'),
+        ('!mosshop', 'Link to the Marbles on Stream shop.'),
+        ('!wiki', 'Link to the Marbles on Stream wiki.'),
+        ('!highfive <@bot>', 'Maintainer-only high-five interaction (CamWOW).'),
+    ),
+    'Stats & leaderboards': (
+        ('!mystats [player]', 'Player statistics; leave player blank for yourself.'),
+        ('!daily', 'Top five players by points in the daily window.'),
+        ('!weekly', 'Top five players by points in the weekly window.'),
+        ('!top10today', 'Today’s points leaderboard.'),
+        ('!top10season', 'Season points leaderboard.'),
+        ('!top10races', 'Leaderboard by races played.'),
+        ('!top10wins', 'Leaderboard by wins.'),
+        ('!top10ppr', 'Leaderboard by points per race.'),
+        ('!top10wr', 'World-record leaderboard.'),
+        ('!top10nwr', 'Today’s points excluding world-record results.'),
+        ('!top10seasonnwr', 'Season points excluding world-record results.'),
+        ('!mostop10', 'Marbles on Stream leaderboard from the external service.'),
+        ('!top10xp', 'Expertise leaderboard from the external service.'),
+    ),
+    'Race & maps': (
+        ('!lastrace [player]', 'Most recent recorded Race result.'),
+        ('!racecard [player]', 'Player’s Race performance summary.'),
+        ('!seasoncard [player]', 'Player’s season performance summary.'),
+        ('!coverage [player]', 'Recorded data coverage for a player.'),
+        ('!maprecord [map name]', 'Recorded best performance on a map.'),
+        ('!bestmaps [player]', 'Player’s strongest recorded maps.'),
+        ('!top10map [map name]', 'Leaderboard for a map.'),
+        ('!builderstats [builder name]', 'Recorded results for a map builder.'),
+        ('!hardestmaps', 'Maps ranked by recorded difficulty.'),
+    ),
+    'Battle Royale': (
+        ('!lastroyale [player]', 'Most recent recorded Battle Royale result.'),
+        ('!brcard [player]', 'Player’s Battle Royale performance summary.'),
+        ('!survival [player]', 'Battle Royale survival statistics.'),
+        ('!kills [player]', 'Recorded Battle Royale kills.'),
+        ('!damage [player]', 'Recorded Battle Royale damage.'),
+        ('!damagegiven [player]', 'Recorded Battle Royale damage given.'),
+        ('!kpr [player]', 'Battle Royale kills per round.'),
+        ('!dpr [player]', 'Battle Royale damage per round.'),
+        ('!top10kills', 'Battle Royale kills leaderboard.'),
+        ('!top10damage', 'Battle Royale damage leaderboard.'),
+        ('!top10kpr', 'Battle Royale kills-per-round leaderboard.'),
+        ('!top10dpr', 'Battle Royale damage-per-round leaderboard.'),
+        ('!brstreak [player]', 'Player’s recorded Battle Royale streak.'),
+        ('!slayer', 'Battle Royale slayer standings.'),
+        ('!nemesis [player]', 'Player’s recorded Battle Royale nemesis.'),
+        ('!victims [player]', 'Player’s recorded Battle Royale victims.'),
+        ('!weaponstats [player]', 'Recorded Battle Royale weapon statistics.'),
+    ),
+    'Tilt': (
+        ('!lasttilt', 'Summary of the last recorded Tilt result.'),
+        ('!tiltlevel', 'Current recorded Tilt level.'),
+        ('!tiltcard [player]', 'Player’s Tilt performance summary.'),
+        ('!tiltdeaths [player]', 'Recorded Tilt deaths.'),
+        ('!toprate [player]', 'Player’s top-tiltee rate.'),
+        ('!top10toprate', 'Top-tiltee-rate leaderboard.'),
+        ('!tiltstreak [player]', 'Player’s recorded Tilt streak.'),
+        ('!hardesttiltlevels', 'Recorded Tilt levels ranked by difficulty.'),
+        ('!fastestlevel [level]', 'Fastest recorded Tilt level completion.'),
+        ('!mytilts [player]', 'Player’s recorded Tilt statistics.'),
+        ('!thisrun', 'Current Tilt run summary and standings.'),
+        ('!xp', 'Tilt expertise summary.'),
+        ('!toptiltees', 'Season leaderboard by top-tiltee appearances, with points.'),
+        ('!top10tiltees', 'Season leaderboard by total Tilt points.'),
+        ('!tiltsurvivors', 'Tilt survivor leaderboard using the configured minimum levels.'),
+    ),
+    'MyTeams': (
+        ('!teamhelp', 'Introduction to the MyTeams feature.'),
+        ('!tcommands', 'List MyTeams commands in chat.'),
+        ('!createteam <team name>', 'Create a team.'),
+        ('!invite <player>', 'Invite a player to your team.'),
+        ('!acceptteam <team name>', 'Accept a team invitation.'),
+        ('!denyteam <team name>', 'Decline a team invitation.'),
+        ('!cocaptain <player>', 'Promote a team member to co-captain; captain only.'),
+        ('!kick <player>', 'Remove a player from your team.'),
+        ('!leave', 'Leave your current team.'),
+        ('!myteam [player]', 'Show a player’s team.'),
+        ('!teambonus [player]', 'Show team bonus status and progress.'),
+        ('!renameteam <new name>', 'Rename your team; captain only.'),
+        ('!logo <emote>', 'Set your team logo emote.'),
+        ('!inactive <days>', 'Set the inactivity policy and remove inactive members; captain/co-captain only.'),
+        ('!jointeam', 'Join a recruiting team.'),
+        ('!recruiting <on|off>', 'Change team recruiting status; captain/co-captain only.'),
+        ('!dailyteams', 'Daily team standings.'),
+        ('!weeklyteams', 'Weekly team standings.'),
+    ),
+    'MyCycle, quests & rivals': (
+        ('!mycycle [player] [--session name]', 'Show placement-cycle progress, optionally for a named session.'),
+        ('!nextcycle', 'Players closest to completing a placement cycle.'),
+        ('!cyclestats [session]', 'Placement-cycle session statistics.'),
+        ('!myquests [player]', 'Player’s season quest progress.'),
+        ('!rivals [player] [opponent] [full]', 'Find nearby rivals or compare two players.'),
+        ('!h2h [player] [opponent]', 'Head-to-head player comparison.'),
+    ),
+    'Live marble': (
+        ('!watching', 'Currently watched marble.'),
+        ('!where', 'Current watched-marble location.'),
+        ('!health', 'Current watched-marble health.'),
+        ('!marbleloadout', 'Currently watched marble’s loadout.'),
+    ),
+}
+
+
+def get_command_reference(bot_instance=None):
+    records = {}
+    for category, items in COMMAND_REFERENCE.items():
+        for usage, description in items:
+            name = usage.split()[0].lstrip('!')
+            records[name] = {'name': name, 'usage': usage, 'description': description, 'category': category}
+    registry = getattr(bot_instance, 'commands', None)
+    if isinstance(registry, dict) and registry:
+        registered = {str(command.name) for command in registry.values()}
+        records = {name: record for name, record in records.items() if name in registered}
+        for name in registered - records.keys():
+            records[name] = {'name': name, 'usage': '!' + name, 'description': 'Additional registered chat command.', 'category': 'Other'}
+    order = {category: index for index, category in enumerate(COMMAND_REFERENCE)}
+    return sorted(records.values(), key=lambda record: (order.get(record['category'], len(order)), record['name']))
+
+
 def show_help(bot_instance, root):
-    commands_list = bot_instance.get_commands()
-    help_text = f"MyStats commands:\n\n" + "\n".join(commands_list)
-
-    # Create a new Toplevel window for the help content
+    existing = getattr(root, '_commands_window', None)
+    if existing is not None and existing.winfo_exists():
+        existing.lift()
+        existing.focus_set()
+        return
     help_window = tk.Toplevel(root)
-    help_window.title("Help")
+    root._commands_window = help_window
+    help_window.title('MyStats · Commands')
+    help_window.transient(root)
+    _apply_window_icon(help_window)
+    width = min(980, help_window.winfo_screenwidth() - 60)
+    height = min(700, help_window.winfo_screenheight() - 100)
+    center_toplevel(help_window, width, height)
+    help_window.minsize(min(720, width), min(520, height))
+    help_window.grid_columnconfigure(0, weight=1)
+    help_window.grid_rowconfigure(2, weight=1)
+    header = ttk.Frame(help_window, style='App.TFrame', padding=14)
+    header.grid(row=0, column=0, sticky='ew')
+    ttk.Label(header, text='Find a command', style='Heading.TLabel').pack(anchor='w')
+    ttk.Label(header, text='Search by name, description or category. [brackets] are optional; <brackets> are required.',
+              style='Small.TLabel', wraplength=680).pack(anchor='w', pady=(4, 0))
+    filters = ttk.Frame(help_window, padding=(14, 0, 14, 8))
+    filters.grid(row=1, column=0, sticky='ew')
+    filters.grid_columnconfigure(1, weight=1)
+    ttk.Label(filters, text='Search').grid(row=0, column=0, sticky='w', padx=(0, 8))
+    search = tk.StringVar()
+    entry = ttk.Entry(filters, textvariable=search)
+    entry.grid(row=0, column=1, sticky='ew', padx=(0, 12))
+    records = get_command_reference(bot_instance)
+    category = tk.StringVar(value='All categories')
+    categories = ['All categories'] + list(dict.fromkeys(record['category'] for record in records))
+    ttk.Combobox(filters, textvariable=category, values=categories, state='readonly', width=25).grid(row=0, column=2)
+    content = ttk.Frame(help_window, padding=(14, 0, 14, 0))
+    content.grid(row=2, column=0, sticky='nsew')
+    content.grid_columnconfigure(0, weight=1)
+    content.grid_rowconfigure(0, weight=1)
+    tree = ttk.Treeview(content, columns=('command', 'description'), show='headings', selectmode='browse', style='Activity.Treeview')
+    tree.heading('command', text='Command')
+    tree.heading('description', text='What it does')
+    tree.column('command', width=170, minwidth=130, stretch=False)
+    tree.column('description', width=560, minwidth=100)
+    tree.grid(row=0, column=0, sticky='nsew')
+    scroll = ttk.Scrollbar(content, orient='vertical', command=tree.yview)
+    scroll.grid(row=0, column=1, sticky='ns')
+    tree.configure(yscrollcommand=scroll.set)
+    details = tk.Text(help_window, wrap='word', height=6, font=('Segoe UI', 10), padx=12, pady=8)
+    style_help_text(details)
+    details.grid(row=3, column=0, sticky='ew', padx=14, pady=10)
+    detail_scroll = ttk.Scrollbar(help_window, orient='vertical', command=details.yview)
+    detail_scroll.grid(row=3, column=1, sticky='ns', pady=10)
+    details.configure(yscrollcommand=detail_scroll.set)
+    footer = ttk.Frame(help_window, padding=(14, 0, 14, 12))
+    footer.grid(row=4, column=0, sticky='ew')
+    status = tk.StringVar()
+    ttk.Label(footer, textvariable=status, style='Small.TLabel').pack(side='left')
+    visible = []
 
-    # Add a label with the help text
-    help_label = tk.Label(help_window, text=help_text, padx=10, pady=10)
-    help_label.pack()
+    def selected_record():
+        selection = tree.selection()
+        return visible[int(selection[0])] if selection else None
 
-    # Calculate the position to center the help window on the main window
-    root_x = root.winfo_rootx()
-    root_y = root.winfo_rooty()
-    root_width = root.winfo_width()
-    root_height = root.winfo_height()
+    def copy_command():
+        record = selected_record()
+        if record:
+            help_window.clipboard_clear()
+            help_window.clipboard_append(record['usage'])
 
-    help_window.update_idletasks()  # Make sure the window size is updated
-    help_width = help_window.winfo_width()
-    help_height = help_window.winfo_height()
+    copy_button = ttk.Button(footer, text='Copy syntax', command=copy_command, state='disabled')
+    copy_button.pack(side='right', padx=(8, 0))
+    ttk.Button(footer, text=tr('Close'), command=help_window.destroy).pack(side='right')
 
-    # Calculate position to center the help window
-    x = root_x + (root_width // 2) - (help_width // 2)
-    y = root_y + (root_height // 2) - (help_height // 2)
+    def select_command(event=None):
+        record = selected_record()
+        details.configure(state='normal')
+        details.delete('1.0', 'end')
+        if record:
+            details.insert('1.0', f'{record["usage"]}\n{record["category"]}\n\n{record["description"]}\n'
+                           'Use in Twitch chat. Feature settings, recorded data and role permissions may apply.')
+            copy_button.state(['!disabled'])
+        else:
+            details.insert('1.0', 'No commands match these filters. Clear the search or choose another category.')
+            copy_button.state(['disabled'])
+        details.configure(state='disabled')
 
-    # Set the geometry to center the help window
-    help_window.geometry(f'{help_width}x{help_height}+{x}+{y}')
+    def filter_commands(*_):
+        needle = search.get().strip().casefold()
+        visible[:] = [record for record in records if (category.get() == 'All categories' or record['category'] == category.get())
+                      and needle in ' '.join(record.values()).casefold()]
+        tree.delete(*tree.get_children())
+        for index, record in enumerate(visible):
+            tree.insert('', 'end', iid=str(index), values=('!' + record['name'], record['description']))
+        status.set(f'{len(visible)} of {len(records)} commands')
+        if visible:
+            tree.selection_set('0')
+        select_command()
+
+    search.trace_add('write', filter_commands)
+    category.trace_add('write', filter_commands)
+    tree.bind('<<TreeviewSelect>>', select_command)
+    help_window.bind('<Escape>', lambda event: help_window.destroy())
+    filter_commands()
+    entry.focus_set()
 
 
 chunk_alert_button = None
@@ -10914,7 +11094,7 @@ menu_bar.add_cascade(label="Edit", menu=edit_menu)
 
 # Create the Help menu
 help_menu = Menu(menu_bar, tearoff=0)
-help_menu.add_command(label="View Commands", command=lambda: show_help(bot, root))
+help_menu.add_command(label="View Commands", command=lambda: show_help(globals().get('bot'), root))
 help_menu.add_command(label="Check for Updates", command=check_for_updates_from_menu)
 help_menu.add_command(label=tr("About"), command=show_about_window)
 menu_bar.add_cascade(label="Help", menu=help_menu)
