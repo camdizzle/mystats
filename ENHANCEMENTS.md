@@ -34,7 +34,7 @@ Validation for this update includes temporary Python checks for master/category/
 
 
 ## Settings menu and saving
-Main tabs are General, Chat, Overlays, Features, MyTeams, and Diagnostics. General opens on General rather than Audio. MyCycle, Rivals, Season Quests and Tilt command thresholds are under Features. Diagnostics contains status and the optional Send Test Messages page. Preferences pages scroll vertically and horizontally; the footer adapts to narrower windows, and the initial window size respects the screen height.
+Main tabs are General, Chat, Overlays, Features, MyTeams, and Diagnostics. General opens on General rather than Audio. MyCycle, Rivals, Season Quests and Tilt command thresholds are under Features. Diagnostics contains status and the optional Send Test Messages page. Preferences pages scroll vertically only; the footer adapts to narrower windows, and the initial window size respects the screen height.
 
 Preferences, themes, audio device and sound file choices remain pending until Apply or Save and Close. Apply keeps the menu open. Cancel or the window close button offers save/discard/keep-editing choices when there are pending edits. An asterisk in the title marks unsaved changes. Only one settings window opens at a time. Opening Settings and refreshing the team table no longer save draft preferences.
 
@@ -45,3 +45,11 @@ A form submission writes changed preferences once using the existing temporary-f
 Reset section and Reset all preferences stage defaults rather than saving immediately. They preserve the channel, chosen sound files, selected MyCycle session, teams and progress counters. Team preferences and the desktop theme are included in reset coverage. Management actions, session activation/creation/deletion, quest-progress resets, and test sends are immediate; these are labeled separately and are not undone by Cancel. Quest reset and session deletion ask for confirmation.
 
 Verification used isolated temporary settings and mocked Twitch/team services: six persistence checks (single write, validation, memory rollback, no-op/zero targets, concurrent writers, failed atomic replacement) and nine actual Tk window checks (navigation/read-only open, invalid fields, Apply, failure retention, reset coverage, dependencies/Cancel, section-only reset/staged theme, disabled-field recovery, and minimum-size save-button visibility). Existing live Twitch/OBS integration still needs a smoke test. No additional Python files are shipped; version remains 6.4.1.
+
+
+## Wider settings and removed competitive raid feature
+Settings pages no longer create horizontal scrollbars or move horizontally. The window opens wider and grows to the natural width of its preferences (within screen limits). Canvas content follows the visible width. Audio and team settings cards stack vertically on narrower screens. Vertical scrolling remains available, including in session management.
+
+Competitive raid controls, stored-setting definitions, startup task, API polling/history requests, announcements, snapshot writing and exclusive parsing helpers have been removed. Existing historical files and unknown legacy settings are preserved but are not used by the application. Current feature documentation and message examples no longer advertise the removed feature. The Windows toast callback fix remains a separate change in PR #402.
+
+Verification for this change: nine existing Tk menu regressions and six persistence checks passed. Three additional layout checks covered absence of horizontal scrollbars, input bounds across every settings tab, and vertical stacking below the team cards' natural combined width. Source checks confirmed 21 exclusive raid functions were removed without dangling references, while Race, BR, Tilt and checkpoint startup tasks remain. Python compilation and whitespace checks passed.

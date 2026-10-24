@@ -99,9 +99,6 @@ This file lists chat-message outputs from `mystats.py` call sites and renders f-
 The table above captures direct call-site string arguments. Race/BR pipelines also build messages dynamically before sending; here are exact sample outputs for those runtime-built messages.
 
 ### Race (sample outputs)
-- `🏁 Competitive raid host selected: @CamWOW (128 raiders)! Welcome competitive raiders—good luck and have fun!`
-- `🧾 Next competitive raid queue is open now: https://pixelbypixel.studio/competitions`
-- `🏁 Competitive raid summary | streamer: camwow | rank: 1 | score: 4200 | wins: 3`
 - `🎉 camwow has just completed their 120th race today! Congratulations! 🎉`
 - `Race Winners 🏆: No Winners!`
 - `🧃 WORLD RECORD 🌎`
