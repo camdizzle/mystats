@@ -12547,18 +12547,8 @@ def show_update_message(versioncheck, download_url):
     pos_y = root_y + (root_height // 2) - (popup_height // 2)
     popup.geometry(f"{popup_width}x{popup_height}+{pos_x}+{pos_y}")
 
-    try:
-        image = Image.open("warning.png")
-        image = image.resize((90, 90), Image.LANCZOS)
-        photo = ImageTk.PhotoImage(image)
-    except Exception as e:
-        logger.error("Error loading image", exc_info=True)
-        photo = None
-
-    if photo:
-        icon_label = tk.Label(popup, image=photo)
-        icon_label.image = photo
-        icon_label.pack(pady=10)
+    # A text heading works from shortcuts and packaged builds without image assets.
+    ttk.Label(popup, text="A new MyStats update is ready", style="Heading.TLabel").pack(pady=(20, 10))
 
     label = tk.Label(
         popup,
