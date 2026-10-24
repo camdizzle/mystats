@@ -25,6 +25,11 @@ Open **Tools & History** in the sidebar or Edit menu.
 
 Desktop notifications reuse one persistent MyStats tray icon. If tray notifications are unavailable, MyStats displays an in-app alert. Update-download progress remains in its progress window rather than generating repeated tray alerts.
 
+### Help windows
+**Help → About** opens without an internet connection or required image files. It shows the current version, website/support links, and a separate Credits tab. Copy Version is available for support requests.
+
+**Help → View Commands** provides a searchable command browser organized into Getting Started, Stats & Leaderboards, Race & Maps, Battle Royale, Tilt, MyTeams, MyCycle/Quests/Rivals, and Live Marble. Select a command for its syntax and full description; Copy Syntax copies it without sending anything to chat. Square brackets mark optional arguments and angle brackets mark required arguments. The browser works before the bot connects; when a registry is available it reflects registered commands, including team-management commands. Feature settings, available data and role permissions still apply.
+
 ---
 
 ## 1) General MyStats use
