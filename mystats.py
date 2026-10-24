@@ -93,6 +93,7 @@ class FileChanges:
         self._directories = set()
         self._subscriptions = {}
         self._lock = threading.Lock()
+        self._fallback_logged = False
         atexit.register(self.close)
 
     @staticmethod
@@ -116,6 +117,9 @@ class FileChanges:
 
     async def wait(self, path, timeout=7):
         if Observer is None or not path:
+            if Observer is None and not self._fallback_logged:
+                logging.getLogger('mystats').info('Watchdog unavailable; file monitoring uses periodic checks')
+                self._fallback_logged = True
             await asyncio.sleep(timeout)
             return
         loop = asyncio.get_running_loop()
@@ -146,6 +150,7 @@ class FileChanges:
                 handler.on_deleted = self._notify
                 self._observer.schedule(handler, directory, recursive=False)
                 self._directories.add(directory)
+                logging.getLogger('mystats').info('Watchdog active: monitoring %s', directory)
         except Exception:
             logging.getLogger('mystats').warning('File notifications unavailable; using periodic checks', exc_info=True)
             await asyncio.sleep(timeout)
@@ -156,6 +161,8 @@ class FileChanges:
             await asyncio.wait_for(signal.wait(), timeout)
         except asyncio.TimeoutError:
             pass
+        else:
+            logging.getLogger('mystats').info('Watchdog detected file update: %s', path)
         finally:
             signal.clear()
 
@@ -5509,6 +5516,10 @@ async def send_chat_message(channel, message, category=None, apply_delay=False):
             await asyncio.sleep(int(config.get_setting('announcedelayseconds') or 0))
         except ValueError:
             await asyncio.sleep(0)
+
+    # Recheck after any delay so saving a disabled setting cancels queued output.
+    if category in category_map and not is_chat_response_enabled(category_map[category]):
+        return False
 
     try:
         await channel.send(translate_chat_message(message))
@@ -17347,7 +17358,7 @@ async def race(bot):
                 for msg in messages:
                     if DEBUG:
                         print('Debug:', msg)
-                    await channel.send(msg)
+                    await send_chat_message(channel, msg, category="race")
                     write_overlays()
 
 
