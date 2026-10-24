@@ -81,7 +81,9 @@ Type: filesandordirs; Name: "{app}\modern_dashboard"
 ; Updated: use portable relative paths instead of machine-specific absolute paths.
 Source: "{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion; BeforeInstall: "PrepareForMyStatsInstall"
 Source: "README.html"; DestDir: "{app}"; Flags: ignoreversion
-Source: "*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs onlyifdoesntexist; Excludes: "*.iss,obs_overlay\*,modern_dashboard\*,Output\*"
+; Keep repository material and sample game exports out of the installed application.
+; Root-anchored exclusions preserve packaged dependencies and their license/data files.
+Source: "*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs onlyifdoesntexist; Excludes: "*.iss,\mystats.py,\requirements-enhancements.txt,\.gitignore,\test_trend_charts.cjs,\Last*.csv,\*.log,\docs,\docs\*,\tests,\tests\*,\.git,\.git\*,\.github,\.github\*,\.codex,\.codex\*,\.agents,\.agents\*,\.venv,\.venv\*,\__pycache__,\__pycache__\*,\Output,\Output\*,\build,\build\*,\dist,\dist\*,\Results,\Results\*,\obs_overlay,\obs_overlay\*,\modern_dashboard,\modern_dashboard\*"
 Source: "circle1.ico"; DestDir: "{app}"; Flags: ignoreversion
 ; Updated: include assets required by current MyStats versions.
 ; Force replacement behavior for every obs_overlay file (read-only/same-version/in-use).
