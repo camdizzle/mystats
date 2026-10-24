@@ -78,6 +78,22 @@ try:
 except ImportError:
     ToastNotifier = None
 
+def create_windows_toaster():
+    if ToastNotifier is None:
+        return None
+
+    class CompatibleToastNotifier(ToastNotifier):
+        def on_destroy(self, hwnd, msg, wparam, lparam):
+            # win10toast returns None here; a Windows WNDPROC must return an integer.
+            try:
+                super().on_destroy(hwnd, msg, wparam, lparam)
+            except Exception:
+                logging.getLogger('mystats').warning('Windows toast cleanup failed', exc_info=True)
+            return 0
+
+    return CompatibleToastNotifier()
+
+
 # Optional file notifications stay embedded for single-file builds.
 try:
     from watchdog.events import FileSystemEventHandler
@@ -260,7 +276,7 @@ tray_icon = None
 tray_thread = None
 tray_queue = queue.Queue()
 is_forced_exit = False
-win_toaster = ToastNotifier() if ToastNotifier is not None else None
+win_toaster = create_windows_toaster()
 is_hiding_to_tray = False
 tray_hint_toast_shown = False
 channel_prompted_this_session = False
