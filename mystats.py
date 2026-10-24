@@ -9709,6 +9709,144 @@ def open_rivals_dashboard():
     webbrowser.open_new(dashboard_url)
 
 
+def get_overview_statistics(period):
+    """Use the same saved totals as the desktop statistics and overlays."""
+    today = period == 'Today'
+    suffix = 'today' if today else 'season'
+    points = get_int_setting('totalpoints' + suffix, 0)
+    count = get_int_setting('totalcount' + suffix, 0)
+    average = _safe_float(config.get_setting('avgpointstoday')) if today else (points / count if count else 0)
+    return (f'{points:,}', f'{count:,}', f'{average:,.2f}',
+            f'{get_int_setting("race_hs_" + suffix, 0):,}',
+            f'{get_int_setting("br_hs_" + suffix, 0):,}')
+
+
+def get_overview_status():
+    connection = getattr(globals().get('bot'), '_diagnostic_connection', 'Not connected')
+    chat = 'Enabled' if is_chat_response_enabled('chat_messages_enabled') else 'Paused in Settings'
+    observer = file_changes._observer
+    watching = observer is not None and observer.is_alive()
+    if watching and not file_changes._last_error:
+        monitoring = 'Watchdog active'
+    elif Observer is None or file_changes._last_error:
+        monitoring = 'Periodic checks'
+    else:
+        monitoring = 'Waiting for connection'
+    stamps = []
+    for key in ('race_file', 'br_file', 'tilt_level_file', 'checkpoint_file'):
+        path = config.get_setting(key)
+        try:
+            if path:
+                stamps.append(os.path.getmtime(path))
+        except (OSError, TypeError, ValueError):
+            pass
+    last_update = datetime.fromtimestamp(max(stamps)).strftime('%b %d, %H:%M:%S') if stamps else 'No exports found'
+    return connection, chat, monitoring, last_update
+
+
+def build_overview(parent, status_parent):
+    """Refresh desktop widgets only on Tk's thread; keep activity bounded in memory."""
+    status_frame = ttk.Frame(status_parent, style='App.TFrame')
+    status_frame.grid(row=1, column=0, columnspan=2, sticky='ew', padx=5, pady=(8, 4))
+    status_labels = []
+    for index in range(4):
+        status_frame.grid_columnconfigure(index % 2, weight=1, uniform='status')
+        label = ttk.Label(status_frame, text='', style='Small.TLabel', wraplength=300)
+        label.grid(row=index // 2, column=index % 2, sticky='w', padx=(0, 12), pady=2)
+        status_labels.append(label)
+
+    parent.grid_columnconfigure(0, weight=1)
+    parent.grid_rowconfigure(3, weight=1)
+    toolbar = ttk.Frame(parent, style='App.TFrame')
+    toolbar.grid(row=0, column=0, sticky='ew', padx=14, pady=(14, 8))
+    ttk.Label(toolbar, text='Your stream at a glance', style='Heading.TLabel').pack(side='left')
+    period = tk.StringVar(value='Today')
+    selector = ttk.Combobox(toolbar, textvariable=period, values=('Today', 'Season'), state='readonly', width=9)
+    selector.pack(side='right')
+    ttk.Label(toolbar, text='Show: ').pack(side='right')
+
+    cards = ttk.Frame(parent, style='App.TFrame')
+    cards.grid(row=1, column=0, sticky='ew', padx=10)
+    values = []
+    for index, title in enumerate(('Total points', 'Races & BRs', 'Average points', 'Best race score', 'Best BR score')):
+        cards.grid_columnconfigure(index % 3, weight=1, uniform='overview_cards')
+        card = ttk.LabelFrame(cards, text=title, style='Card.TLabelframe', padding=12)
+        card.grid(row=index // 3, column=index % 3, sticky='nsew', padx=4, pady=4)
+        value = ttk.Label(card, text='0', font=('Segoe UI', 20, 'bold'))
+        value.pack(anchor='w')
+        values.append(value)
+
+    ttk.Label(parent, text='Recent activity · this session', style='Heading.TLabel').grid(
+        row=2, column=0, sticky='w', padx=14, pady=(16, 6))
+    activity_frame = ttk.Frame(parent, style='App.TFrame')
+    activity_frame.grid(row=3, column=0, sticky='nsew', padx=14, pady=(0, 14))
+    activity_frame.grid_columnconfigure(0, weight=1)
+    activity_frame.grid_rowconfigure(0, weight=1)
+    activity = ttk.Treeview(activity_frame, columns=('time', 'event'), show='headings', height=6, selectmode='browse')
+    activity.heading('time', text='Time')
+    activity.heading('event', text='Activity')
+    activity.column('time', width=78, minwidth=70, stretch=False)
+    activity.column('event', width=360, minwidth=100)
+    activity.grid(row=0, column=0, sticky='nsew')
+    scroll = ttk.Scrollbar(activity_frame, orient='vertical', command=activity.yview)
+    scroll.grid(row=0, column=1, sticky='ns')
+    activity.configure(yscrollcommand=scroll.set)
+    activity.insert('', 0, values=(datetime.now().strftime('%H:%M:%S'), 'MyStats opened. Waiting for new activity.'))
+    previous = {}
+
+    def add_activity(message):
+        activity.insert('', 0, values=(datetime.now().strftime('%H:%M:%S'), message))
+        for item in activity.get_children()[100:]:
+            activity.delete(item)
+
+    def refresh(schedule=True):
+        if not parent.winfo_exists():
+            return
+        if globals().get('config') is None:
+            if schedule:
+                parent.after(1000, refresh)
+            return
+        for label, value in zip(values, get_overview_statistics(period.get())):
+            label.configure(text=value)
+        status = get_overview_status()
+        for label, title, value in zip(status_labels, ('Twitch', 'Outgoing chat', 'File monitoring', 'Last export update'), status):
+            label.configure(text=f'{title}: {value}')
+        snapshot = {
+            'Twitch': status[0], 'Outgoing chat': status[1], 'File monitoring': status[2],
+            'results': (get_int_setting('totalcounttoday', 0), get_int_setting('totalpointstoday', 0)),
+            'tilt_level': config.get_setting('tilt_level_completion_overlay'),
+            'tilt_run': get_int_setting('tilt_run_completion_event_id', 0),
+            'race_best': get_int_setting('race_hs_today', 0),
+            'br_best': get_int_setting('br_hs_today', 0),
+        }
+        if previous:
+            for key in ('Twitch', 'Outgoing chat', 'File monitoring'):
+                if snapshot[key] != previous[key]:
+                    add_activity(f'{key}: {snapshot[key]}')
+            if snapshot['results'] != previous['results']:
+                add_activity(f'Results updated · {snapshot["results"][0]:,} races & BRs · {snapshot["results"][1]:,} points today')
+            for key, title in (('race_best', 'Race'), ('br_best', 'BR')):
+                if snapshot[key] > previous[key]:
+                    add_activity(f'{title} best today: {snapshot[key]:,} points')
+            if snapshot['tilt_level'] != previous['tilt_level']:
+                try:
+                    result = json.loads(snapshot['tilt_level'] or '{}')
+                    if result.get('level'):
+                        add_activity(f'Tilt level {result["level"]} completed · {result.get("level_points", 0):,} points')
+                except (ValueError, TypeError):
+                    pass
+            if snapshot['tilt_run'] > previous['tilt_run']:
+                add_activity('Tilt run completed. Final standings are available in Console.')
+        previous.update(snapshot)
+        if schedule:
+            parent.after(1000, refresh)
+
+    selector.bind('<<ComboboxSelected>>', lambda event: refresh(False))
+    # Configuration is initialized after the main window is constructed.
+    parent.after(1000, refresh)
+    return period, values, activity
+
+
 def build_stats_sidebar(parent):
     global total_points_label, total_count_label, avg_points_label, race_hs_label, br_hs_label
     global total_points_t_label, total_count_t_label, avg_points_t_label, race_hs_t_label, br_hs_t_label
@@ -9717,7 +9855,7 @@ def build_stats_sidebar(parent):
     stats_container_frame.grid(row=0, column=0, rowspan=2, sticky='nw', padx=10, pady=10)
 
     season_stats_frame = ttk.LabelFrame(stats_container_frame, text="Season Statistics", style="Card.TLabelframe")
-    season_stats_frame.pack(fill='x', pady=(0, 10))
+    # Keep legacy label targets for existing update callbacks; Overview displays totals.
 
     season_stat_labels = build_stats_labels(season_stats_frame)
     total_points_label = season_stat_labels["total_points"]
@@ -9727,7 +9865,6 @@ def build_stats_sidebar(parent):
     br_hs_label = season_stat_labels["br_hs"]
 
     todays_stats_frame = ttk.LabelFrame(stats_container_frame, text="Today's Statistics", style="Card.TLabelframe")
-    todays_stats_frame.pack(fill='x')
 
     today_stat_labels = build_stats_labels(todays_stats_frame)
     total_points_t_label = today_stat_labels["total_points"]
@@ -9772,7 +9909,7 @@ def build_stats_sidebar(parent):
     button_frame.grid_rowconfigure(3, weight=1)
 
     url_label = tk.Label(button_frame, text="https://mystats.camwow.tv", fg="blue", cursor="hand2", font=("Arial", 10, "underline"))
-    url_label.grid(row=3, column=0, columnspan=2, pady=(85, 0), sticky="s")
+    url_label.grid(row=3, column=0, columnspan=2, pady=(20, 0), sticky="s")
     url_label.bind("<Button-1>", open_url)
 
 
@@ -9800,15 +9937,19 @@ def build_main_content(parent):
     notebook = ttk.Notebook(parent)
     notebook.grid(row=1, column=1, sticky='nsew', padx=(0, 5), pady=5)
 
+    overview_tab = ttk.Frame(notebook, style="App.TFrame")
     console_tab = ttk.Frame(notebook, style="App.TFrame")
     season_quests_tab = ttk.Frame(notebook, style="App.TFrame")
     rivals_tab = ttk.Frame(notebook, style="App.TFrame")
     mycycle_tab = ttk.Frame(notebook, style="App.TFrame")
 
+    notebook.add(overview_tab, text="Overview")
     notebook.add(console_tab, text="Console")
     notebook.add(season_quests_tab, text=tr("Season Quests"))
     notebook.add(rivals_tab, text=tr("Rivals"))
     notebook.add(mycycle_tab, text=tr("MyCycle"))
+    build_overview(overview_tab, top_frame1)
+    notebook.select(overview_tab)
 
     console_tab.grid_rowconfigure(0, weight=1)
     console_tab.grid_columnconfigure(0, weight=1)
@@ -10137,7 +10278,7 @@ def initialize_main_window():
     root_window.bind("<Unmap>", handle_root_minimize)
     root_window.title(tr("MyStats - Marbles On Stream Companion Application"))
 
-    window_width = 1040
+    window_width = 1160
     window_height = 650
     screen_width = root_window.winfo_screenwidth()
     screen_height = root_window.winfo_screenheight()
@@ -10149,7 +10290,7 @@ def initialize_main_window():
     pos_x = (screen_width // 2) - (window_width // 2)
     pos_y = (screen_height // 2) - (window_height // 2)
     root_window.geometry(f"{window_width}x{window_height}+{pos_x}+{pos_y}")
-    root_window.minsize(920, 560)
+    root_window.minsize(min(1000, window_width), min(600, window_height))
     root_window.resizable(True, True)
 
     root_window.grid_rowconfigure(1, weight=1)
