@@ -4,6 +4,8 @@ This folder holds developer notes, audits, and field references. Both Inno Setup
 
 ## References
 
+- [Dashboard product improvements](DASHBOARD_PRODUCT_IMPROVEMENTS.md): features, data limits and validation.
+
 - [Game CSV fields](CSV_FIELD_REFERENCE.md): the exact headers/order and field meanings for the seven removed sample game exports. No player rows are retained here.
 - [Enhancements and verification](ENHANCEMENTS.md): Watchdog, dashboard, settings, diagnostics and chat implementation notes. Commands are run from the repository root.
 - [Chat sample outputs](CHAT_MESSAGE_SAMPLE_OUTPUTS.md): generated examples; recorded source line numbers describe the version audited.

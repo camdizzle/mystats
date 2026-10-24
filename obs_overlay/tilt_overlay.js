@@ -399,6 +399,7 @@ function startAutoScroll(listId) {
 }
 
 function applyTheme(settings = {}) {
+  settings = overlayUrlSettings(settings);
   const merged = { ...defaultSettings, ...(settings || {}) };
   const theme = themes[(merged.theme || 'midnight').toLowerCase()] || themes.midnight;
   const opacity = Math.max(65, Math.min(100, Number(merged.card_opacity || 84))) / 100;
@@ -467,11 +468,10 @@ function renderCombinedFeed(run = {}, seasonRows = [], todayRows = []) {
   $('run-elapsed-value').textContent = run.elapsed_time || '0:00';
   $('top-tiltee-value').textContent = run.top_tiltee || 'None';
 
+  const selectedScope = new URLSearchParams(window.location.search).get('stats');
   const combinedMarkup = [
-    `<li class="standings-section-title">Top 10 (Season)</li>`,
-    buildTop10Rows(seasonRows, t('No season standings yet.')),
-    `<li class="standings-section-title">Top 10 (Today)</li>`,
-    buildTop10Rows(todayRows, t('No Tilt Levels Completed Today')),
+    ...(selectedScope !== 'today' ? [`<li class="standings-section-title">Top 10 (Season)</li>`, buildTop10Rows(seasonRows, t('No season standings yet.'))] : []),
+    ...(selectedScope !== 'season' ? [`<li class="standings-section-title">Top 10 (Today)</li>`, buildTop10Rows(todayRows, t('No Tilt Levels Completed Today'))] : []),
     `<li class="standings-section-title">${hasActiveRun ? 'Current Standings' : 'Last Run Standings'}</li>`,
     buildCurrentStandingsRows(run.standings || []),
     `<li class="standings-section-title">${hasActiveRun ? 'Current Run' : 'Last Run'}</li>`,
@@ -683,7 +683,7 @@ async function refresh() {
     const unifiedPayload = await response.json();
     const overlayMode = String(unifiedPayload?.active_mode || '').trim().toLowerCase();
     if (overlayMode && overlayMode !== 'tilt') {
-      window.location.replace('/overlay');
+      window.location.replace('/overlay' + window.location.search);
       return;
     }
 
@@ -788,3 +788,21 @@ if (tracker) tracker.hidden = false;
 document.body?.setAttribute('data-overlay-mode', 'tracker');
 setRotationViewAndAutoscroll(rotationOrder[rotationIndex]);
 startRotationCycleTimer();
+
+
+function overlayUrlSettings(raw) {
+  const settings = {...raw}, params = new URLSearchParams(window.location.search);
+  for (const [key,min,max] of [['card_opacity',65,100],['text_scale',80,150]]) {
+    if (params.has(key)) { const value = Number(params.get(key)); if (Number.isFinite(value)) settings[key] = Math.max(min,Math.min(max,value)); }
+  }
+  if (['true','false'].includes(params.get('horizontal_layout'))) settings.horizontal_layout = params.get('horizontal_layout');
+  const scope = params.get('stats');
+  if (scope === 'today' || scope === 'season') {
+    for (const key of Object.keys(settings)) {
+      if (!key.startsWith('horizontal_feed_')) continue;
+      settings[key] = String(key.includes(scope));
+    }
+    document.querySelectorAll('.pill[id]').forEach(node => { node.hidden = scope === 'today' ? node.id.includes('season') : node.id.includes('today'); });
+  }
+  return settings;
+}

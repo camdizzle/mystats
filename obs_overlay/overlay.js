@@ -1014,6 +1014,7 @@ function applyTheme() {
 }
 
 function applyServerSettings(raw = {}) {
+  raw = overlayUrlSettings(raw);
   currentLanguage = String(raw.language || currentLanguage || 'en').toLowerCase();
   const next = {
     rotationSeconds: clampNumber(raw.rotation_seconds, 3, 120, defaultSettings.rotationSeconds),
@@ -1052,7 +1053,8 @@ function applyServerSettings(raw = {}) {
 }
 
 function syncViews(views = []) {
-  currentViews = views;
+  const scope = new URLSearchParams(window.location.search).get('stats');
+  currentViews = ['today','season'].includes(scope) ? views.filter(view => String(view.id).includes(scope)) : views;
 
   if (top3IsShowing || overlayEventActive || isSplashViewActive()) {
     return;
@@ -1178,7 +1180,7 @@ function applyOverlayPayload(payload) {
   applyServerSettings(racePayload.settings || {});
 
   if (overlayMode === 'tilt' && !settings.horizontalLayout) {
-    window.location.replace('/overlay');
+    window.location.replace('/overlay' + window.location.search);
     return;
   }
 
@@ -1338,3 +1340,21 @@ startPillRotationTimer();
     if (n) n.textContent = t(key);
   });
 })();
+
+
+function overlayUrlSettings(raw) {
+  const settings = {...raw}, params = new URLSearchParams(window.location.search);
+  for (const [key,min,max] of [['card_opacity',65,100],['text_scale',80,150]]) {
+    if (params.has(key)) { const value = Number(params.get(key)); if (Number.isFinite(value)) settings[key] = Math.max(min,Math.min(max,value)); }
+  }
+  if (['true','false'].includes(params.get('horizontal_layout'))) settings.horizontal_layout = params.get('horizontal_layout');
+  const scope = params.get('stats');
+  if (scope === 'today' || scope === 'season') {
+    for (const key of Object.keys(settings)) {
+      if (!key.startsWith('horizontal_feed_')) continue;
+      settings[key] = String(key.includes(scope));
+    }
+    document.querySelectorAll('.pill[id]').forEach(node => { node.hidden = scope === 'today' ? node.id.includes('season') : node.id.includes('today'); });
+  }
+  return settings;
+}
