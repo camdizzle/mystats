@@ -4,6 +4,11 @@ This folder holds developer notes, audits, and field references. Both Inno Setup
 
 ## References
 
+- [Private default-bot builds](PRIVATE_DEFAULT_BOT_BUILD.md): settings removal, installer template and private-source requirements.
+- [Discord 7.0 release guide](DISCORD_RELEASE_GUIDE_7.0.0.md): three pasteable user-facing posts covering changes since August.
+
+- [Windows token storage](WINDOWS_TOKEN_STORAGE.md): credential migration, recovery, security scope and validation.
+
 - [Dashboard product improvements](DASHBOARD_PRODUCT_IMPROVEMENTS.md): features, data limits and validation.
 
 - [Game CSV fields](CSV_FIELD_REFERENCE.md): the exact headers/order and field meanings for the seven removed sample game exports. No player rows are retained here.

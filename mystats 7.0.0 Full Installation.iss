@@ -81,8 +81,8 @@ Source: "{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion; BeforeInstall
 Source: "README.html"; DestDir: "{app}"; Flags: ignoreversion
 ; Keep repository material and sample game exports out of the installed application.
 ; Root-anchored exclusions preserve packaged dependencies and their license/data files.
-Source: "*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs onlyifdoesntexist; Excludes: "*.iss,\mystats.py,\requirements-enhancements.txt,\.gitignore,\test_trend_charts.cjs,\Last*.csv,\*.log,\docs,\docs\*,\tests,\tests\*,\.git,\.git\*,\.github,\.github\*,\.codex,\.codex\*,\.agents,\.agents\*,\.venv,\.venv\*,\__pycache__,\__pycache__\*,\Output,\Output\*,\build,\build\*,\dist,\dist\*,\Results,\Results\*,\obs_overlay,\obs_overlay\*,\modern_dashboard,\modern_dashboard\*"
-Source: "settings.txt"; DestDir: "{app}"; Flags: onlyifdoesntexist uninsneveruninstall
+Source: "*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs onlyifdoesntexist; Excludes: "mystats-default-bot-token.txt,settings.txt,token_data.json,installer,installer\*,*.iss,\mystats.py,\requirements-enhancements.txt,\.gitignore,\test_trend_charts.cjs,\Last*.csv,\*.log,\docs,\docs\*,\tests,\tests\*,\.git,\.git\*,\.github,\.github\*,\.codex,\.codex\*,\.agents,\.agents\*,\.venv,\.venv\*,\__pycache__,\__pycache__\*,\Output,\Output\*,\build,\build\*,\dist,\dist\*,\Results,\Results\*,\obs_overlay,\obs_overlay\*,\modern_dashboard,\modern_dashboard\*"
+Source: "installer\settings-defaults.txt"; DestDir: "{app}"; DestName: "settings.txt"; Flags: onlyifdoesntexist uninsneveruninstall
 Source: "circle1.ico"; DestDir: "{app}"; Flags: ignoreversion
 ; Updated: include assets required by current MyStats versions.
 Source: "obs_overlay\*"; DestDir: "{app}\obs_overlay"; Flags: ignoreversion recursesubdirs createallsubdirs overwritereadonly
