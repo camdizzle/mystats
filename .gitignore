@@ -20,3 +20,7 @@ token_data.json
 
 # Local default-bot build credential.
 mystats-default-bot-token.txt
+
+/junk/
+
+meta-data-tracking.json
