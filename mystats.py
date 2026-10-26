@@ -5277,14 +5277,37 @@ def drain_ui_calls():
 class PrintRedirector:
     def __init__(self, widget):
         self.widget = widget
+        self._pending = queue.Queue(maxsize=1000)
+        self._lock = threading.Lock()
+        self._scheduled = False
 
     def write(self, message):
         # Filter out Flask startup messages
         if "Serving Flask app" in message or "Debug mode" in message:
             return  # Ignore these messages
 
-        queue_ui_call(self._append, message)
+        with self._lock:
+            try:
+                self._pending.put_nowait(message[-16384:])
+            except queue.Full:
+                return len(message)
+            if not self._scheduled:
+                self._scheduled = queue_ui_call(self._flush_pending)
         return len(message)
+
+    def _flush_pending(self):
+        messages = []
+        with self._lock:
+            for _ in range(200):
+                try:
+                    messages.append(self._pending.get_nowait())
+                except queue.Empty:
+                    break
+            self._scheduled = False
+            if not self._pending.empty():
+                self._scheduled = queue_ui_call(self._flush_pending)
+        if messages:
+            self._append(''.join(messages))
 
     def _append(self, message):
         if self.widget and self.widget.winfo_exists():
