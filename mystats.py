@@ -1508,7 +1508,7 @@ def refresh_tilt_lifetime_xp_from_leaderboard():
             leaderboard_data = fetch_pixelbypixel_leaderboard("TiltedExpertise", offset=offset)
         except requests.RequestException as exc:
             print(f"Could not refresh TiltedExpertise value (offset={offset}): {exc}")
-            continue
+            return
 
         for record in leaderboard_data:
             if not isinstance(record, dict):
@@ -13269,105 +13269,58 @@ def ensure_channel_name_configured(parent=None):
 
 
 # Replace messagebox.showwarning with show_update_message in ver_season_only()
+_version_check_lock = threading.Lock()
+_startup_complete = threading.Event()
+
+
 def ver_season_only():
-    load_racer_data()
-    channel = ensure_channel_name_configured(root)
-    if not channel:
-        print("Channel is missing. Skipping version/season API call.")
+    """Check the service without blocking Tk or discarding cached season data."""
+    if threading.current_thread() is threading.main_thread():
+        threading.Thread(target=ver_season_only, name='MyStats version check', daemon=True).start()
         return None
-
-    channel = config.get_setting('CHANNEL')
-    api_url = f"https://mystats.camwow.tv/api/app/settings?channel={channel}"
-
-    max_retries = 20
-    retry_delay = 1
-
-    def retry_request():
-        """Function to retry the API call."""
-        nonlocal max_retries, retry_delay
-        for attempt in range(max_retries):
+    if not _version_check_lock.acquire(blocking=False):
+        return None
+    try:
+        channel = (config.get_setting('CHANNEL') or '').strip()
+        if not channel:
+            return None
+        api_url = f"https://mystats.camwow.tv/api/app/settings?channel={channel}"
+        for attempt in range(3):
             try:
-                response = requests.get(api_url, timeout=(5, 20))
-                if response.status_code == 200:
-                    response_data = json.loads(response.text.strip('[]'))
+                response = requests.get(api_url, timeout=(5, 10))
+                response.raise_for_status()
+                payload = response.json()
+                if isinstance(payload, list):
+                    payload = payload[0] if payload else {}
+                if not isinstance(payload, dict):
+                    raise ValueError('Invalid settings response')
+                if not payload.get('exists', True):
+                    queue_ui_call(messagebox.showwarning, 'Website Login Required',
+                                  'Please log in to the MyStats website, then use Help > Check for Updates. '
+                                  'MyStats will keep your saved season settings.', parent=root)
+                    return None
+                season = str(payload.get('season') or '').strip()
+                if not season.isdigit() or int(season) <= 0:
+                    raise ValueError('Missing or invalid season')
+                config.set_setting('new_season', 'True' if str(config.get_setting('season')) != season else 'False', persistent=False)
+                config.set_setting('season', season, persistent=True)
+                latest = str(payload.get('version') or '').strip()
+                if latest and latest != str(version):
+                    url = payload.get('download_url') or 'https://mystats.camwow.tv/download'
+                    queue_ui_call(show_update_message, latest, url)
+                elif latest:
+                    config.set_setting('update_later_clicks', '0', persistent=True)
+                    config.set_setting('update_later_version', '', persistent=True)
+                return season
+            except (requests.RequestException, ValueError):
+                logger.warning('Version/season service unavailable (attempt %s of 3)', attempt + 1)
+                if attempt < 2:
+                    time.sleep(attempt + 1)
+        print('Could not check the MyStats service. Continuing with saved season settings.\n')
+        return None
+    finally:
+        _version_check_lock.release()
 
-                    # Check if 'exists' is false
-                    if not response_data.get('exists', True):
-                        # Show popup to prompt login
-                        if retry_popup():
-                            retry_request()  # Retry the API call
-                        else:
-                            return  # User canceled, stop retrying
-
-                    season = response_data.get("season", "")
-                    versioncheck = response_data.get("version", "")
-                    download_url = response_data.get("download_url") or "https://mystats.camwow.tv/download"
-
-                    if not config.get_setting('season'):
-                        config.set_setting('season', '56', persistent=True)
-                        print(f"Current Season set to default: {config.get_setting('season')}")
-
-                    if str(config.get_setting('season')) != str(season):
-                        config.set_setting('new_season', 'True', persistent=False)
-                    else:
-                        config.set_setting('new_season', 'False', persistent=False)
-
-                    config.set_setting('season', season, persistent=True)
-
-                    if str(versioncheck) == str(version):
-                        print("No Updates available.\n")
-                        config.set_setting('update_later_clicks', '0', persistent=True)
-                        config.set_setting('update_later_version', '', persistent=True)
-                        return season
-                    else:
-                        print(f"An update is available. Current Version: {version} | New Version: {versioncheck}")
-                        show_windows_toast("MyStats Update Available", f"New version {versioncheck} is ready to install.")
-                        root.after(0, lambda v=versioncheck, u=download_url: show_update_message(v, u))
-                        return season
-                else:
-                    print("API call failed with status code:", response.status_code)
-                    print("Error message:", response.text)
-
-                if response.status_code != 200:
-                    print(response.text)
-                    print("Using Default Season.  If this is not the current season, restart mystats")
-                    config.set_setting('season', '56', persistent=True)
-
-            except requests.exceptions.ConnectionError as e:
-                print(f"Connection error: {e}. Retrying in {retry_delay} seconds...")
-                time.sleep(retry_delay)
-                retry_delay *= 2
-            except json.JSONDecodeError as e:
-                print("Failed to decode JSON from response:", e)
-                break
-
-        print("All retries have failed.")
-
-        def _fatal_error():
-            messagebox.showerror("Error", "Unable to verify season data after multiple attempts.")
-            root.destroy()
-            sys.exit(0)
-
-        root.after(0, _fatal_error)
-
-    def retry_popup():
-        """Show retry popup on the main thread and return the result."""
-        result = [None]
-        event = threading.Event()
-
-        def _show():
-            result[0] = messagebox.askretrycancel(
-                "Login Required",
-                "You must log in to the website to use MyStats. Click Retry to try again.",
-                parent=root
-            )
-            event.set()
-
-        root.after(0, _show)
-        event.wait()
-        return result[0]
-
-    retry_request()  # Initial API call
 
 
 def reset_season_stats():
@@ -13462,6 +13415,7 @@ def reset(run_version_check=True):
     update_config_labels()
 
 
+@ui_thread_only
 def display_welcome_message(text_widget, version, config, timestamp):
     text_widget.tag_configure("cyan", foreground="cyan")
     text_widget.tag_configure("yellow", foreground="yellow")
@@ -13489,11 +13443,32 @@ def display_welcome_message(text_widget, version, config, timestamp):
 def startup(text_widget):
     print("\nCommunicating with server to check for updates...\n")
     channel = ensure_channel_name_configured(root)
+    threading.Thread(target=_startup_worker, args=(text_widget, channel),
+                     name='MyStats startup', daemon=True).start()
+
+
+def _startup_worker(text_widget, channel):
+    try:
+        _complete_startup(text_widget, channel)
+    except Exception:
+        logger.exception('Startup initialization failed')
+        queue_ui_call(messagebox.showerror, 'MyStats startup problem',
+                      'Startup could not finish. Please send mystats.log to support. '
+                      'Your saved files have been kept.', parent=root)
+    else:
+        _startup_complete.set()
+        queue_ui_call(refresh_main_leaderboards)
+
+
+def _complete_startup(text_widget, channel):
+    logger.info('Startup: loading saved racer data')
+    load_racer_data()
     config.set_setting('startup', 'yes', persistent=False)
     config.set_setting('data_sync', 'yes', persistent=False)
     config.set_setting('app_install_directory', application_install_path(), persistent=True)
 
     if channel:
+        logger.info('Startup: checking version and season in background')
         ver_season_only()
 
     timestamp, timestampMDY, timestampHMS, adjusted_time = time_manager.get_adjusted_time()
@@ -13502,14 +13477,19 @@ def startup(text_widget):
     if config.get_setting('marble_day') != timestampMDY:
         reset(run_version_check=False)
 
+    logger.info('Startup: preparing results and saved statistics')
     create_results_files()
     refresh_tilt_lifetime_xp_from_leaderboard()
     load_additional_settings()
     write_overlays()
     update_config_labels()
-    set_login_button_text()
+    try:
+        set_login_button_text()
+    except requests.RequestException:
+        logger.warning('Startup: Twitch username unavailable; using saved display name')
+        fallback_to_saved_username()
 
-    br_hscore = int(config.get_setting('hscore'))
+    br_hscore = _safe_int(config.get_setting('hscore'))
     br_hscore_format = format(br_hscore, ',')
     with open(appdata_path('HighScore.txt'), 'w', encoding='utf-8', errors='ignore') as hs:
         hs.write(str(config.get_setting('hscore_name')) + '\n')
@@ -13517,6 +13497,7 @@ def startup(text_widget):
 
     timestamp, timestampMDY, timestampHMS, adjusted_time = time_manager.get_adjusted_time()
     display_welcome_message(text_widget, version, config, timestamp)
+    logger.info('Startup: initialization complete')
 
 
 # Try to recover a previously downloaded installer if a prior update launch was interrupted.
@@ -13525,7 +13506,6 @@ pending_update_resumed = recover_pending_update_launch(root)
 # Schedule startup only when the normal UI flow should continue.
 if not pending_update_resumed:
     root.after(100, lambda: startup(text_area))
-    root.after(250, refresh_main_leaderboards)
 
 
 # Initialize the Bot
@@ -19046,6 +19026,8 @@ if __name__ == "__main__":
         global bot
 
         reconnect_delay = 5
+        while BOT_SHOULD_RUN and not _startup_complete.wait(0.25):
+            pass
 
         while BOT_SHOULD_RUN:
             loop = asyncio.new_event_loop()
