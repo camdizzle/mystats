@@ -7201,12 +7201,90 @@ def clear_invalid_token_data(reason):
     print("Twitch custom bot login needs renewal. Click 'Custom Bot Login' to authenticate again.")
 
 
+@ui_thread_only
+def update_account_controls(has_custom_login):
+    button = globals().get('default_bot_button')
+    if button is not None and button.winfo_exists():
+        if has_custom_login:
+            button.grid()
+        else:
+            button.grid_remove()
+
+
+def forget_custom_bot_login():
+    """Save a verified signed-out marker before cleaning up legacy credentials."""
+    with TOKEN_STORAGE_LOCK:
+        _store_verified_token_payload(None)
+        for path, raw, _ in _legacy_token_snapshots():
+            try:
+                if path.read_bytes() == raw:
+                    path.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError:
+                _token_storage_notice('signout-legacy', 'An old login file could not be removed; Windows has blocked its automatic reuse.')
+
+
+async def _disconnect_for_account_switch(current_bot):
+    await current_bot.shutdown()
+    # Let the supervising bot thread construct a fresh client using saved credentials.
+    current_bot.loop.call_later(0.05, current_bot.loop.stop)
+
+
+def use_default_bot_account():
+    if not DEFAULT_BOT_TOKEN.strip():
+        messagebox.showerror('Default bot unavailable',
+                             'This build does not include the default bot login. Your custom login has been kept.', parent=root)
+        return
+    default_bot_button.state(['disabled'])
+    login_button.state(['disabled'])
+    threading.Thread(target=_use_default_bot_worker, name='MyStats account switch', daemon=True).start()
+
+
+def _use_default_bot_worker():
+    global oauth_token
+    removed = False
+    try:
+        forget_custom_bot_login()
+        removed = True
+        oauth_token = None
+        config.set_setting('TWITCH_USERNAME', DEFAULT_BOT_USERNAME, persistent=True)
+        update_account_controls(False)
+        update_login_button_text(DEFAULT_BOT_USERNAME)
+        current_bot = globals().get('bot')
+        loop = getattr(current_bot, 'loop', None)
+        if current_bot is not None and loop is not None and loop.is_running():
+            future = asyncio.run_coroutine_threadsafe(_disconnect_for_account_switch(current_bot), loop)
+            future.result(timeout=20)
+        print('Custom bot login removed. Connecting with mystats_results...')
+    except Exception:
+        # Do not log exception text here: storage and connection exceptions may contain credentials.
+        logger.warning('Switch to default bot could not finish')
+        message = ('Your custom login was removed. Restart MyStats to connect with the default bot.' if removed else
+                   'Windows could not remove your custom login. It has been kept; please try again.')
+        queue_ui_call(messagebox.showwarning, 'Bot account', message, parent=root)
+    finally:
+        queue_ui_call(_finish_account_switch, removed)
+
+
+@ui_thread_only
+def _finish_account_switch(removed):
+    for button in (globals().get('login_button'), globals().get('default_bot_button')):
+        if button is not None and button.winfo_exists():
+            button.state(['!disabled'])
+    if removed:
+        update_account_controls(False)
+
+
 def _sync_chatbot_identity_from_token(access_token):
     """Refresh UI + config username from a known-good Twitch OAuth token."""
     if not access_token:
         return
 
     username = fetch_twitch_username(access_token)
+    current = load_token_data()
+    if not current or current.get('access_token') != access_token:
+        return  # A sign-out or newer login superseded this in-flight lookup.
     if username:
         update_login_button_text(username)
         try:
@@ -7227,6 +7305,7 @@ def save_token_data(token_info, reconnect_bot=False):
         # A refresh rotates secrets; remove the prior canonical login only after verification.
         for path, raw, old_value in snapshots:
             _remove_migrated_token_files([(path, raw, old_value)], old_value)
+    update_account_controls(True)
     _sync_chatbot_identity_from_token(value['access_token'])
     if reconnect_bot:
         print('Token secured in Windows Credential Manager. Restarting bot...')
@@ -7416,11 +7495,15 @@ def set_default_bot_login_button(reason):
 # Updated logic for setting the login button's username
 def set_login_button_text():
     token_data = load_token_data()
+    update_account_controls(bool(token_data))
 
     if token_data and 'access_token' in token_data:
         # Use the token from Windows Credential Manager to fetch the username
         oauth_token = token_data['access_token']
         username = fetch_twitch_username(oauth_token)
+        current = load_token_data()
+        if not current or current.get('access_token') != oauth_token:
+            return
 
         if username:
             update_login_button_text(username)
@@ -10670,7 +10753,7 @@ def build_stats_sidebar(parent):
 
 
 def build_main_content(parent):
-    global chatbot_label, login_button, text_area
+    global chatbot_label, login_button, default_bot_button, text_area
     global season_quest_tree, rivals_tree, mycycle_tree, mycycle_session_label
     global mycycle_session_position_label, mycycle_prev_button, mycycle_next_button, mycycle_export_button
 
@@ -10689,6 +10772,10 @@ def build_main_content(parent):
 
     login_button = ttk.Button(login_button_frame, text="Custom Bot Login", command=open_login_url, style="Primary.TButton")
     login_button.grid(row=1, column=1, sticky='e', padx=(0, 5))
+    default_bot_button = ttk.Button(login_button_frame, text='Use default bot',
+                                    command=use_default_bot_account)
+    default_bot_button.grid(row=1, column=0, sticky='e', padx=(0, 8))
+    default_bot_button.grid_remove()
 
     notebook = ttk.Notebook(parent, style='Main.TNotebook')
     notebook.grid(row=1, column=1, sticky='nsew', padx=(0, 5), pady=5)
@@ -13755,6 +13842,7 @@ class Bot(commands.Bot):
 
         # Load the custom Windows credential, otherwise use the configured default bot token
         token_data = load_token_data()
+        update_account_controls(bool(token_data))
 
         if token_data:
             file_access_token = token_data.get('access_token')
