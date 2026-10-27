@@ -419,7 +419,11 @@ def launch_target_dir():
     return str(Path(target_path).parent)
 
 # Log errors and milestones (INFO and above) to mystats.log only
-_log_file_handler = logging.FileHandler(appdata_path("mystats.log"), encoding="utf-8")
+from logging.handlers import RotatingFileHandler
+
+_log_file_handler = RotatingFileHandler(
+    appdata_path("mystats.log"), maxBytes=5 * 1024 * 1024, backupCount=2, encoding="utf-8"
+)
 _log_file_handler.setLevel(logging.INFO)
 _log_file_handler.setFormatter(
     logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -1353,6 +1357,16 @@ def configure_dpi_awareness():
 
 def apply_ui_styles(style):
     """Central app styles for a modern, cleaner UI."""
+    from tkinter import font as tkfont
+
+    # Fonts scale with Windows DPI; Treeview row heights are pixel values.
+    table_font = ('Segoe UI', 10)
+    line_height = tkfont.Font(root=style.master, font=table_font).metrics('linespace')
+    row_height = max(32, line_height + max(10, round(line_height * 0.5)))
+    for table_style in ('Treeview', 'Activity.Treeview', 'SeasonQuest.Treeview',
+                        'MyCycleHome.Treeview', 'MyCycleLeaderboard.Treeview'):
+        style.configure(table_style, font=table_font, rowheight=row_height)
+
     style.configure("App.TFrame", padding=8)
     style.configure("Card.TLabelframe", padding=12)
     style.configure("Card.TLabelframe.Label", font=("Segoe UI", 10, "bold"))
@@ -1408,7 +1422,7 @@ def apply_ui_styles(style):
     for name, color in (('Ready', '#86efac' if dark else '#166534'), ('Waiting', '#fcd34d' if dark else '#92400e')):
         style.configure(name + '.Status.TLabel', background=surface, foreground=color, font=('Segoe UI', 9), padding=(10, 3))
     style.configure('Activity.Treeview', background=surface, fieldbackground=surface, foreground=foreground,
-                    rowheight=32, borderwidth=0, relief='flat', font=('Segoe UI', 10))
+                    rowheight=row_height, borderwidth=0, relief='flat', font=table_font)
     style.configure('Activity.Treeview.Heading', background=surface, foreground=muted,
                     font=('Segoe UI', 9, 'bold'), padding=(8, 9), relief='flat')
     style.map('Activity.Treeview', background=[('selected', '#4338ca')], foreground=[('selected', '#ffffff')])
@@ -1494,7 +1508,7 @@ def refresh_tilt_lifetime_xp_from_leaderboard():
             leaderboard_data = fetch_pixelbypixel_leaderboard("TiltedExpertise", offset=offset)
         except requests.RequestException as exc:
             print(f"Could not refresh TiltedExpertise value (offset={offset}): {exc}")
-            continue
+            return
 
         for record in leaderboard_data:
             if not isinstance(record, dict):
@@ -4982,7 +4996,6 @@ def open_mycycle_leaderboard_window(parent_window, initial_session_id=None):
 
     columns = ("rank", "user", "cycles", "progress", "placements_line1", "placements_line2", "cycle_races", "last_cycle")
     leaderboard_tree_style = "MyCycleLeaderboard.Treeview"
-    app_style.configure(leaderboard_tree_style, rowheight=30)
     app_style.configure(f"{leaderboard_tree_style}.Heading", padding=(8, 14))
     tree = ttk.Treeview(popup, columns=columns, show="headings", height=22, style=leaderboard_tree_style)
     leaderboard_settings = get_mycycle_settings()
@@ -5219,20 +5232,90 @@ def is_mystats_running():
 is_mystats_running()
 
 # Redirect print statements to Tkinter Text widget
+_ui_calls = queue.Queue(maxsize=4000)
+
+
+def queue_ui_call(callback, *args, **kwargs):
+    """Workers enqueue work without calling into Tcl or waiting for the UI."""
+    try:
+        _ui_calls.put_nowait((callback, args, kwargs))
+    except queue.Full:
+        # UI output must never block game processing during an output burst.
+        return False
+    return True
+
+
+def ui_thread_only(callback):
+    from functools import wraps
+
+    @wraps(callback)
+    def invoke(*args, **kwargs):
+        if threading.current_thread() is not threading.main_thread():
+            queue_ui_call(callback, *args, **kwargs)
+            return
+        return callback(*args, **kwargs)
+    return invoke
+
+
+def drain_ui_calls():
+    """Bound each batch so input and painting still get time to run."""
+    deadline = time.monotonic() + 0.01
+    for _ in range(100):
+        try:
+            callback, args, kwargs = _ui_calls.get_nowait()
+        except queue.Empty:
+            break
+        try:
+            callback(*args, **kwargs)
+        except Exception:
+            logger.exception('Desktop update failed')
+        if time.monotonic() >= deadline:
+            break
+    root.after(25, drain_ui_calls)
+
+
 class PrintRedirector:
     def __init__(self, widget):
         self.widget = widget
+        self._pending = queue.Queue(maxsize=1000)
+        self._lock = threading.Lock()
+        self._scheduled = False
 
     def write(self, message):
         # Filter out Flask startup messages
         if "Serving Flask app" in message or "Debug mode" in message:
             return  # Ignore these messages
 
+        with self._lock:
+            try:
+                self._pending.put_nowait(message[-16384:])
+            except queue.Full:
+                return len(message)
+            if not self._scheduled:
+                self._scheduled = queue_ui_call(self._flush_pending)
+        return len(message)
+
+    def _flush_pending(self):
+        messages = []
+        with self._lock:
+            for _ in range(200):
+                try:
+                    messages.append(self._pending.get_nowait())
+                except queue.Empty:
+                    break
+            self._scheduled = False
+            if not self._pending.empty():
+                self._scheduled = queue_ui_call(self._flush_pending)
+        if messages:
+            self._append(''.join(messages))
+
+    def _append(self, message):
         if self.widget and self.widget.winfo_exists():
             self.widget.insert(tk.END, message)
+            line_count = int(self.widget.index('end-1c').split('.')[0])
+            if line_count > 5000:
+                self.widget.delete('1.0', f'{line_count - 5000}.0')
             self.widget.see(tk.END)
-        else:
-            sys.__stdout__.write(message)
 
     def flush(self):
         pass
@@ -7118,12 +7201,90 @@ def clear_invalid_token_data(reason):
     print("Twitch custom bot login needs renewal. Click 'Custom Bot Login' to authenticate again.")
 
 
+@ui_thread_only
+def update_account_controls(has_custom_login):
+    button = globals().get('default_bot_button')
+    if button is not None and button.winfo_exists():
+        if has_custom_login:
+            button.grid()
+        else:
+            button.grid_remove()
+
+
+def forget_custom_bot_login():
+    """Save a verified signed-out marker before cleaning up legacy credentials."""
+    with TOKEN_STORAGE_LOCK:
+        _store_verified_token_payload(None)
+        for path, raw, _ in _legacy_token_snapshots():
+            try:
+                if path.read_bytes() == raw:
+                    path.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError:
+                _token_storage_notice('signout-legacy', 'An old login file could not be removed; Windows has blocked its automatic reuse.')
+
+
+async def _disconnect_for_account_switch(current_bot):
+    await current_bot.shutdown()
+    # Let the supervising bot thread construct a fresh client using saved credentials.
+    current_bot.loop.call_later(0.05, current_bot.loop.stop)
+
+
+def use_default_bot_account():
+    if not DEFAULT_BOT_TOKEN.strip():
+        messagebox.showerror('Default bot unavailable',
+                             'This build does not include the default bot login. Your custom login has been kept.', parent=root)
+        return
+    default_bot_button.state(['disabled'])
+    login_button.state(['disabled'])
+    threading.Thread(target=_use_default_bot_worker, name='MyStats account switch', daemon=True).start()
+
+
+def _use_default_bot_worker():
+    global oauth_token
+    removed = False
+    try:
+        forget_custom_bot_login()
+        removed = True
+        oauth_token = None
+        config.set_setting('TWITCH_USERNAME', DEFAULT_BOT_USERNAME, persistent=True)
+        update_account_controls(False)
+        update_login_button_text(DEFAULT_BOT_USERNAME)
+        current_bot = globals().get('bot')
+        loop = getattr(current_bot, 'loop', None)
+        if current_bot is not None and loop is not None and loop.is_running():
+            future = asyncio.run_coroutine_threadsafe(_disconnect_for_account_switch(current_bot), loop)
+            future.result(timeout=20)
+        print('Custom bot login removed. Connecting with mystats_results...')
+    except Exception:
+        # Do not log exception text here: storage and connection exceptions may contain credentials.
+        logger.warning('Switch to default bot could not finish')
+        message = ('Your custom login was removed. Restart MyStats to connect with the default bot.' if removed else
+                   'Windows could not remove your custom login. It has been kept; please try again.')
+        queue_ui_call(messagebox.showwarning, 'Bot account', message, parent=root)
+    finally:
+        queue_ui_call(_finish_account_switch, removed)
+
+
+@ui_thread_only
+def _finish_account_switch(removed):
+    for button in (globals().get('login_button'), globals().get('default_bot_button')):
+        if button is not None and button.winfo_exists():
+            button.state(['!disabled'])
+    if removed:
+        update_account_controls(False)
+
+
 def _sync_chatbot_identity_from_token(access_token):
     """Refresh UI + config username from a known-good Twitch OAuth token."""
     if not access_token:
         return
 
     username = fetch_twitch_username(access_token)
+    current = load_token_data()
+    if not current or current.get('access_token') != access_token:
+        return  # A sign-out or newer login superseded this in-flight lookup.
     if username:
         update_login_button_text(username)
         try:
@@ -7144,6 +7305,7 @@ def save_token_data(token_info, reconnect_bot=False):
         # A refresh rotates secrets; remove the prior canonical login only after verification.
         for path, raw, old_value in snapshots:
             _remove_migrated_token_files([(path, raw, old_value)], old_value)
+    update_account_controls(True)
     _sync_chatbot_identity_from_token(value['access_token'])
     if reconnect_bot:
         print('Token secured in Windows Credential Manager. Restarting bot...')
@@ -7282,7 +7444,7 @@ def fetch_twitch_username(oauth_token):
     headers = {'Authorization': f'Bearer {oauth_token}', 'Client-Id': CLIENT_ID}
     user_info_url = "https://api.twitch.tv/helix/users"
     logger.info("API call: Twitch user info")
-    response = requests.get(user_info_url, headers=headers)
+    response = requests.get(user_info_url, headers=headers, timeout=(5, 20))
 
     if response.status_code == 200:
         user_info = response.json()
@@ -7301,6 +7463,7 @@ def fallback_to_saved_username():
         print("No saved username in config. Using default account: mystats_results")
 
 
+@ui_thread_only
 def update_login_button_text(text):
     button = globals().get('login_button')
     if button is None:
@@ -7332,11 +7495,15 @@ def set_default_bot_login_button(reason):
 # Updated logic for setting the login button's username
 def set_login_button_text():
     token_data = load_token_data()
+    update_account_controls(bool(token_data))
 
     if token_data and 'access_token' in token_data:
         # Use the token from Windows Credential Manager to fetch the username
         oauth_token = token_data['access_token']
         username = fetch_twitch_username(oauth_token)
+        current = load_token_data()
+        if not current or current.get('access_token') != oauth_token:
+            return
 
         if username:
             update_login_button_text(username)
@@ -7400,7 +7567,7 @@ def verify_token(token, emit_console=True):
     verify_url = "https://id.twitch.tv/oauth2/validate"
     headers = {"Authorization": f"OAuth {token}"}
     logger.info("API call: Twitch token validation")
-    response = requests.get(verify_url, headers=headers)
+    response = requests.get(verify_url, headers=headers, timeout=(5, 20))
     if response.status_code == 200:
         if emit_console:
             with TOKEN_VALIDATION_LOG_LOCK:
@@ -10586,7 +10753,7 @@ def build_stats_sidebar(parent):
 
 
 def build_main_content(parent):
-    global chatbot_label, login_button, text_area
+    global chatbot_label, login_button, default_bot_button, text_area
     global season_quest_tree, rivals_tree, mycycle_tree, mycycle_session_label
     global mycycle_session_position_label, mycycle_prev_button, mycycle_next_button, mycycle_export_button
 
@@ -10605,6 +10772,10 @@ def build_main_content(parent):
 
     login_button = ttk.Button(login_button_frame, text="Custom Bot Login", command=open_login_url, style="Primary.TButton")
     login_button.grid(row=1, column=1, sticky='e', padx=(0, 5))
+    default_bot_button = ttk.Button(login_button_frame, text='Use default bot',
+                                    command=use_default_bot_account)
+    default_bot_button.grid(row=1, column=0, sticky='e', padx=(0, 8))
+    default_bot_button.grid_remove()
 
     notebook = ttk.Notebook(parent, style='Main.TNotebook')
     notebook.grid(row=1, column=1, sticky='nsew', padx=(0, 5), pady=5)
@@ -10642,7 +10813,6 @@ def build_main_content(parent):
         "rank", "user", "completed", "points", "races", "race_hs", "br_hs", "tilt_levels", "tilt_tops", "tilt_points"
     )
     season_quest_style = "SeasonQuest.Treeview"
-    app_style.configure(season_quest_style, rowheight=30)
     app_style.configure(f"{season_quest_style}.Heading", padding=(8, 12))
     season_quest_tree = ttk.Treeview(
         season_quests_tab,
@@ -10722,7 +10892,6 @@ def build_main_content(parent):
 
     mycycle_columns = ("rank", "user", "cycles", "progress", "placements_line1", "placements_line2", "cycle_races", "last_cycle")
     mycycle_style = "MyCycleHome.Treeview"
-    app_style.configure(mycycle_style, rowheight=30)
     app_style.configure(f"{mycycle_style}.Heading", padding=(8, 12))
     mycycle_tree = ttk.Treeview(mycycle_tab, columns=mycycle_columns, show="headings", height=20, style=mycycle_style)
     leaderboard_settings = get_mycycle_settings()
@@ -11074,7 +11243,8 @@ def open_events_window():
             logger.info("API call: active events for channel %s", channel)
             response = requests.post(
                 f"https://mystats.camwow.tv/api/app/get-active-events/{channel}",
-                json=data_payload  # Sending the data as JSON
+                json=data_payload,
+                timeout=(5, 20),
             )
 
             response.raise_for_status()
@@ -11324,7 +11494,8 @@ def open_events_window():
                             "name": event_name,
                             "startAt": event_start,
                             "endAt": event_end
-                        }
+                        },
+                        timeout=(5, 20),
                     )
                     response1.raise_for_status()
 
@@ -11360,6 +11531,7 @@ flask_thread.daemon = True
 flask_thread.start()
 
 
+@ui_thread_only
 def update_config_labels():
     # Update today's statistics with comma-separated values
     total_points_t_label.config(text=f"Total Points: {get_int_setting('totalpointstoday', 0):,}")
@@ -11874,7 +12046,7 @@ def process_event_data(event_id):
 
     # Get leaderboard config from the API
     try:
-        response = requests.get(api_url)
+        response = requests.get(api_url, timeout=(5, 20))
         response.raise_for_status()
         config_data = response.json()
     except requests.exceptions.RequestException as e:
@@ -12026,7 +12198,7 @@ def process_event_data(event_id):
         'eventId': event_id
     }
     try:
-        response = requests.post(api_url, files=files, data=data)
+        response = requests.post(api_url, files=files, data=data, timeout=(5, 20))
         response.raise_for_status()
         print(f"Successfully uploaded event {event_id} data.")
     except requests.exceptions.RequestException as e:
@@ -13184,105 +13356,58 @@ def ensure_channel_name_configured(parent=None):
 
 
 # Replace messagebox.showwarning with show_update_message in ver_season_only()
+_version_check_lock = threading.Lock()
+_startup_complete = threading.Event()
+
+
 def ver_season_only():
-    load_racer_data()
-    channel = ensure_channel_name_configured(root)
-    if not channel:
-        print("Channel is missing. Skipping version/season API call.")
+    """Check the service without blocking Tk or discarding cached season data."""
+    if threading.current_thread() is threading.main_thread():
+        threading.Thread(target=ver_season_only, name='MyStats version check', daemon=True).start()
         return None
-
-    channel = config.get_setting('CHANNEL')
-    api_url = f"https://mystats.camwow.tv/api/app/settings?channel={channel}"
-
-    max_retries = 20
-    retry_delay = 1
-
-    def retry_request():
-        """Function to retry the API call."""
-        nonlocal max_retries, retry_delay
-        for attempt in range(max_retries):
+    if not _version_check_lock.acquire(blocking=False):
+        return None
+    try:
+        channel = (config.get_setting('CHANNEL') or '').strip()
+        if not channel:
+            return None
+        api_url = f"https://mystats.camwow.tv/api/app/settings?channel={channel}"
+        for attempt in range(3):
             try:
-                response = requests.get(api_url)
-                if response.status_code == 200:
-                    response_data = json.loads(response.text.strip('[]'))
+                response = requests.get(api_url, timeout=(5, 10))
+                response.raise_for_status()
+                payload = response.json()
+                if isinstance(payload, list):
+                    payload = payload[0] if payload else {}
+                if not isinstance(payload, dict):
+                    raise ValueError('Invalid settings response')
+                if not payload.get('exists', True):
+                    queue_ui_call(messagebox.showwarning, 'Website Login Required',
+                                  'Please log in to the MyStats website, then use Help > Check for Updates. '
+                                  'MyStats will keep your saved season settings.', parent=root)
+                    return None
+                season = str(payload.get('season') or '').strip()
+                if not season.isdigit() or int(season) <= 0:
+                    raise ValueError('Missing or invalid season')
+                config.set_setting('new_season', 'True' if str(config.get_setting('season')) != season else 'False', persistent=False)
+                config.set_setting('season', season, persistent=True)
+                latest = str(payload.get('version') or '').strip()
+                if latest and latest != str(version):
+                    url = payload.get('download_url') or 'https://mystats.camwow.tv/download'
+                    queue_ui_call(show_update_message, latest, url)
+                elif latest:
+                    config.set_setting('update_later_clicks', '0', persistent=True)
+                    config.set_setting('update_later_version', '', persistent=True)
+                return season
+            except (requests.RequestException, ValueError):
+                logger.warning('Version/season service unavailable (attempt %s of 3)', attempt + 1)
+                if attempt < 2:
+                    time.sleep(attempt + 1)
+        print('Could not check the MyStats service. Continuing with saved season settings.\n')
+        return None
+    finally:
+        _version_check_lock.release()
 
-                    # Check if 'exists' is false
-                    if not response_data.get('exists', True):
-                        # Show popup to prompt login
-                        if retry_popup():
-                            retry_request()  # Retry the API call
-                        else:
-                            return  # User canceled, stop retrying
-
-                    season = response_data.get("season", "")
-                    versioncheck = response_data.get("version", "")
-                    download_url = response_data.get("download_url") or "https://mystats.camwow.tv/download"
-
-                    if not config.get_setting('season'):
-                        config.set_setting('season', '56', persistent=True)
-                        print(f"Current Season set to default: {config.get_setting('season')}")
-
-                    if str(config.get_setting('season')) != str(season):
-                        config.set_setting('new_season', 'True', persistent=False)
-                    else:
-                        config.set_setting('new_season', 'False', persistent=False)
-
-                    config.set_setting('season', season, persistent=True)
-
-                    if str(versioncheck) == str(version):
-                        print("No Updates available.\n")
-                        config.set_setting('update_later_clicks', '0', persistent=True)
-                        config.set_setting('update_later_version', '', persistent=True)
-                        return season
-                    else:
-                        print(f"An update is available. Current Version: {version} | New Version: {versioncheck}")
-                        show_windows_toast("MyStats Update Available", f"New version {versioncheck} is ready to install.")
-                        root.after(0, lambda v=versioncheck, u=download_url: show_update_message(v, u))
-                        return season
-                else:
-                    print("API call failed with status code:", response.status_code)
-                    print("Error message:", response.text)
-
-                if response.status_code != 200:
-                    print(response.text)
-                    print("Using Default Season.  If this is not the current season, restart mystats")
-                    config.set_setting('season', '56', persistent=True)
-
-            except requests.exceptions.ConnectionError as e:
-                print(f"Connection error: {e}. Retrying in {retry_delay} seconds...")
-                time.sleep(retry_delay)
-                retry_delay *= 2
-            except json.JSONDecodeError as e:
-                print("Failed to decode JSON from response:", e)
-                break
-
-        print("All retries have failed.")
-
-        def _fatal_error():
-            messagebox.showerror("Error", "Unable to verify season data after multiple attempts.")
-            root.destroy()
-            sys.exit(0)
-
-        root.after(0, _fatal_error)
-
-    def retry_popup():
-        """Show retry popup on the main thread and return the result."""
-        result = [None]
-        event = threading.Event()
-
-        def _show():
-            result[0] = messagebox.askretrycancel(
-                "Login Required",
-                "You must log in to the website to use MyStats. Click Retry to try again.",
-                parent=root
-            )
-            event.set()
-
-        root.after(0, _show)
-        event.wait()
-        return result[0]
-
-    retry_request()  # Initial API call
 
 
 def reset_season_stats():
@@ -13377,6 +13502,7 @@ def reset(run_version_check=True):
     update_config_labels()
 
 
+@ui_thread_only
 def display_welcome_message(text_widget, version, config, timestamp):
     text_widget.tag_configure("cyan", foreground="cyan")
     text_widget.tag_configure("yellow", foreground="yellow")
@@ -13404,11 +13530,32 @@ def display_welcome_message(text_widget, version, config, timestamp):
 def startup(text_widget):
     print("\nCommunicating with server to check for updates...\n")
     channel = ensure_channel_name_configured(root)
+    threading.Thread(target=_startup_worker, args=(text_widget, channel),
+                     name='MyStats startup', daemon=True).start()
+
+
+def _startup_worker(text_widget, channel):
+    try:
+        _complete_startup(text_widget, channel)
+    except Exception:
+        logger.exception('Startup initialization failed')
+        queue_ui_call(messagebox.showerror, 'MyStats startup problem',
+                      'Startup could not finish. Please send mystats.log to support. '
+                      'Your saved files have been kept.', parent=root)
+    else:
+        _startup_complete.set()
+        queue_ui_call(refresh_main_leaderboards)
+
+
+def _complete_startup(text_widget, channel):
+    logger.info('Startup: loading saved racer data')
+    load_racer_data()
     config.set_setting('startup', 'yes', persistent=False)
     config.set_setting('data_sync', 'yes', persistent=False)
     config.set_setting('app_install_directory', application_install_path(), persistent=True)
 
     if channel:
+        logger.info('Startup: checking version and season in background')
         ver_season_only()
 
     timestamp, timestampMDY, timestampHMS, adjusted_time = time_manager.get_adjusted_time()
@@ -13417,14 +13564,19 @@ def startup(text_widget):
     if config.get_setting('marble_day') != timestampMDY:
         reset(run_version_check=False)
 
+    logger.info('Startup: preparing results and saved statistics')
     create_results_files()
     refresh_tilt_lifetime_xp_from_leaderboard()
     load_additional_settings()
     write_overlays()
     update_config_labels()
-    set_login_button_text()
+    try:
+        set_login_button_text()
+    except requests.RequestException:
+        logger.warning('Startup: Twitch username unavailable; using saved display name')
+        fallback_to_saved_username()
 
-    br_hscore = int(config.get_setting('hscore'))
+    br_hscore = _safe_int(config.get_setting('hscore'))
     br_hscore_format = format(br_hscore, ',')
     with open(appdata_path('HighScore.txt'), 'w', encoding='utf-8', errors='ignore') as hs:
         hs.write(str(config.get_setting('hscore_name')) + '\n')
@@ -13432,6 +13584,7 @@ def startup(text_widget):
 
     timestamp, timestampMDY, timestampHMS, adjusted_time = time_manager.get_adjusted_time()
     display_welcome_message(text_widget, version, config, timestamp)
+    logger.info('Startup: initialization complete')
 
 
 # Try to recover a previously downloaded installer if a prior update launch was interrupted.
@@ -13440,7 +13593,6 @@ pending_update_resumed = recover_pending_update_launch(root)
 # Schedule startup only when the normal UI flow should continue.
 if not pending_update_resumed:
     root.after(100, lambda: startup(text_area))
-    root.after(250, refresh_main_leaderboards)
 
 
 # Initialize the Bot
@@ -13690,6 +13842,7 @@ class Bot(commands.Bot):
 
         # Load the custom Windows credential, otherwise use the configured default bot token
         token_data = load_token_data()
+        update_account_controls(bool(token_data))
 
         if token_data:
             file_access_token = token_data.get('access_token')
@@ -14710,7 +14863,7 @@ class Bot(commands.Bot):
     # @commands.command(name='myenergy')
     async def myenergy(self, ctx):
         api_url = f"https://pixelbypixel.studio/api/user/energy/{ctx.message.author.display_name}"
-        response = requests.get(api_url)
+        response = requests.get(api_url, timeout=(5, 20))
 
         if response.status_code == 200:
             energy_data = response.json()
@@ -16931,7 +17084,7 @@ def process_season(directory, season):
     retry_delay = 1
 
     try:
-        response = requests.post(api_url, files=files)
+        response = requests.post(api_url, files=files, timeout=(5, 20))
         if response.status_code == 504:
             print("Data Sync Delayed. We will try again on next reboot.")
         if response.status_code != 200 and response.status_code != 504:
@@ -17341,7 +17494,7 @@ async def tilted(bot):
                     for chunk in chunks:
                         if is_chat_response_enabled("chat_tilt_results") and not should_suppress_tilt_chat:
                             await send_chat_message(bot.channel, chunk, category="tilt")
-                    text_area.insert('end', f"\n{base_msg}{', '.join(survivor_tokens)}\n")
+                    queue_ui_call(text_area.insert, 'end', f"\n{base_msg}{', '.join(survivor_tokens)}\n")
                 else:
                     print("No player data to send for current level.")
 
@@ -17400,12 +17553,12 @@ async def tilted(bot):
                     for chunk in chunks:
                         if is_chat_response_enabled("chat_tilt_results") and not should_suppress_tilt_chat:
                             await send_chat_message(bot.channel, chunk, category="tilt")
-                    text_area.insert('end', f"\nTilt run complete! Final standings: {', '.join(standings_items)}\n")
+                    queue_ui_call(text_area.insert, 'end', f"\nTilt run complete! Final standings: {', '.join(standings_items)}\n")
                     show_windows_toast("MyStats Tilt", f"Tilt run complete. Top player: {limited_run_results[0][0]}")
                 else:
                     if is_chat_response_enabled("chat_tilt_results") and not should_suppress_tilt_chat:
                         await send_chat_message(bot.channel, "🏁 Tilt run complete! No results to display.", category="tilt")
-                    text_area.insert('end', f"\nTilt run complete! No results to display.\n")
+                    queue_ui_call(text_area.insert, 'end', f"\nTilt run complete! No results to display.\n")
                     show_windows_toast("MyStats Tilt", "Tilt run complete. No standings were available.")
 
                 participants_with_points = sorted(
@@ -17492,6 +17645,7 @@ async def checkpoints(bot):
     # You might need to pass them as parameters or define them globally
     global text_area, root
 
+    @ui_thread_only
     def insert_colored_text(text_area, text):
         # Since this function interacts with Tkinter widgets, it must be called in the main thread
         if text_area and text_area.winfo_exists():
@@ -18122,6 +18276,7 @@ async def race(bot):
             config.set_setting('avgpointstoday', avgptstoday, persistent=False)
 
             # Add color tags for the text widget
+            @ui_thread_only
             def add_color_tag(widget, tag_name, color):
                 try:
                     widget.tag_configure(tag_name, foreground=color)
@@ -18129,9 +18284,11 @@ async def race(bot):
                     print(f"Error configuring color {color}: {e}")
                     widget.tag_configure(tag_name, foreground="white")
 
+            @ui_thread_only
             def insert_colored_text(text_widget, text, tag_name):
                 text_widget.insert(tk.END, text, tag_name)
 
+            @ui_thread_only
             def display_race_winners(text_widget, marbcount, namecolordata, nowinner):
                 add_color_tag(text_widget, "cyan", "cyan")
                 add_color_tag(text_widget, "yellow", "yellow")
@@ -18466,9 +18623,11 @@ async def royale(bot):
     br_cache_loaded = False
     br_user_totals = {}
 
+    @ui_thread_only
     def add_color_tag(widget, tag_name, color):
         widget.tag_configure(tag_name, foreground=color)
 
+    @ui_thread_only
     def insert_colored_text(text_area, text, tag_name):
         text_area.insert(tk.END, text, tag_name)
 
@@ -18552,6 +18711,7 @@ async def royale(bot):
                 entry['wins'] += 1
 
     # Crown Winner Display
+    @ui_thread_only
     def display_battle_royale_crownwinner(text_area, marbcount, wname, wpoints, wkills, wdam, wcount, winnertotalpoints, namecolor):
         add_color_tag(text_area, "cyan", "cyan")
         add_color_tag(text_area, "yellow", "yellow")
@@ -18583,6 +18743,7 @@ async def royale(bot):
         text_area.see(tk.END)
 
     # Regular Battle Royale Winner Display
+    @ui_thread_only
     def display_battle_royale_winner(text_area, marbcount, wname, wpoints, wkills, wdam, wcount, winnertotalpoints, namecolor):
         add_color_tag(text_area, "cyan", "cyan")
         add_color_tag(text_area, "yellow", "yellow")
@@ -18898,6 +19059,52 @@ async def royale(bot):
                     print("No valid winner found after processing the data.")
 
 
+def close_startup_splash():
+    """Dismiss PyInstaller's optional splash after Tk has drawn the main window."""
+    try:
+        import pyi_splash
+    except ImportError:
+        return
+    try:
+        pyi_splash.close()
+    except Exception:
+        logger.warning("Could not close the startup splash", exc_info=True)
+
+
+def install_runtime_diagnostics():
+    """Capture uncaught errors and thread stacks when the desktop stops responding."""
+    def report_exception(exc_type, exc_value, traceback):
+        logger.error('Unhandled application error', exc_info=(exc_type, exc_value, traceback))
+
+    root.report_callback_exception = report_exception
+    sys.excepthook = report_exception
+    threading.excepthook = lambda args: report_exception(args.exc_type, args.exc_value, args.exc_traceback)
+    try:
+        import faulthandler
+        diagnostic_path = appdata_path('mystats-runtime.log')
+        if os.path.exists(diagnostic_path) and os.path.getsize(diagnostic_path) > 2 * 1024 * 1024:
+            os.replace(diagnostic_path, diagnostic_path + '.previous')
+        stream = open(diagnostic_path, 'a', encoding='utf-8')
+        stream.write('\nMyStats runtime session started\n')
+        stream.flush()
+        faulthandler.enable(file=stream)
+
+        def heartbeat():
+            # Re-arm from Tk: a stalled UI leaves the timer running and captures stacks.
+            faulthandler.dump_traceback_later(60, repeat=True, file=stream)
+            root.after(10000, heartbeat)
+
+        def cleanup():
+            faulthandler.cancel_dump_traceback_later()
+            faulthandler.disable()
+            stream.close()
+
+        atexit.register(cleanup)
+        heartbeat()
+    except Exception:
+        logger.exception('Runtime stack capture unavailable')
+
+
 if __name__ == "__main__":
 
     # Ensure the lock file is removed when the application exits
@@ -18907,6 +19114,8 @@ if __name__ == "__main__":
         global bot
 
         reconnect_delay = 5
+        while BOT_SHOULD_RUN and not _startup_complete.wait(0.25):
+            pass
 
         while BOT_SHOULD_RUN:
             loop = asyncio.new_event_loop()
@@ -18946,4 +19155,7 @@ if __name__ == "__main__":
     bot_thread.start()
 
     # Run the Tkinter application
+    install_runtime_diagnostics()
+    root.after(25, drain_ui_calls)
+    root.after_idle(close_startup_splash)
     root.mainloop()
